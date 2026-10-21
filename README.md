@@ -4,14 +4,14 @@ Online urenregistratie voor gastouder Mariko: meerdere kinderen, per kind meerde
 
 ```
 frontend/   Statische site (vanilla HTML/JS) + staticwebapp.config.json (Microsoft-login)
-backend/    Azure Functions (Node.js 20, v4-model) met Azure Table Storage
-infra/      Bicep: Static Web App + Function App (Consumption) + Storage
+backend/    Azure Functions-code (Node.js 20, v4-model) met Azure Table Storage; draait als managed functions in de Static Web App
+infra/      Bicep: Static Web App (Free) + Storage
 ```
 
 ## Architectuur
 
 - **Frontend:** Azure Static Web App. Alle pagina's en `/api/*` vereisen login via Microsoft (Entra ID).
-- **Backend:** aparte Function App op het Consumption-plan, gekoppeld aan de Static Web App (*linked backend*). De frontend roept `/api/...` aan; Static Web App stuurt de ingelogde gebruiker mee.
+- **Backend:** de Functions-code uit `backend/` draait als *managed functions* binnen dezelfde Static Web App (Free-tier). De frontend roept `/api/...` aan; Static Web App stuurt de ingelogde gebruiker mee en de pipeline levert de API vooraf gebouwd aan (`api/`, zonder tests en dev-dependencies).
 - **Toegang:** iedereen met een Microsoft-account kan inloggen, maar de API laat alleen e-mailadressen uit de app-setting `ALLOWED_USERS` toe. Staat die leeg, dan komt niemand erin.
 - **Opslag:** Azure Table Storage, tabellen `children` (kind + contracten) en `entries` (uren, `RowKey` = `JJJJ-MM-DD_id`). Data is per gebruiker gescheiden (`PartitionKey`).
 
@@ -44,7 +44,7 @@ Tests (draaien tegen Azurite, wordt automatisch gestart): `cd backend && npm tes
 
 ## Omgevingen en deployen naar Azure
 
-Er zijn twee volledig gescheiden omgevingen, **test** en **production**: elk met een eigen resource group, Function App, Static Web App en storage-account (dus ook gescheiden data en eigen URL).
+Er zijn twee volledig gescheiden omgevingen, **test** en **production**: elk met een eigen resource group, Static Web App en storage-account (dus ook gescheiden data en eigen URL).
 
 De pipeline (`.github/workflows/deploy.yml`, hergebruikt `_deploy.yml`):
 
@@ -52,7 +52,7 @@ De pipeline (`.github/workflows/deploy.yml`, hergebruikt `_deploy.yml`):
 push naar main → tests → deploy test → (goedkeuring) → deploy production
 ```
 
-Bij elke deploy worden de resources uit `infra/main.bicep` aangemaakt of bijgewerkt, daarna gaan de backend en de frontend erheen. Inloggen bij Azure gaat via OIDC; er zijn geen wachtwoorden of publish profiles. Handmatig starten kan via *Actions → Deploy → Run workflow*; standaard rolt dat alleen naar **test** uit (vink `only_test` uit om ook production te doen). Zo kun je ook een branch op test uitproberen.
+Bij elke deploy worden de resources uit `infra/main.bicep` aangemaakt of bijgewerkt, daarna gaan de frontend en de API (managed functions) erheen. Inloggen bij Azure gaat via OIDC; er zijn geen wachtwoorden of publish profiles. Handmatig starten kan via *Actions → Deploy → Run workflow*; standaard rolt dat alleen naar **test** uit (vink `only_test` uit om ook production te doen). Zo kun je ook een branch op test uitproberen.
 
 **Eenmalige set-up** (zodra je de subscription hebt):
 
@@ -75,6 +75,14 @@ Handmatig één omgeving aanmaken kan ook: `az deployment group create -g <rg> -
 
 ### Kosten en aandachtspunten
 
-- Een eigen Function App koppelen aan een Static Web App vereist de **Standard**-tier (ca. € 9 per maand **per omgeving**, dus ca. € 18 voor test + production). De Function Apps op Consumption en Table Storage kosten bij dit gebruik vrijwel niets. Test kun je tussendoor verwijderen (resource group weggooien); de pipeline maakt hem bij de volgende run opnieuw aan.
+- Static Web App **Free** met managed functions kost niets, ook niet voor twee omgevingen; het storage-account kost bij dit gebruik centen per maand. Grenzen van Free: 100 GB bandwidth per maand, alleen HTTP-triggers, geen VNet. Test kun je tussendoor verwijderen (resource group weggooien); de pipeline maakt hem bij de volgende run opnieuw aan.
 - De vooraf ingestelde Microsoft-login van Static Web Apps accepteert werk- en schoolaccounts (Entra ID). Heeft Mariko alleen een persoonlijk Microsoft-account, dan is een eigen app-registratie nodig (custom auth provider).
 - De Bicep-template en de deploy-pipeline zijn niet tegen een echte Azure-omgeving uitgevoerd; controleer na de eerste deploy of `/api/children` ingelogd werkt en uitgelogd een 401 geeft.
+
+### Later opschalen
+De API-code is gewone Azure Functions en staat los van de hosting. Groeit het gebruik of heb je een eigen Function App nodig (scaling, monitoring, VNet), dan:
+1. Zet de SKU van de Static Web App in `infra/main.bicep` op `Standard` (ca. € 9 per maand per omgeving).
+2. Voeg een Function App (Consumption, Node 20) toe met dezelfde app-settings (`TABLES_CONNECTION`, `ALLOWED_USERS`) en een `Microsoft.Web/staticSites/linkedBackends`-resource die ernaar verwijst.
+3. Deploy `backend/` naar die Function App (`Azure/functions-action`) en haal `api_location` uit de Static Web App-deploy; managed functions en een gekoppelde backend kunnen niet naast elkaar bestaan.
+
+De frontend (`/api/...`), de login en de data in Table Storage veranderen niet.

@@ -44,7 +44,6 @@ jobs:
                   -p allowedUsers="$ALLOWED_USERS" environmentName="$ENVIRONMENT" location="$LOCATION" \
                   --query properties.outputs -o json)
           {
-            echo "function_app=$(jq -r .functionAppName.value <<<"$out")"
             echo "static_web_app=$(jq -r .staticWebAppName.value <<<"$out")"
             echo "frontend_url=$(jq -r .frontendUrl.value <<<"$out")"
           } >> "$GITHUB_OUTPUT"
@@ -55,16 +54,14 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
 
-      - name: Backend bouwen
-        working-directory: backend
-        run: npm ci --omit=dev
-
-      - name: Backend uitrollen (Function App)
-        uses: Azure/functions-action@v1
-        with:
-          app-name: ${{ steps.infra.outputs.function_app }}
-          package: backend
-          respect-funcignore: true
+      # De API draait als managed functions in de Static Web App: stage alleen wat de runtime nodig heeft
+      # (geen tests, geen dev-dependencies zoals azurite) en lever het vooraf gebouwd aan.
+      - name: API klaarzetten
+        run: |
+          mkdir api
+          cp -r backend/src backend/host.json backend/package.json backend/package-lock.json api/
+          npm ci --omit=dev --prefix api
+          du -sh api
 
       - name: Deployment-token Static Web App ophalen
         id: swa
@@ -79,6 +76,7 @@ jobs:
           azure_static_web_apps_api_token: ${{ steps.swa.outputs.token }}
           action: upload
           app_location: frontend
+          api_location: api
           skip_app_build: true
           skip_api_build: true
 
