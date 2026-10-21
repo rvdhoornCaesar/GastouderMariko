@@ -44,20 +44,25 @@ Tests (draaien tegen Azurite, wordt automatisch gestart): `cd backend && npm tes
 
 ## Deployen naar Azure
 
-1. **Resources aanmaken** (eenmalig):
-   ```bash
-   az group create -n gastouder-rg -l westeurope
-   az deployment group create -g gastouder-rg -f infra/main.bicep -p allowedUsers=mariko@voorbeeld.nl
-   ```
-   De outputs geven de frontend-URL en de namen van de Function App en Static Web App.
-2. **GitHub-secrets en -variabelen** (Settings → Secrets and variables → Actions):
-   - secret `AZURE_STATIC_WEB_APPS_API_TOKEN`: `az staticwebapp secrets list -n <staticWebAppName> --query properties.apiKey -o tsv`
-   - secret `AZURE_FUNCTIONAPP_PUBLISH_PROFILE`: `az functionapp deployment list-publishing-profiles -n <functionAppName> -g gastouder-rg --xml`
-   - variable `AZURE_FUNCTIONAPP_NAME`: naam van de Function App
-3. Een push naar `main` draait de tests en deployt backend en frontend (`.github/workflows/deploy.yml`).
+Eén pipeline (`.github/workflows/deploy.yml`) doet bij elke push naar `main` (of handmatig via *Run workflow*): tests draaien, de resources uit `infra/main.bicep` aanmaken of bijwerken, de backend naar de Function App en de frontend naar de Static Web App uitrollen. Inloggen bij Azure gaat via OIDC; er zijn geen wachtwoorden of publish profiles nodig.
+
+**Eenmalige set-up** (zodra je de subscription hebt):
+
+1. **App-registratie voor GitHub** (Entra ID → App registrations → New, of `az ad app create`), met een *federated credential* voor GitHub Actions:
+   - Organization/repository: `rvdhoornCaesar/GastouderMariko`
+   - Entity type: *Environment*, naam `production`
+2. **Rol toekennen** aan die app (service principal): *Contributor* op de subscription, of op een vooraf aangemaakte resource group.
+3. **GitHub-environment** `production` aanmaken (Settings → Environments); optioneel met *required reviewers* als je een goedkeuringsstap voor elke deploy wilt.
+4. **Secrets** (Settings → Secrets and variables → Actions → Secrets): `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
+5. **Variables** (zelfde plek → Variables):
+   - `ALLOWED_USERS`: komma-gescheiden e-mailadressen die de app mogen gebruiken (bijv. `mariko@voorbeeld.nl`)
+   - `AZURE_RESOURCE_GROUP` (optioneel, standaard `gastouder-rg`) en `AZURE_LOCATION` (optioneel, standaard `westeurope`)
+6. Run de workflow. De frontend-URL staat in de samenvatting van de run.
+
+Handmatig kan ook: `az deployment group create -g <rg> -f infra/main.bicep -p allowedUsers=mariko@voorbeeld.nl`.
 
 ### Kosten en aandachtspunten
 
 - Een eigen Function App koppelen aan een Static Web App vereist de **Standard**-tier (ca. € 9 per maand). De Function App op Consumption en Table Storage kosten bij dit gebruik vrijwel niets.
 - De vooraf ingestelde Microsoft-login van Static Web Apps accepteert werk- en schoolaccounts (Entra ID). Heeft Mariko alleen een persoonlijk Microsoft-account, dan is een eigen app-registratie nodig (custom auth provider).
-- De Bicep-template en de deploy-workflows zijn niet tegen een echte Azure-omgeving uitgevoerd; controleer na de eerste deploy of `/api/children` ingelogd werkt en uitgelogd een 401 geeft.
+- De Bicep-template en de deploy-pipeline zijn niet tegen een echte Azure-omgeving uitgevoerd; controleer na de eerste deploy of `/api/children` ingelogd werkt en uitgelogd een 401 geeft.

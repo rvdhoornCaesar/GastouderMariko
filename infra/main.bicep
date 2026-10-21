@@ -59,13 +59,6 @@ resource func 'Microsoft.Web/sites@2023-12-01' = {
   }
 }
 
-// Staat de publish profile (GitHub Actions deploy) toe.
-resource scm 'Microsoft.Web/sites/basicPublishingCredentialsPolicies@2023-12-01' = {
-  parent: func
-  name: 'scm'
-  properties: { allow: true }
-}
-
 // Standard-tier is nodig om een eigen Function App aan een Static Web App te koppelen.
 resource swa 'Microsoft.Web/staticSites@2023-12-01' = {
   name: '${baseName}-web-${suffix}'
