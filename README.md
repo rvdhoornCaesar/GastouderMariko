@@ -42,27 +42,37 @@ Open daarna http://localhost:4280 (de SWA CLI emuleert de login).
 
 Tests (draaien tegen Azurite, wordt automatisch gestart): `cd backend && npm test`.
 
-## Deployen naar Azure
+## Omgevingen en deployen naar Azure
 
-Eén pipeline (`.github/workflows/deploy.yml`) doet bij elke push naar `main` (of handmatig via *Run workflow*): tests draaien, de resources uit `infra/main.bicep` aanmaken of bijwerken, de backend naar de Function App en de frontend naar de Static Web App uitrollen. Inloggen bij Azure gaat via OIDC; er zijn geen wachtwoorden of publish profiles nodig.
+Er zijn twee volledig gescheiden omgevingen, **test** en **production**: elk met een eigen resource group, Function App, Static Web App en storage-account (dus ook gescheiden data en eigen URL).
+
+De pipeline (`.github/workflows/deploy.yml`, hergebruikt `_deploy.yml`):
+
+```
+push naar main → tests → deploy test → (goedkeuring) → deploy production
+```
+
+Bij elke deploy worden de resources uit `infra/main.bicep` aangemaakt of bijgewerkt, daarna gaan de backend en de frontend erheen. Inloggen bij Azure gaat via OIDC; er zijn geen wachtwoorden of publish profiles. Handmatig starten kan via *Actions → Deploy → Run workflow*; standaard rolt dat alleen naar **test** uit (vink `only_test` uit om ook production te doen). Zo kun je ook een branch op test uitproberen.
 
 **Eenmalige set-up** (zodra je de subscription hebt):
 
-1. **App-registratie voor GitHub** (Entra ID → App registrations → New, of `az ad app create`), met een *federated credential* voor GitHub Actions:
-   - Organization/repository: `rvdhoornCaesar/GastouderMariko`
-   - Entity type: *Environment*, naam `production`
-2. **Rol toekennen** aan die app (service principal): *Contributor* op de subscription, of op een vooraf aangemaakte resource group.
-3. **GitHub-environment** `production` aanmaken (Settings → Environments); optioneel met *required reviewers* als je een goedkeuringsstap voor elke deploy wilt.
-4. **Secrets** (Settings → Secrets and variables → Actions → Secrets): `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`.
-5. **Variables** (zelfde plek → Variables):
-   - `ALLOWED_USERS`: komma-gescheiden e-mailadressen die de app mogen gebruiken (bijv. `mariko@voorbeeld.nl`)
-   - `AZURE_RESOURCE_GROUP` (optioneel, standaard `gastouder-rg`) en `AZURE_LOCATION` (optioneel, standaard `westeurope`)
-6. Run de workflow. De frontend-URL staat in de samenvatting van de run.
+1. **App-registratie voor GitHub** (Entra ID → App registrations, of `az ad app create`) met twee *federated credentials* voor GitHub Actions, repository `rvdhoornCaesar/GastouderMariko`:
+   - entity type *Environment*, naam `test`
+   - entity type *Environment*, naam `production`
 
-Handmatig kan ook: `az deployment group create -g <rg> -f infra/main.bicep -p allowedUsers=mariko@voorbeeld.nl`.
+   (Wil je test en production in aparte subscriptions of met aparte app-registraties, maak er dan twee.)
+2. **Rol toekennen** aan die app (service principal): *Contributor* op de subscription, of op de vooraf aangemaakte resource groups.
+3. **GitHub-environments** `test` en `production` aanmaken (Settings → Environments). Zet bij `production` *Required reviewers* aan: de pipeline wacht dan op jouw goedkeuring voordat hij naar productie gaat.
+4. **Per environment** instellen (Settings → Environments → *test* / *production*):
+   - Secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
+   - Variable `ALLOWED_USERS`: komma-gescheiden e-mailadressen die de omgeving mogen gebruiken. Voor test kun je bijvoorbeeld alleen jezelf opnemen, voor production Mariko.
+   - Optioneel: `AZURE_RESOURCE_GROUP` (standaard `gastouder-test-rg` / `gastouder-production-rg`) en `AZURE_LOCATION` (standaard `westeurope`)
+5. Run de workflow. De frontend-URL van elke omgeving staat in de samenvatting van de run.
+
+Handmatig één omgeving aanmaken kan ook: `az deployment group create -g <rg> -f infra/main.bicep -p allowedUsers=mariko@voorbeeld.nl environmentName=test`.
 
 ### Kosten en aandachtspunten
 
-- Een eigen Function App koppelen aan een Static Web App vereist de **Standard**-tier (ca. € 9 per maand). De Function App op Consumption en Table Storage kosten bij dit gebruik vrijwel niets.
+- Een eigen Function App koppelen aan een Static Web App vereist de **Standard**-tier (ca. € 9 per maand **per omgeving**, dus ca. € 18 voor test + production). De Function Apps op Consumption en Table Storage kosten bij dit gebruik vrijwel niets. Test kun je tussendoor verwijderen (resource group weggooien); de pipeline maakt hem bij de volgende run opnieuw aan.
 - De vooraf ingestelde Microsoft-login van Static Web Apps accepteert werk- en schoolaccounts (Entra ID). Heeft Mariko alleen een persoonlijk Microsoft-account, dan is een eigen app-registratie nodig (custom auth provider).
 - De Bicep-template en de deploy-pipeline zijn niet tegen een echte Azure-omgeving uitgevoerd; controleer na de eerste deploy of `/api/children` ingelogd werkt en uitgelogd een 401 geeft.

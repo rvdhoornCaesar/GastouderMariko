@@ -1,8 +1,12 @@
-// Gastouder Uren: Static Web App (frontend) + Function App op Consumption (backend) + Storage (Table Storage).
+// Gastouder Uren (één omgeving per deployment; draai met environmentName=test en =production): Static Web App (frontend) + Function App op Consumption (backend) + Storage (Table Storage).
 @description('Basisnaam voor alle resources (kleine letters/cijfers, 3-14 tekens).')
 @minLength(3)
 @maxLength(14)
 param baseName string = 'gastouder'
+
+@description('Omgeving: test of production. Elke omgeving krijgt eigen resources.')
+@allowed(['test', 'production'])
+param environmentName string = 'test'
 
 @description('Regio. Static Web Apps ondersteunt maar enkele regio\'s, o.a. westeurope.')
 param location string = 'westeurope'
@@ -10,8 +14,10 @@ param location string = 'westeurope'
 @description('Komma-gescheiden e-mailadressen (Microsoft-account) die de app mogen gebruiken.')
 param allowedUsers string
 
+var envShort = environmentName == 'production' ? 'prd' : 'tst'
+var prefix = '${baseName}-${envShort}'
 var suffix = uniqueString(resourceGroup().id)
-var storageName = take('${baseName}${suffix}', 24)
+var storageName = take('${baseName}${envShort}${suffix}', 24)
 
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: storageName
@@ -28,7 +34,7 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
 var storageConnection = 'DefaultEndpointsProtocol=https;AccountName=${storage.name};AccountKey=${storage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
 
 resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
-  name: '${baseName}-plan'
+  name: '${prefix}-plan'
   location: location
   kind: 'linux'
   sku: { name: 'Y1', tier: 'Dynamic' }
@@ -36,7 +42,7 @@ resource plan 'Microsoft.Web/serverfarms@2023-12-01' = {
 }
 
 resource func 'Microsoft.Web/sites@2023-12-01' = {
-  name: '${baseName}-api-${suffix}'
+  name: '${prefix}-api-${suffix}'
   location: location
   kind: 'functionapp,linux'
   properties: {
@@ -49,7 +55,7 @@ resource func 'Microsoft.Web/sites@2023-12-01' = {
       appSettings: [
         { name: 'AzureWebJobsStorage', value: storageConnection }
         { name: 'WEBSITE_CONTENTAZUREFILECONNECTIONSTRING', value: storageConnection }
-        { name: 'WEBSITE_CONTENTSHARE', value: toLower('${baseName}-api') }
+        { name: 'WEBSITE_CONTENTSHARE', value: toLower('${prefix}-api') }
         { name: 'FUNCTIONS_EXTENSION_VERSION', value: '~4' }
         { name: 'FUNCTIONS_WORKER_RUNTIME', value: 'node' }
         { name: 'WEBSITE_NODE_DEFAULT_VERSION', value: '~20' }
@@ -61,7 +67,7 @@ resource func 'Microsoft.Web/sites@2023-12-01' = {
 
 // Standard-tier is nodig om een eigen Function App aan een Static Web App te koppelen.
 resource swa 'Microsoft.Web/staticSites@2023-12-01' = {
-  name: '${baseName}-web-${suffix}'
+  name: '${prefix}-web-${suffix}'
   location: location
   sku: { name: 'Standard', tier: 'Standard' }
   properties: {}
