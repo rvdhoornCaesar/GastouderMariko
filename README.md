@@ -69,6 +69,8 @@ Bij elke deploy worden de resources uit `infra/main.bicep` aangemaakt of bijgewe
    - Optioneel: `AZURE_RESOURCE_GROUP` (standaard `gastouder-test-rg` / `gastouder-production-rg`) en `AZURE_LOCATION` (standaard `westeurope`)
 5. Run de workflow. De frontend-URL van elke omgeving staat in de samenvatting van de run.
 
+**Validatie van de infra:** `.github/workflows/validate-infra.yml` draait bij elke pull request die `infra/` raakt. Hij compileert en lint de Bicep (geen Azure nodig). Zodra de Azure-login voor `test` is ingesteld en de resource group bestaat, draait hij ook `az deployment group validate` (voor test én production) en een what-if voor test, zonder iets te wijzigen. Heeft de service principal geen toegang of bestaat de resource group nog niet, dan blijft het bij compileren.
+
 Handmatig één omgeving aanmaken kan ook: `az deployment group create -g <rg> -f infra/main.bicep -p allowedUsers=mariko@voorbeeld.nl environmentName=test`.
 
 ### Kosten en aandachtspunten
