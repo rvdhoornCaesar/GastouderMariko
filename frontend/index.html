@@ -15,7 +15,11 @@
   * { box-sizing: border-box; }
   body { margin: 0; font: 16px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--ink); }
   header { padding: 14px 16px 0; max-width: 760px; margin: 0 auto; }
-  h1 { font-size: 1.3rem; margin: 0 0 10px; }
+  h1 { font-size: 1.3rem; margin: 0 0 10px; display: flex; align-items: baseline; gap: 10px; }
+  h1 small { font-size: .8rem; font-weight: 400; color: var(--muted); margin-left: auto; }
+  h1 a { font-size: .8rem; font-weight: 400; color: var(--muted); }
+  #toast { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 728px; margin: 0 auto; padding: 12px 14px;
+    background: var(--danger); color: #fff; border-radius: 8px; z-index: 10; }
   nav { display: flex; gap: 4px; }
   nav button { flex: 1; padding: 10px 6px; border: 0; background: transparent; color: var(--muted);
     font: inherit; font-weight: 600; border-bottom: 3px solid transparent; cursor: pointer; }
@@ -59,7 +63,7 @@
 </head>
 <body>
 <header>
-  <h1>Gastouder Uren</h1>
+  <h1>Gastouder Uren <small id="user" class="noprint"></small> <a href="/.auth/logout" class="noprint" id="logout">uitloggen</a></h1>
   <nav>
     <button data-tab="uren" class="active">Uren invullen</button>
     <button data-tab="overzicht">Overzicht</button>
@@ -132,39 +136,53 @@
       <div class="row"><div><label for="childName">Naam</label><input id="childName" required></div></div>
       <button class="btn" type="submit">Toevoegen</button>
     </form>
-    <div class="card">
-      <h2>Back-up</h2>
-      <p class="meta" style="color:var(--muted);margin-top:0">Gegevens staan alleen in deze browser. Maak regelmatig een back-up.</p>
-      <div class="actions">
-        <button class="btn secondary" id="backup">Back-up downloaden</button>
-        <button class="btn secondary" id="restore">Back-up terugzetten</button>
-        <input type="file" id="restoreFile" accept="application/json" hidden>
-      </div>
-    </div>
   </section>
 </main>
+<div id="toast" role="alert" hidden></div>
 
 <script>
 (() => {
-  const KEY = 'gastouder-uren-v1';
   const $ = (id) => document.getElementById(id);
-  const uid = () => Math.random().toString(36).slice(2, 10);
   const pad = (n) => String(n).padStart(2, '0');
   const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
   const euro = (n) => n.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  let state = load();
+  const state = { children: [], entries: [] };
+  const loadedMonths = new Set();
 
-  function load() {
-    try {
-      const s = JSON.parse(localStorage.getItem(KEY));
-      if (s && Array.isArray(s.children) && Array.isArray(s.entries)) return s;
-    } catch (e) {}
-    return { children: [], entries: [] };
+  // --- API ---
+  const LOGIN = '/.auth/login/aad?post_login_redirect_uri=/';
+  async function api(method, path, body) {
+    const res = await fetch('/api/' + path, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (res.status === 401) { location.href = LOGIN; throw new Error('Niet ingelogd'); }
+    if (res.status === 204) return null;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Fout ${res.status}`);
+    return data;
   }
-  function save() {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { alert('Opslaan in de browser is mislukt.'); }
+
+  let toastTimer;
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
+  }
+  // Voert een actie uit en meldt fouten; geeft undefined terug bij falen.
+  async function guard(fn) {
+    try { return await fn(); } catch (e) { toast(e.message); }
+  }
+
+  async function ensureMonth(m, force) {
+    if (loadedMonths.has(m) && !force) return;
+    const list = await api('GET', 'entries?month=' + m);
+    state.entries = state.entries.filter((e) => !e.date.startsWith(m)).concat(list);
+    loadedMonths.add(m);
   }
 
   // --- helpers ---
@@ -189,9 +207,13 @@
   $('nextDay').onclick = () => shiftDay(1);
   $('day').onchange = renderDay;
 
-  function renderDay() {
+  let daySeq = 0;
+  async function renderDay() {
     const day = $('day').value;
     if (!day) return;
+    const seq = ++daySeq;
+    await guard(() => ensureMonth(day.slice(0, 7)));
+    if (seq !== daySeq) return;
     $('dayTitle').textContent = new Date(day + 'T12:00').toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
     const list = state.entries.filter((e) => e.date === day).sort((a, b) => a.start.localeCompare(b.start));
     $('dayEntries').innerHTML = list.length ? list.map((e) => entryRow(e)).join('') : '<div class="empty">Nog geen uren voor deze dag.</div>';
@@ -211,25 +233,30 @@
       <div><span class="hours">${fmt(entryMin(e))}</span> <button class="link noprint" data-del="${e.id}" title="Verwijderen">✕</button></div></div>`;
   }
 
-  $('entryForm').addEventListener('submit', (ev) => {
+  $('entryForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const e = { id: uid(), date: $('day').value, contractId: $('contract').value, start: $('start').value,
+    const e = { date: $('day').value, contractId: $('contract').value, start: $('start').value,
       end: $('end').value, pause: Number($('pause').value) || 0, note: $('note').value.trim() };
     const err = $('entryErr');
     if (!e.contractId) return err.textContent = 'Kies een kind/contract.';
     if (entryMin(e) <= 0) return err.textContent = 'Eindtijd moet na de begintijd liggen (na aftrek pauze).';
     err.textContent = '';
-    state.entries.push(e);
-    save();
+    const btn = ev.submitter; btn.disabled = true;
+    const saved = await guard(() => api('POST', 'entries', e));
+    btn.disabled = false;
+    if (!saved) return;
+    state.entries.push(saved);
     $('note').value = ''; $('pause').value = 0;
     renderDay();
   });
 
-  document.addEventListener('click', (ev) => {
+  document.addEventListener('click', async (ev) => {
     const id = ev.target.dataset && ev.target.dataset.del;
     if (id && confirm('Deze registratie verwijderen?')) {
-      state.entries = state.entries.filter((e) => e.id !== id);
-      save(); render();
+      if (await guard(() => api('DELETE', 'entries/' + id).then(() => true))) {
+        state.entries = state.entries.filter((e) => e.id !== id);
+        render();
+      }
     }
   });
 
@@ -242,9 +269,13 @@
   const monthEntries = () => state.entries.filter((e) => e.date.startsWith($('month').value))
     .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
 
-  function renderMonth() {
+  let monthSeq = 0;
+  async function renderMonth() {
     const m = $('month').value;
     if (!m) return;
+    const seq = ++monthSeq;
+    await guard(() => ensureMonth(m));
+    if (seq !== monthSeq) return;
     const [y, mo] = m.split('-').map(Number);
     $('monthTitle').textContent = new Date(y, mo - 1, 1).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
     const list = monthEntries();
@@ -272,15 +303,11 @@
       lines.push([e.date, q(x ? x.child.name : ''), q(x ? x.contract.name : ''), e.start, e.end, e.pause || 0,
         h.toFixed(2).replace('.', ','), rateOf(x).toFixed(2).replace('.', ','), (h * rateOf(x)).toFixed(2).replace('.', ','), q(e.note || '')].join(';'));
     });
-    download(`uren-${$('month').value}.csv`, '﻿' + lines.join('\r\n'), 'text/csv;charset=utf-8');
-  };
-
-  function download(name, text, type) {
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([text], { type }));
-    a.download = name; a.click();
+    a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = `uren-${$('month').value}.csv`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  }
+  };
 
   // --- kinderen ---
   function renderChildren() {
@@ -298,65 +325,76 @@
       </div>`).join('') || '<div class="empty">Nog geen kinderen. Voeg hieronder een kind toe.</div>';
   }
 
-  $('childForm').addEventListener('submit', (ev) => {
+  const replaceChild = (c) => { state.children = state.children.map((x) => (x.id === c.id ? c : x)); };
+  // Slaat een gewijzigd kind (met contracten) op en vervangt het lokaal door het antwoord van de server.
+  async function saveChild(child) {
+    const saved = await guard(() => api('PUT', 'children/' + child.id, child));
+    if (saved) replaceChild(saved);
+    render();
+    return saved;
+  }
+
+  $('childForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    state.children.push({ id: uid(), name: $('childName').value.trim(), contracts: [] });
-    $('childName').value = ''; save(); render();
+    const c = await guard(() => api('POST', 'children', { name: $('childName').value.trim() }));
+    if (!c) return;
+    state.children.push(c);
+    state.children.sort((a, b) => a.name.localeCompare(b.name, 'nl'));
+    $('childName').value = '';
+    render();
   });
 
   $('childList').addEventListener('submit', (ev) => {
     ev.preventDefault();
     const c = state.children.find((x) => x.id === ev.target.dataset.addk);
-    if (!c) return;
-    c.contracts.push({ id: uid(), name: ev.target.n.value.trim(), rate: Number(ev.target.r.value) || 0 });
-    save(); render();
+    if (c) saveChild({ ...c, contracts: [...c.contracts, { name: ev.target.n.value.trim(), rate: Number(ev.target.r.value) || 0 }] });
   });
 
   $('childList').addEventListener('change', (ev) => {
     const t = ev.target, kid = t.dataset.k;
     if (!kid) return;
-    const x = findContract(kid);
-    if (x) { x.contract[t.dataset.f] = t.dataset.f === 'rate' ? Number(t.value) || 0 : t.value.trim(); save(); }
+    const c = state.children.find((x) => x.contracts.some((k) => k.id === kid));
+    const v = t.dataset.f === 'rate' ? Number(t.value) || 0 : t.value.trim();
+    saveChild({ ...c, contracts: c.contracts.map((k) => (k.id === kid ? { ...k, [t.dataset.f]: v } : k)) });
   });
 
-  $('childList').addEventListener('click', (ev) => {
+  $('childList').addEventListener('click', async (ev) => {
     const t = ev.target;
     if (t.dataset.rmchild) {
       const c = state.children.find((x) => x.id === t.dataset.rmchild);
-      const ids = c.contracts.map((k) => k.id);
-      if (confirm(`${c.name} en alle bijbehorende uren verwijderen?`)) {
+      if (!confirm(`${c.name} en alle bijbehorende uren verwijderen?`)) return;
+      if (await guard(() => api('DELETE', 'children/' + c.id).then(() => true))) {
+        const ids = c.contracts.map((k) => k.id);
         state.entries = state.entries.filter((e) => !ids.includes(e.contractId));
         state.children = state.children.filter((x) => x !== c);
-        save(); render();
+        render();
       }
     } else if (t.dataset.rmk) {
-      if (confirm('Contract en bijbehorende uren verwijderen?')) {
-        state.children.forEach((c) => { c.contracts = c.contracts.filter((k) => k.id !== t.dataset.rmk); });
+      if (!confirm('Contract en bijbehorende uren verwijderen?')) return;
+      const c = state.children.find((x) => x.contracts.some((k) => k.id === t.dataset.rmk));
+      if (await saveChild({ ...c, contracts: c.contracts.filter((k) => k.id !== t.dataset.rmk) })) {
         state.entries = state.entries.filter((e) => e.contractId !== t.dataset.rmk);
-        save(); render();
+        render();
       }
     }
   });
 
-  // --- back-up ---
-  $('backup').onclick = () => download(`gastouder-backup-${iso(new Date())}.json`, JSON.stringify(state, null, 2), 'application/json');
-  $('restore').onclick = () => $('restoreFile').click();
-  $('restoreFile').onchange = async (ev) => {
-    try {
-      const s = JSON.parse(await ev.target.files[0].text());
-      if (!Array.isArray(s.children) || !Array.isArray(s.entries)) throw 0;
-      if (!confirm('Alle huidige gegevens vervangen door deze back-up?')) return;
-      state = s; save(); render();
-    } catch (e) { alert('Dit is geen geldige back-up.'); }
-    ev.target.value = '';
-  };
-
   function render() { renderDay(); renderMonth(); renderChildren(); }
 
-  $('day').value = iso(new Date());
-  $('month').value = iso(new Date()).slice(0, 7);
-  $('start').value = '08:00'; $('end').value = '17:00';
-  render();
+  async function init() {
+    $('day').value = iso(new Date());
+    $('month').value = iso(new Date()).slice(0, 7);
+    $('start').value = '08:00'; $('end').value = '17:00';
+    try {
+      const me = await (await fetch('/.auth/me')).json();
+      if (!me.clientPrincipal) { location.href = LOGIN; return; }
+      $('user').textContent = me.clientPrincipal.userDetails;
+    } catch (e) { /* lokaal zonder auth-emulator: doorgaan */ }
+    const children = await guard(() => api('GET', 'children'));
+    if (children) state.children = children;
+    render();
+  }
+  init();
 })();
 </script>
 </body>
