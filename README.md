@@ -66,7 +66,8 @@ Bij elke deploy worden de resources uit `infra/main.bicep` aangemaakt of bijgewe
 4. **Per environment** instellen (Settings → Environments → *test* / *production*):
    - Secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
    - Variable `ALLOWED_USERS`: komma-gescheiden e-mailadressen die de omgeving mogen gebruiken. Voor test kun je bijvoorbeeld alleen jezelf opnemen, voor production Mariko.
-   - Optioneel: `AZURE_RESOURCE_GROUP` (standaard `gastouder-test-rg` / `gastouder-production-rg`) en `AZURE_LOCATION` (standaard `westeurope`)
+   - `AZURE_RESOURCE_GROUP`: naam van de (al aangemaakte) resource group van deze omgeving. Bestaat hij niet, dan maakt de pipeline hem aan (standaard `gastouder-<omgeving>-rg`).
+   - Optioneel: `AZURE_LOCATION` (standaard `westeurope`) voor de resources zelf
 5. Run de workflow. De frontend-URL van elke omgeving staat in de samenvatting van de run.
 
 **Validatie van de infra:** `.github/workflows/validate-infra.yml` draait bij elke pull request die `infra/` raakt. Hij compileert en lint de Bicep (geen Azure nodig). Zodra de Azure-login voor `test` is ingesteld en de resource group bestaat, draait hij ook `az deployment group validate` (voor test én production) en een what-if voor test, zonder iets te wijzigen. Heeft de service principal geen toegang of bestaat de resource group nog niet, dan blijft het bij compileren.

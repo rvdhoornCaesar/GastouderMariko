@@ -39,7 +39,7 @@ jobs:
           ENVIRONMENT: ${{ inputs.environment }}
         run: |
           if [ -z "$ALLOWED_USERS" ]; then echo "::error::Stel de variabele ALLOWED_USERS in voor environment $ENVIRONMENT."; exit 1; fi
-          az group create -n "$RESOURCE_GROUP" -l "$LOCATION" -o none
+          if [ "$(az group exists -n "$RESOURCE_GROUP")" != "true" ]; then az group create -n "$RESOURCE_GROUP" -l "$LOCATION" -o none; fi
           out=$(az deployment group create -g "$RESOURCE_GROUP" -f infra/main.bicep \
                   -p allowedUsers="$ALLOWED_USERS" environmentName="$ENVIRONMENT" location="$LOCATION" \
                   --query properties.outputs -o json)
