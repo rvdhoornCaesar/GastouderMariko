@@ -96,4 +96,5 @@ jobs:
           skip_api_build: true
 
       - name: Samenvatting
-        run: echo "Frontend: ${{ steps.infra.outputs.frontend_url }}" >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          echo "Frontend: ${{ steps.infra.outputs.frontend_url }}" >> "$GITHUB_STEP_SUMMARY"
