@@ -3,14 +3,14 @@
 Online urenregistratie voor gastouder Mariko: meerdere kinderen, per kind meerdere contracten (eigen uurtarief of algemeen tarief, optioneel vaste uren per maand), meerdere registraties per dag, openingstijden met toeslag daarbuiten, maandoverzicht met bedragen, CSV-export en afdrukken.
 
 ```
-frontend/   Statische site (vanilla HTML/JS) + staticwebapp.config.json (Microsoft-login)
-backend/    Azure Functions-code (Node.js 24, v4-model) met Azure Table Storage; draait als managed functions in de Static Web App
+frontend/   Statische site (vanilla HTML/JS) + staticwebapp.config.json (routes: Microsoft-login voor `/api/ms/*`)
+backend/    Azure Functions-code (Node.js 22, v4-model) met Azure Table Storage; draait als managed functions in de Static Web App
 infra/      Bicep: Static Web App (Free) + Storage
 ```
 
 ## Architectuur
 
-- **Frontend:** Azure Static Web App. Alle pagina's en `/api/*` vereisen login via Microsoft (Entra ID).
+- **Frontend:** Azure Static Web App. De pagina is openbaar (het inlogscherm); alle gegevens zitten achter de API, die inloggen vereist: Microsoft (Entra ID, `/api/ms/*`) of een lokaal account (`/api/*`, zie hieronder).
 - **Backend:** de Functions-code uit `backend/` draait als *managed functions* binnen dezelfde Static Web App (Free-tier). De frontend roept `/api/...` aan; Static Web App stuurt de ingelogde gebruiker mee en de pipeline levert de API vooraf gebouwd aan (`api/`, zonder tests en dev-dependencies).
 - **Toegang:** iedereen met een Microsoft-account kan inloggen, maar de API laat alleen toegestane e-mailadressen toe: de *beheerders* uit de app-setting `ALLOWED_USERS` (kunnen nooit buitengesloten worden) plus de gebruikers die in de app bij *Instellingen* zijn toegevoegd. Zijn beide lijsten leeg, dan komt niemand erin.
 - **Opslag:** Azure Table Storage, tabellen `children` (kind + contracten) en `entries` (uren, `RowKey` = `JJJJ-MM-DD_id`). Alle toegestane gebruikers van een omgeving delen dezelfde gegevens (`PartitionKey` is altijd `main`). Ook de instellingen (tabel `settings`) staan hier.
@@ -32,7 +32,7 @@ infra/      Bicep: Static Web App (Free) + Storage
 
 ## Lokaal draaien
 
-Vereist Node.js 24 (`engines` in `backend/package.json`; de bouwstap van Static Web Apps kiest zijn Node-versie daaruit), [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) en de [SWA CLI](https://azure.github.io/static-web-apps-cli/).
+Vereist Node.js 22 (`engines` in `backend/package.json`; de bouwstap van Static Web Apps kiest zijn Node-versie daaruit), [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) en de [SWA CLI](https://azure.github.io/static-web-apps-cli/).
 
 ```bash
 cd backend
@@ -131,6 +131,19 @@ Het tabblad **Kinderen** toont eerst een lijst; met *Bewerken* (of *Kind toevoeg
 
 Kinderen en contracten uit een eerdere versie hebben nog geen startdatum, t/m datum of achternaam; bij het eerstvolgende opslaan vraagt de app daarom om die in te vullen.
 
+### Inloggen met een lokaal account
+
+Naast Microsoft kan een gebruiker inloggen met een account dat alleen in deze app bestaat (e-mailadres + wachtwoord).
+
+- **Beheer:** een beheerder (vaste gebruiker uit `ALLOWED_USERS`, ingelogd via Microsoft) maakt accounts aan bij *Instellingen → Lokale accounts*. Het tijdelijke wachtwoord wordt één keer getoond; de gebruiker moet het bij de eerste keer inloggen wijzigen. Wachtwoord vergeten: de beheerder zet een nieuw tijdelijk wachtwoord (de gebruiker wordt overal uitgelogd).
+- **Wachtwoorden:** nooit leesbaar opgeslagen. Alleen een scrypt-hash (N=65536, r=8, p=2, eigen salt per wachtwoord) staat in tabel `accounts`. Regels: 12–128 tekens, niet afgeleid van het e-mailadres, geen gangbare woorden.
+- **Sessies:** na inloggen een willekeurige sleutel in een `HttpOnly`/`Secure`/`SameSite=Strict`-cookie (`gu_session`, 7 dagen). In tabel `sessions` staat alleen de SHA-256 van die sleutel, dus een uitgelezen database levert geen bruikbare sessies op. Wachtwoord wijzigen beëindigt de andere sessies. Wijzigende verzoeken vereisen daarnaast de header `X-Requested-With` (CSRF).
+- **Gokken tegen gegaan:** na 5 mislukte pogingen per e-mailadres volgt een blokkade van 15 minuten (steeds langer, maximaal een dag); ook bij onbekende adressen, zodat niet te zien is of een account bestaat.
+- **Twee routesets:** `/api/ms/*` vereist een Microsoft-login (afgedwongen door Static Web Apps) en `/api/*` werkt met de sessiecookie. De sessieroutes negeren `x-ms-client-principal`, omdat die header op een openbare route door iedereen te vervalsen is. Accountbeheer bestaat alleen op `/api/ms/*`.
+- **Tweestapsverificatie (TOTP):** een lokale gebruiker kan bij *Instellingen → Mijn account* een authenticator-app koppelen (RFC 6238, 6 cijfers). Bij het inloggen volgt na het wachtwoord een codestap; een code werkt maar één keer en foute codes tellen mee voor dezelfde blokkade. Bij het aanzetten krijgt de gebruiker 8 herstelcodes (eenmalig, alleen als hash opgeslagen). Het TOTP-geheim moet terug te lezen zijn en staat daarom versleuteld (AES-256-GCM) in de opslag; de sleutel is de app-setting `TOTP_KEY`, en zonder die setting wordt hij afgeleid van `TABLES_CONNECTION`. Zet voor extra scheiding een eigen `TOTP_KEY` in de Static Web App (wijzigen of kwijtraken betekent dat gebruikers hun 2FA opnieuw moeten instellen). Een beheerder die een nieuw tijdelijk wachtwoord instelt, zet 2FA van dat account ook uit (telefoon kwijt en geen herstelcodes). Voor Microsoft-logins regelt Microsoft zelf of er MFA is; zet dat aan op beheerdersaccounts.
+- **Voorbereid op later:** elk account heeft een `role` (nu alleen `beheerder`) en een `instanceId` (nu `main`), zodat er later een adminrol, beheerders per gastouder en gewone gebruikers zonder instellingen bij kunnen.
+- Controleer na de eerste deploy op test dat inloggen (cookie) via Static Web Apps werkt; zo niet, dan is een token in een header het alternatief.
+
 ### Kosten en aandachtspunten
 
 - Static Web App **Free** met managed functions kost niets, ook niet voor twee omgevingen; het storage-account kost bij dit gebruik centen per maand. Grenzen van Free: 100 GB bandwidth per maand, alleen HTTP-triggers, geen VNet. Test kun je tussendoor verwijderen (resource group weggooien); de pipeline maakt hem bij de volgende run opnieuw aan.
@@ -138,12 +151,13 @@ Kinderen en contracten uit een eerdere versie hebben nog geen startdatum, t/m da
 - De Bicep-template en de deploy-pipeline zijn niet tegen een echte Azure-omgeving uitgevoerd; controleer na de eerste deploy of `/api/children` ingelogd werkt en uitgelogd een 401 geeft.
 
 ### Node-versie
-CI, de deploy-pipeline en de API in de Static Web App draaien op **Node.js 24** (LTS tot april 2028); de runtime van de API staat in `frontend/staticwebapp.config.json` (`apiRuntime`). Bij Instellingen staat onderaan op welke Node-versie de API echt draait. Weigert Static Web Apps een nieuwere versie (of kiest het een andere), zet `apiRuntime` en `engines` dan terug op de nieuwste ondersteunde (`node:22`) en pas `node-version` in de workflows daarop aan. De GitHub-acties zelf (`checkout`, `setup-node`, `azure/login`) staan op versies die op Node 24 draaien.
+
+CI, de deploy-pipeline en de API in de Static Web App draaien op **Node.js 22** (LTS). De bouwstap van Static Web Apps (Oryx) gebruikt voor de API Node 22, ook als `engines` hoger is; daarom staat alles op 22: `engines` in `backend/package.json`, `apiRuntime` in `frontend/staticwebapp.config.json` en `node-version` in de workflows. Bij Instellingen staat onderaan op welke Node-versie de API echt draait. Gaat Static Web Apps later Node 24 ondersteunen, pas die drie plekken dan samen aan. De GitHub-acties zelf (`checkout`, `setup-node`, `azure/login`) draaien op Node 24.
 
 ### Later opschalen
 De API-code is gewone Azure Functions en staat los van de hosting. Groeit het gebruik of heb je een eigen Function App nodig (scaling, monitoring, VNet), dan:
 1. Zet de SKU van de Static Web App in `infra/main.bicep` op `Standard` (ca. € 9 per maand per omgeving).
-2. Voeg een Function App (Consumption, Node 24) toe met dezelfde app-settings (`TABLES_CONNECTION`, `ALLOWED_USERS`) en een `Microsoft.Web/staticSites/linkedBackends`-resource die ernaar verwijst.
+2. Voeg een Function App (Consumption, Node 22) toe met dezelfde app-settings (`TABLES_CONNECTION`, `ALLOWED_USERS`) en een `Microsoft.Web/staticSites/linkedBackends`-resource die ernaar verwijst.
 3. Deploy `backend/` naar die Function App (`Azure/functions-action`) en haal `api_location` uit de Static Web App-deploy; managed functions en een gekoppelde backend kunnen niet naast elkaar bestaan.
 
 De frontend (`/api/...`), de login en de data in Table Storage veranderen niet.

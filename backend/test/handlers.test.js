@@ -235,3 +235,185 @@ test('eigen kinderen: opslaan, sorteren op geboortedatum, validatie', async () =
   // leeg maken mag
   assert.deepEqual((await call(h.putOwnChildren, { body: { ownChildren: [] } })).jsonBody.ownChildren, []);
 });
+
+// --- Lokale accounts ---
+const admin = { email: 'mariko@voorbeeld.nl', kind: 'microsoft', fixed: true, admin: true };
+const PW = 'koekjes-tomaat-fiets-42';
+const hdr = (cookie) => ({ get: (n) => (n === 'cookie' ? cookie : null) });
+const cookieOf = (res) => `${res.cookies[0].name}=${res.cookies[0].value}`;
+const { authorizeSession } = require('../src/auth');
+const P = require('../src/passwords');
+
+async function newAccount(email) {
+  const r = await h.createAccount({ user: admin, repo, body: { email, name: 'Test' } });
+  return r.jsonBody;
+}
+
+test('account aanmaken: tijdelijk wachtwoord wordt niet leesbaar opgeslagen', async () => {
+  const { tempPassword, account } = await newAccount('Lokaal1@Voorbeeld.nl');
+  assert.equal(account.email, 'lokaal1@voorbeeld.nl');
+  assert.equal(account.mustChange, true);
+  const stored = await repo.getAccount('lokaal1@voorbeeld.nl');
+  assert.ok(stored.passwordHash.startsWith('scrypt$'));
+  assert.ok(!JSON.stringify(stored).includes(tempPassword));
+  await assert.rejects(h.createAccount({ user: admin, repo, body: { email: 'lokaal1@voorbeeld.nl' } }), { status: 409 });
+});
+
+test('accountbeheer is alleen voor beheerders', async () => {
+  await assert.rejects(h.listAccounts({ user: { ...admin, admin: false }, repo }), { status: 403 });
+  await assert.rejects(h.createAccount({ user: { kind: 'local', admin: false }, repo, body: { email: 'x@y.nl' } }), { status: 403 });
+});
+
+test('inloggen, sessie, wachtwoord wijzigen en uitloggen', async () => {
+  const { tempPassword } = await newAccount('lokaal2@voorbeeld.nl');
+  const res = await h.login({ repo, body: { email: 'lokaal2@voorbeeld.nl', password: tempPassword } });
+  assert.equal(res.jsonBody.mustChange, true);
+  assert.equal(res.cookies[0].httpOnly, true);
+  assert.equal(res.cookies[0].sameSite, 'Strict');
+  const token = res.cookies[0].value;
+  // Alleen de hash van de sessiesleutel staat in de opslag
+  assert.ok(await repo.getSession(P.hashToken(token)));
+  assert.equal(await repo.getSession(token), undefined ?? null);
+  const user = await authorizeSession(hdr(cookieOf(res)), 'GET', repo);
+  assert.equal(user.kind, 'local');
+  assert.equal(user.mustChange, true);
+
+  await assert.rejects(h.changePassword({ user, repo, body: { current: 'fout', next: PW } }), { status: 400 });
+  await assert.rejects(h.changePassword({ user, repo, body: { current: tempPassword, next: 'kort' } }), { status: 400 });
+  await h.changePassword({ user, repo, body: { current: tempPassword, next: PW } });
+  assert.equal((await repo.getAccount('lokaal2@voorbeeld.nl')).mustChange, false);
+  await assert.rejects(h.login({ repo, body: { email: 'lokaal2@voorbeeld.nl', password: tempPassword } }), { status: 401 });
+
+  const second = await h.login({ repo, body: { email: 'lokaal2@voorbeeld.nl', password: PW } });
+  const out = await h.logout({ repo, headers: hdr(cookieOf(second)) });
+  assert.equal(out.cookies[0].maxAge, 0);
+  await assert.rejects(authorizeSession(hdr(cookieOf(second)), 'GET', repo), { status: 401 });
+});
+
+test('wachtwoord wijzigen beëindigt andere sessies', async () => {
+  const { tempPassword } = await newAccount('lokaal3@voorbeeld.nl');
+  const a = await h.login({ repo, body: { email: 'lokaal3@voorbeeld.nl', password: tempPassword } });
+  const b = await h.login({ repo, body: { email: 'lokaal3@voorbeeld.nl', password: tempPassword } });
+  const user = await authorizeSession(hdr(cookieOf(a)), 'GET', repo);
+  await h.changePassword({ user, repo, body: { current: tempPassword, next: PW } });
+  await authorizeSession(hdr(cookieOf(a)), 'GET', repo);
+  await assert.rejects(authorizeSession(hdr(cookieOf(b)), 'GET', repo), { status: 401 });
+});
+
+test('verlopen sessie wordt geweigerd', async () => {
+  const { tempPassword } = await newAccount('lokaal4@voorbeeld.nl');
+  const res = await h.login({ repo, body: { email: 'lokaal4@voorbeeld.nl', password: tempPassword } });
+  const later = new Date(Date.now() + 8 * 86400000);
+  await assert.rejects(authorizeSession(hdr(cookieOf(res)), 'GET', repo, later), { status: 401 });
+});
+
+test('blokkade na vijf mislukte pogingen, ook voor onbekende adressen', async () => {
+  const { tempPassword } = await newAccount('lokaal5@voorbeeld.nl');
+  for (let i = 0; i < 5; i++) await assert.rejects(h.login({ repo, body: { email: 'lokaal5@voorbeeld.nl', password: 'fout' } }), { status: 401 });
+  await assert.rejects(h.login({ repo, body: { email: 'lokaal5@voorbeeld.nl', password: tempPassword } }), { status: 429 });
+  const later = new Date(Date.now() + 16 * 60000);
+  assert.equal((await h.login({ repo, body: { email: 'lokaal5@voorbeeld.nl', password: tempPassword }, now: later })).status, 200);
+  for (let i = 0; i < 5; i++) await assert.rejects(h.login({ repo, body: { email: 'bestaat-niet@voorbeeld.nl', password: 'fout' } }), { status: 401 });
+  await assert.rejects(h.login({ repo, body: { email: 'bestaat-niet@voorbeeld.nl', password: 'fout' } }), { status: 429 });
+});
+
+test('reset geeft nieuw tijdelijk wachtwoord en beëindigt sessies; verwijderen ruimt op', async () => {
+  const { tempPassword } = await newAccount('lokaal6@voorbeeld.nl');
+  const res = await h.login({ repo, body: { email: 'lokaal6@voorbeeld.nl', password: tempPassword } });
+  const r = await h.resetAccount({ user: admin, repo, params: { email: 'lokaal6%40voorbeeld.nl' } });
+  assert.notEqual(r.jsonBody.tempPassword, tempPassword);
+  assert.equal((await repo.getAccount('lokaal6@voorbeeld.nl')).mustChange, true);
+  await assert.rejects(authorizeSession(hdr(cookieOf(res)), 'GET', repo), { status: 401 });
+  await h.login({ repo, body: { email: 'lokaal6@voorbeeld.nl', password: r.jsonBody.tempPassword } });
+  assert.equal((await h.deleteAccount({ user: admin, repo, params: { email: 'lokaal6@voorbeeld.nl' } })).status, 204);
+  await assert.rejects(h.login({ repo, body: { email: 'lokaal6@voorbeeld.nl', password: r.jsonBody.tempPassword } }), { status: 401 });
+  const list = (await h.listAccounts({ user: admin, repo })).jsonBody;
+  assert.ok(list.every((a) => !('passwordHash' in a)));
+});
+
+// --- Tweestapsverificatie ---
+const T = require('../src/totp');
+const tenv = { TOTP_KEY: 'test-sleutel' };
+
+async function localUser(email) {
+  const { tempPassword } = await newAccount(email);
+  const login = await h.login({ repo, env: tenv, body: { email, password: tempPassword } });
+  const user = await authorizeSession(hdr(cookieOf(login)), 'GET', repo);
+  await h.changePassword({ user, repo, body: { current: tempPassword, next: PW } });
+  return { user, email };
+}
+
+test('2FA instellen: geheim versleuteld, herstelcodes alleen als hash', async () => {
+  const { user, email } = await localUser('mfa1@voorbeeld.nl');
+  await assert.rejects(h.totpStart({ user, repo, env: tenv, body: { password: 'fout' } }), { status: 400 });
+  const start = (await h.totpStart({ user, repo, env: tenv, body: { password: PW } })).jsonBody;
+  assert.match(start.uri, /^otpauth:\/\/totp\//);
+  await assert.rejects(h.totpEnable({ user, repo, env: tenv, body: { code: '000000' } }), { status: 400 });
+  const now = new Date();
+  const code = T.code(start.secret, Math.floor(now.getTime() / 30000));
+  const { recoveryCodes } = (await h.totpEnable({ user, repo, env: tenv, body: { code }, now })).jsonBody;
+  assert.equal(recoveryCodes.length, 8);
+  const stored = await repo.getAccount(email);
+  const dump = JSON.stringify(stored);
+  assert.ok(!dump.includes(start.secret));
+  for (const c of recoveryCodes) assert.ok(!dump.includes(c));
+  assert.equal(T.decrypt(stored.totpSecret, tenv), start.secret);
+  await assert.rejects(h.totpStart({ user, repo, env: tenv, body: { password: PW } }), { status: 409 });
+});
+
+test('inloggen met 2FA: zonder code geen sessie, code één keer bruikbaar, herstelcode eenmalig', async () => {
+  const { user, email } = await localUser('mfa2@voorbeeld.nl');
+  const start = (await h.totpStart({ user, repo, env: tenv, body: { password: PW } })).jsonBody;
+  const t0 = new Date();
+  const step = Math.floor(t0.getTime() / 30000);
+  const { recoveryCodes } = (await h.totpEnable({ user, repo, env: tenv, body: { code: T.code(start.secret, step) }, now: t0 })).jsonBody;
+
+  const first = await h.login({ repo, env: tenv, body: { email, password: PW }, now: t0 });
+  assert.equal(first.jsonBody.mfaRequired, true);
+  assert.equal(first.cookies, undefined);
+  const ticket = first.jsonBody.ticket;
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket: 'troep', code: '123456' } }), { status: 401 });
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket, code: '000000' }, now: t0 }), { status: 401 });
+  // De code waarmee 2FA is ingesteld is al gebruikt en werkt niet nog eens; de volgende tijdstap wel.
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket, code: T.code(start.secret, step) }, now: t0 }), { status: 401 });
+  const t1 = new Date(t0.getTime() + 30000);
+  const ok = await h.loginMfa({ repo, env: tenv, body: { ticket, code: T.code(start.secret, step + 1) }, now: t1 });
+  assert.equal(ok.status, 200);
+  assert.ok(ok.cookies[0].value);
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket, code: T.code(start.secret, step + 1) }, now: t1 }), { status: 401 });
+
+  // herstelcode: werkt één keer
+  const again = (await h.login({ repo, env: tenv, body: { email, password: PW }, now: t1 })).jsonBody.ticket;
+  const rec = await h.loginMfa({ repo, env: tenv, body: { ticket: again, code: recoveryCodes[0].toUpperCase() }, now: t1 });
+  assert.equal(rec.jsonBody.recoveryCodesLeft, 7);
+  const again2 = (await h.login({ repo, env: tenv, body: { email, password: PW }, now: t1 })).jsonBody.ticket;
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket: again2, code: recoveryCodes[0] }, now: t1 }), { status: 401 });
+});
+
+test('2FA: te veel foute codes blokkeren; verlopen ticket werkt niet', async () => {
+  const { user, email } = await localUser('mfa3@voorbeeld.nl');
+  const start = (await h.totpStart({ user, repo, env: tenv, body: { password: PW } })).jsonBody;
+  const t0 = new Date();
+  await h.totpEnable({ user, repo, env: tenv, body: { code: T.code(start.secret, Math.floor(t0.getTime() / 30000)) }, now: t0 });
+  const ticket = (await h.login({ repo, env: tenv, body: { email, password: PW }, now: t0 })).jsonBody.ticket;
+  for (let i = 0; i < 5; i++) await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket, code: '000000' }, now: t0 }), { status: 401 });
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket, code: '000000' }, now: t0 }), { status: 429 });
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket, code: '000000' }, now: new Date(t0.getTime() + 6 * 60000) }), { status: 401 });
+});
+
+test('2FA uitzetten vraagt wachtwoord en code; reset door beheerder zet 2FA ook uit', async () => {
+  const { user, email } = await localUser('mfa4@voorbeeld.nl');
+  const start = (await h.totpStart({ user, repo, env: tenv, body: { password: PW } })).jsonBody;
+  const t0 = new Date();
+  const step = Math.floor(t0.getTime() / 30000);
+  await h.totpEnable({ user, repo, env: tenv, body: { code: T.code(start.secret, step) }, now: t0 });
+  await assert.rejects(h.totpDisable({ user, repo, env: tenv, body: { password: PW, code: '000000' }, now: t0 }), { status: 400 });
+  await h.totpDisable({ user, repo, env: tenv, body: { password: PW, code: T.code(start.secret, step + 1) }, now: new Date(t0.getTime() + 30000) });
+  assert.equal((await repo.getAccount(email)).totpSecret, '');
+  // opnieuw aanzetten en dan resetten
+  const s2 = (await h.totpStart({ user, repo, env: tenv, body: { password: PW } })).jsonBody;
+  await h.totpEnable({ user, repo, env: tenv, body: { code: T.code(s2.secret, step + 2) }, now: new Date(t0.getTime() + 60000) });
+  assert.ok((await repo.getAccount(email)).totpSecret);
+  await h.resetAccount({ user: admin, repo, params: { email } });
+  assert.equal((await repo.getAccount(email)).totpSecret, '');
+});

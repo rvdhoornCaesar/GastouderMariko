@@ -53,6 +53,62 @@ function createRepo(connectionString) {
   };
 
   return {
+    // Lokale accounts (e-mailadres als sleutel), sessies (sleutel = hash van de sessiesleutel) en inlogpogingen (sleutel = hash van het e-mailadres).
+    // 'role' en 'instanceId' liggen nu al vast, zodat er later rollen en meerdere gastouders (instanties) bij kunnen.
+    async getAccount(email) {
+      const t = await table('accounts');
+      try {
+        return await t.getEntity('accounts', email);
+      } catch (e) {
+        if (e.statusCode === 404) return null;
+        throw e;
+      }
+    },
+    async listAccounts() {
+      const t = await table('accounts');
+      return collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq 'accounts'` } }));
+    },
+    async saveAccount(a) {
+      const t = await table('accounts');
+      await t.upsertEntity({
+        partitionKey: 'accounts', rowKey: a.email, name: a.name || '', role: a.role, instanceId: a.instanceId,
+        passwordHash: a.passwordHash, mustChange: !!a.mustChange, createdAt: a.createdAt, lastLogin: a.lastLogin || '',
+        // Tweestapsverificatie: geheim versleuteld, herstelcodes als hashes (JSON-lijst)
+        totpSecret: a.totpSecret || '', totpPending: a.totpPending || '', totpLastStep: a.totpLastStep || 0, recoveryCodes: a.recoveryCodes || '[]',
+      }, 'Replace');
+    },
+    async deleteAccount(email) {
+      try { await (await table('accounts')).deleteEntity('accounts', email); } catch (e) { if (e.statusCode !== 404) throw e; }
+    },
+    async createSession(hash, s) {
+      await (await table('sessions')).upsertEntity({ partitionKey: 'sessions', rowKey: hash, email: s.email, createdAt: s.createdAt, expiresAt: s.expiresAt }, 'Replace');
+    },
+    async getSession(hash) {
+      try { return await (await table('sessions')).getEntity('sessions', hash); } catch (e) { if (e.statusCode === 404) return null; throw e; }
+    },
+    async deleteSession(hash) {
+      try { await (await table('sessions')).deleteEntity('sessions', hash); } catch (e) { if (e.statusCode !== 404) throw e; }
+    },
+    async deleteSessionsOf(email, exceptHash) {
+      const t = await table('sessions');
+      for (const s of await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq 'sessions' and email eq '${email.replace(/'/g, "''")}'` } }))) {
+        if (s.rowKey !== exceptHash) await t.deleteEntity('sessions', s.rowKey);
+      }
+    },
+    async purgeExpiredSessions(nowIso) {
+      const t = await table('sessions');
+      for (const s of await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq 'sessions' and expiresAt lt '${nowIso}'` } }))) await t.deleteEntity('sessions', s.rowKey);
+    },
+    async getThrottle(key) {
+      try { return await (await table('throttle')).getEntity('throttle', key); } catch (e) { if (e.statusCode === 404) return null; throw e; }
+    },
+    async setThrottle(key, v) {
+      await (await table('throttle')).upsertEntity({ partitionKey: 'throttle', rowKey: key, count: v.count, lockedUntil: v.lockedUntil || '' }, 'Replace');
+    },
+    async clearThrottle(key) {
+      try { await (await table('throttle')).deleteEntity('throttle', key); } catch (e) { if (e.statusCode !== 404) throw e; }
+    },
+
     getUsers: () => getSetting('users'),
     setUsers: (list) => setSetting('users', list),
     getRates: () => getSetting('rates'),
