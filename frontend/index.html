@@ -557,7 +557,7 @@
     const sel = $('contract'), prev = sel.value;
     sel.innerHTML = contracts().length
       ? contracts().map((x) => `<option value="${x.contract.id}">${esc(label(x))}</option>`).join('')
-      : '<option value="">Voeg eerst een kind + contract toe (tab Kinderen)</option>';
+      : `<option value="">${can('children:write') ? 'Voeg eerst een kind + contract toe (tab Kinderen)' : 'Er is nog geen kind of contract. Vraag een beheerder dit toe te voegen.'}</option>`;
     if (prev) sel.value = prev;
     $('dayCap').innerHTML = capacityIssues(day).map(capacityLine).join('');
     updateEntryHints(prefill === true);
@@ -651,7 +651,7 @@
     $('summary').innerHTML = rows.length
       ? `<table><tr><th>Kind – contract</th><th class="num">Uren</th><th class="num">Tarief</th><th class="num">Bedrag</th></tr>${rows.join('')}
          <tr><th>Totaal</th><th class="num">${fmt(totMin)}</th><th></th><th class="num">${euro(totEur)}</th></tr></table>
-         ${missing ? '<div class="warn">Voor sommige uren is geen tarief bekend (bedrag telt als € 0). Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.</div>' : ''}
+         ${missing ? `<div class="warn">Voor sommige uren is geen tarief bekend (bedrag telt als € 0). ${can('settings:write') ? 'Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.' : 'Vraag een beheerder een tarief toe te voegen.'}</div>` : ''}
          ${outsideContract ? `<div class="warn">${outsideContract} registratie${outsideContract === 1 ? '' : 's'} ${outsideContract === 1 ? 'valt' : 'vallen'} buiten de contractperiode.</div>` : ''}
          ${capDays.length ? `<div class="warn">Op ${capDays.length} dag${capDays.length === 1 ? '' : 'en'} zijn er te veel kinderen tegelijk (${capDays.map(nlDate).join(', ')}). Zie de dag in het tabblad Uren invullen.</div>` : ''}`
       : '<div class="empty">Geen uren in deze maand.</div>';
