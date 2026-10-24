@@ -58,19 +58,19 @@ function parseContracts(list, newId) {
   if (list === undefined) return [];
   if (!Array.isArray(list) || list.length > 50) throw bad('Ongeldige contracten.');
   const seen = new Set();
-  return list.map((k) => {
-    const name = text(k && k.name, 100);
-    if (!name) throw bad('Een contract heeft een naam nodig.');
-    const number = text(k.number, 50);
+  return list.map((k, i) => {
+    const who = `Contract ${i + 1}`;
+    const number = text(k && k.number, 50);   // optioneel
     // Leeg tarief = het algemene tarief (uit de instellingen) geldt.
     const rate = k.rate === null || k.rate === undefined || k.rate === '' ? null : parseRate(k.rate);
     const monthlyHours = parseMonthlyHours(k.monthlyHours);
-    const start = requiredDate(k.start, `Contract "${name}": vul een geldige startdatum in.`);
-    const end = requiredDate(k.end, `Contract "${name}": vul een geldige t/m datum in.`);
-    if (end < start) throw bad(`Contract "${name}": de t/m datum ligt voor de startdatum.`);
+    const start = requiredDate(k.start, `${who}: vul een geldige startdatum in.`);
+    const end = requiredDate(k.end, `${who}: vul een geldige t/m datum in.`);
+    if (end < start) throw bad(`${who}: de t/m datum ligt voor de startdatum.`);
     const id = k.id && ID.test(k.id) && !seen.has(k.id) ? k.id : newId();
     seen.add(id);
-    return { id, name, number, rate, monthlyHours, start, end, schedule: parseSchedule(k.schedule) };
+    // Optioneel (standaard uit): worden vakanties van het kind doorbetaald?
+    return { id, number, rate, monthlyHours, start, end, schedule: parseSchedule(k.schedule), paidHolidays: k.paidHolidays === true };
   });
 }
 
