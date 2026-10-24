@@ -86,6 +86,17 @@ De *beheerders* uit de GitHub-variabele `ALLOWED_USERS` (Settings → Environmen
 
 De pagina zelf is voor elk ingelogd Microsoft-account te laden, maar bevat geen gegevens: alle data zit achter de API, en die controleert de toegang. Wil je de pagina ook blokkeren, dan kan dat met rollen/uitnodigingen van Static Web Apps.
 
+### Monitoring (Application Insights)
+Elke omgeving krijgt een Application Insights-resource (workspace-based, 30 dagen bewaard, plafond van 0,1 GB per dag, dus kosten rond nul). De API stuurt requests, fouten en logregels daar naartoe; geweigerde toegang (401/403) wordt gelogd met het adres dat de server zag. Kijk in de Azure Portal bij de resource group → Application Insights → *Logs* of *Failures*, bijvoorbeeld:
+
+```kusto
+traces | where message startswith "403" or message startswith "401" | order by timestamp desc
+requests | where resultCode >= 400 | project timestamp, name, resultCode | order by timestamp desc
+exceptions | order by timestamp desc
+```
+
+Eenmalig nodig: de resource providers `Microsoft.OperationalInsights` en `Microsoft.Insights` moeten op de subscription geregistreerd zijn (`az provider register --namespace Microsoft.OperationalInsights`); de pipeline kan dat zelf niet, want zijn rol geldt alleen op de resource groups.
+
 ### Kosten en aandachtspunten
 
 - Static Web App **Free** met managed functions kost niets, ook niet voor twee omgevingen; het storage-account kost bij dit gebruik centen per maand. Grenzen van Free: 100 GB bandwidth per maand, alleen HTTP-triggers, geen VNet. Test kun je tussendoor verwijderen (resource group weggooien); de pipeline maakt hem bij de volgende run opnieuw aan.
