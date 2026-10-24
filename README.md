@@ -12,8 +12,8 @@ infra/      Bicep: Static Web App (Free) + Storage
 
 - **Frontend:** Azure Static Web App. Alle pagina's en `/api/*` vereisen login via Microsoft (Entra ID).
 - **Backend:** de Functions-code uit `backend/` draait als *managed functions* binnen dezelfde Static Web App (Free-tier). De frontend roept `/api/...` aan; Static Web App stuurt de ingelogde gebruiker mee en de pipeline levert de API vooraf gebouwd aan (`api/`, zonder tests en dev-dependencies).
-- **Toegang:** iedereen met een Microsoft-account kan inloggen, maar de API laat alleen e-mailadressen uit de app-setting `ALLOWED_USERS` toe. Staat die leeg, dan komt niemand erin.
-- **Opslag:** Azure Table Storage, tabellen `children` (kind + contracten) en `entries` (uren, `RowKey` = `JJJJ-MM-DD_id`). Data is per gebruiker gescheiden (`PartitionKey`).
+- **Toegang:** iedereen met een Microsoft-account kan inloggen, maar de API laat alleen toegestane e-mailadressen toe: de *beheerders* uit de app-setting `ALLOWED_USERS` (kunnen nooit buitengesloten worden) plus de gebruikers die in de app bij *Instellingen* zijn toegevoegd. Zijn beide lijsten leeg, dan komt niemand erin.
+- **Opslag:** Azure Table Storage, tabellen `children` (kind + contracten) en `entries` (uren, `RowKey` = `JJJJ-MM-DD_id`). Alle toegestane gebruikers van een omgeving delen dezelfde gegevens (`PartitionKey` is altijd `main`). Ook de instellingen (tabel `settings`) staan hier.
 
 ### API
 
@@ -22,8 +22,11 @@ infra/      Bicep: Static Web App (Free) + Storage
 | GET / POST | `/api/children` | kinderen met contracten ophalen / kind toevoegen |
 | PUT / DELETE | `/api/children/{id}` | kind (met contracten) opslaan / verwijderen; verwijderde contracten nemen hun uren mee |
 | GET | `/api/entries?month=JJJJ-MM` | uren van een maand |
-| POST | `/api/entries` | uren toevoegen (`date, contractId, start, end, pause, note`) |
+| POST | `/api/entries` | uren toevoegen (`date, contractId, start, end, note`) |
 | DELETE | `/api/entries/{id}` | uren verwijderen |
+| GET | `/api/settings` | algemene tarieven, toegevoegde gebruikers, beheerders en het ingelogde adres |
+| PUT | `/api/settings/rates` | lijst algemene tarieven opslaan (`{ rates: [{ from, to, rate }] }`, periodes mogen niet overlappen) |
+| PUT | `/api/settings/users` | lijst toegevoegde gebruikers opslaan (`{ users: [email] }`) |
 
 ## Lokaal draaien
 
@@ -65,7 +68,7 @@ Bij elke deploy worden de resources uit `infra/main.bicep` aangemaakt of bijgewe
 3. **GitHub-environments** `test` en `production` aanmaken (Settings → Environments). Zet bij `production` *Required reviewers* aan: de pipeline wacht dan op jouw goedkeuring voordat hij naar productie gaat.
 4. **Per environment** instellen (Settings → Environments → *test* / *production*):
    - Secrets: `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`
-   - Variable `ALLOWED_USERS`: komma-gescheiden e-mailadressen die de omgeving mogen gebruiken. Voor test kun je bijvoorbeeld alleen jezelf opnemen, voor production Mariko.
+   - Variable `ALLOWED_USERS`: komma-gescheiden e-mailadressen van de *beheerders*: zij hebben altijd toegang. Meer gebruikers voeg je daarna in de app toe. Voor test kun je bijvoorbeeld alleen jezelf opnemen, voor production Mariko.
    - `AZURE_RESOURCE_GROUP`: naam van de (al aangemaakte) resource group van deze omgeving. Bestaat hij niet, dan maakt de pipeline hem aan (standaard `gastouder-<omgeving>-rg`).
    - Optioneel: `AZURE_LOCATION` (standaard `westeurope`) voor de resources zelf
 5. Run de workflow. De frontend-URL van elke omgeving staat in de samenvatting van de run.
@@ -73,6 +76,15 @@ Bij elke deploy worden de resources uit `infra/main.bicep` aangemaakt of bijgewe
 **Validatie van de infra:** `.github/workflows/validate-infra.yml` draait bij elke pull request die `infra/` raakt. Hij compileert en lint de Bicep (geen Azure nodig). Zodra de Azure-login voor `test` is ingesteld en de resource group bestaat, draait hij ook `az deployment group validate` (voor test én production) en een what-if voor test, zonder iets te wijzigen. Heeft de service principal geen toegang of bestaat de resource group nog niet, dan blijft het bij compileren.
 
 Handmatig één omgeving aanmaken kan ook: `az deployment group create -g <rg> -f infra/main.bicep -p allowedUsers=mariko@voorbeeld.nl environmentName=test`.
+
+### Instellingen in de app
+Op het tabblad **Instellingen** beheer je:
+- **Algemeen uurtarief:** een lijst met periodes (van, tot, € per uur). “Tot” leeg = doorlopend; periodes mogen niet overlappen. Een contract zonder eigen tarief gebruikt het algemene tarief dat geldt op de datum van elke registratie; een contract met eigen tarief houdt dat. Is er voor een datum geen tarief bekend, dan telt het bedrag als € 0 en toont het overzicht een waarschuwing.
+- **Toegestane gebruikers:** iedereen in deze lijst kan inloggen en ziet dezelfde gegevens. Wie niet in de lijst staat, krijgt na het inloggen het scherm *Geen toegang*. Een toegevoegde gebruiker kan zichzelf niet verwijderen.
+
+De *beheerders* uit de GitHub-variabele `ALLOWED_USERS` (Settings → Environments → *test* / *production* → Variables, komma-gescheiden, hoofdletters maken niet uit) staan ook in die lijst, gemarkeerd als beheerder, en kunnen niet in de app worden verwijderd. Zo kun je jezelf nooit buitensluiten. Wijzig je die variabele, dan pas je de beheerders aan na een nieuwe deploy (*Actions → Deploy → Run workflow*, of *Re-run*).
+
+De pagina zelf is voor elk ingelogd Microsoft-account te laden, maar bevat geen gegevens: alle data zit achter de API, en die controleert de toegang. Wil je de pagina ook blokkeren, dan kan dat met rollen/uitnodigingen van Static Web Apps.
 
 ### Kosten en aandachtspunten
 

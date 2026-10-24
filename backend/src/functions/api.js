@@ -1,5 +1,5 @@
 const { app } = require('@azure/functions');
-const { getUser } = require('../auth');
+const { authorize } = require('../auth');
 const { HttpError } = require('../errors');
 const { createRepo } = require('../repo');
 const handlers = require('../handlers');
@@ -14,9 +14,10 @@ function route(name, methods, path, handler) {
     authLevel: 'anonymous', // toegang loopt via Static Web Apps + ALLOWED_USERS
     handler: async (request, context) => {
       try {
-        const user = getUser(request.headers);
-        const body = request.method === 'POST' || request.method === 'PUT' ? await request.json().catch(() => { throw new HttpError(400, 'Ongeldige JSON.'); }) : undefined;
-        const res = await handler({ user, repo: getRepo(), params: request.params, query: Object.fromEntries(request.query), body });
+        const db = getRepo();
+        const user = await authorize(request.headers, db);
+        const body = ['POST', 'PUT'].includes(request.method) ? await request.json().catch(() => { throw new HttpError(400, 'Ongeldige JSON.'); }) : undefined;
+        const res = await handler({ user, repo: db, env: process.env, params: request.params, query: Object.fromEntries(request.query), body });
         return res;
       } catch (e) {
         if (e instanceof HttpError) return { status: e.status, jsonBody: { error: e.message } };
@@ -34,3 +35,6 @@ route('deleteChild', ['DELETE'], 'children/{id}', handlers.deleteChild);
 route('listEntries', ['GET'], 'entries', handlers.listEntries);
 route('createEntry', ['POST'], 'entries', handlers.createEntry);
 route('deleteEntry', ['DELETE'], 'entries/{id}', handlers.deleteEntry);
+route('getSettings', ['GET'], 'settings', handlers.getSettings);
+route('putRates', ['PUT'], 'settings/rates', handlers.putRates);
+route('putUsers', ['PUT'], 'settings/users', handlers.putUsers);

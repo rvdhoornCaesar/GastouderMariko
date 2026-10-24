@@ -1,10 +1,15 @@
 const { HttpError } = require('./errors');
 
+// E-mailadressen uit de app-setting ALLOWED_USERS: de vaste gebruikers (beheerders).
+// Zij kunnen nooit buitengesloten worden; extra gebruikers worden in de app beheerd (zie repo.getUsers).
+function fixedUsers(env = process.env) {
+  return (env.ALLOWED_USERS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+}
+
 // Static Web Apps stuurt de ingelogde gebruiker mee in de header x-ms-client-principal.
-function getUser(headers, env = process.env) {
+function parsePrincipal(headers) {
   const raw = headers.get('x-ms-client-principal');
   if (!raw) throw new HttpError(401, 'Niet ingelogd.');
-
   let principal;
   try {
     principal = JSON.parse(Buffer.from(raw, 'base64').toString('utf8'));
@@ -12,12 +17,15 @@ function getUser(headers, env = process.env) {
     throw new HttpError(401, 'Ongeldige inloggegevens.');
   }
   if (!principal || !principal.userId || !principal.userDetails) throw new HttpError(401, 'Ongeldige inloggegevens.');
-
-  // Elk Microsoft-account kan inloggen; alleen de genoemde gebruikers mogen erbij. Leeg = niemand.
-  const allowed = (env.ALLOWED_USERS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-  if (!allowed.includes(String(principal.userDetails).toLowerCase())) throw new HttpError(403, 'Geen toegang.');
-
-  return { id: String(principal.userId).replace(/[^A-Za-z0-9_-]/g, '_'), name: principal.userDetails };
+  return { name: String(principal.userDetails), email: String(principal.userDetails).toLowerCase() };
 }
 
-module.exports = { getUser };
+// Elk Microsoft-account kan inloggen; alleen vaste en toegevoegde gebruikers mogen erbij.
+async function authorize(headers, repo, env = process.env) {
+  const user = parsePrincipal(headers);
+  const fixed = fixedUsers(env).includes(user.email);
+  if (!fixed && !(await repo.getUsers()).includes(user.email)) throw new HttpError(403, 'Geen toegang.');
+  return { ...user, fixed };
+}
+
+module.exports = { authorize, fixedUsers };
