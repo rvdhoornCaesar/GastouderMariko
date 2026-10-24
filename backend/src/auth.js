@@ -62,7 +62,7 @@ async function authorizeSession(headers, method, repo, now = new Date()) {
   if (!account) throw new HttpError(401, 'Niet ingelogd.');
   return {
     kind: 'local', email: account.rowKey, name: account.name || account.rowKey, fixed: false, admin: false,
-    role: account.role, instanceId: account.instanceId, mustChange: !!account.mustChange, sessionHash: hash,
+    role: account.role, instanceId: account.instanceId, mustChange: !!account.mustChange, totp: !!account.totpSecret, sessionHash: hash,
   };
 }
 

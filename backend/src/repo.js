@@ -73,6 +73,8 @@ function createRepo(connectionString) {
       await t.upsertEntity({
         partitionKey: 'accounts', rowKey: a.email, name: a.name || '', role: a.role, instanceId: a.instanceId,
         passwordHash: a.passwordHash, mustChange: !!a.mustChange, createdAt: a.createdAt, lastLogin: a.lastLogin || '',
+        // Tweestapsverificatie: geheim versleuteld, herstelcodes als hashes (JSON-lijst)
+        totpSecret: a.totpSecret || '', totpPending: a.totpPending || '', totpLastStep: a.totpLastStep || 0, recoveryCodes: a.recoveryCodes || '[]',
       }, 'Replace');
     },
     async deleteAccount(email) {

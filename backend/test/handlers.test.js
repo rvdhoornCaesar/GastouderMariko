@@ -330,3 +330,90 @@ test('reset geeft nieuw tijdelijk wachtwoord en beëindigt sessies; verwijderen 
   const list = (await h.listAccounts({ user: admin, repo })).jsonBody;
   assert.ok(list.every((a) => !('passwordHash' in a)));
 });
+
+// --- Tweestapsverificatie ---
+const T = require('../src/totp');
+const tenv = { TOTP_KEY: 'test-sleutel' };
+
+async function localUser(email) {
+  const { tempPassword } = await newAccount(email);
+  const login = await h.login({ repo, env: tenv, body: { email, password: tempPassword } });
+  const user = await authorizeSession(hdr(cookieOf(login)), 'GET', repo);
+  await h.changePassword({ user, repo, body: { current: tempPassword, next: PW } });
+  return { user, email };
+}
+
+test('2FA instellen: geheim versleuteld, herstelcodes alleen als hash', async () => {
+  const { user, email } = await localUser('mfa1@voorbeeld.nl');
+  await assert.rejects(h.totpStart({ user, repo, env: tenv, body: { password: 'fout' } }), { status: 400 });
+  const start = (await h.totpStart({ user, repo, env: tenv, body: { password: PW } })).jsonBody;
+  assert.match(start.uri, /^otpauth:\/\/totp\//);
+  await assert.rejects(h.totpEnable({ user, repo, env: tenv, body: { code: '000000' } }), { status: 400 });
+  const now = new Date();
+  const code = T.code(start.secret, Math.floor(now.getTime() / 30000));
+  const { recoveryCodes } = (await h.totpEnable({ user, repo, env: tenv, body: { code }, now })).jsonBody;
+  assert.equal(recoveryCodes.length, 8);
+  const stored = await repo.getAccount(email);
+  const dump = JSON.stringify(stored);
+  assert.ok(!dump.includes(start.secret));
+  for (const c of recoveryCodes) assert.ok(!dump.includes(c));
+  assert.equal(T.decrypt(stored.totpSecret, tenv), start.secret);
+  await assert.rejects(h.totpStart({ user, repo, env: tenv, body: { password: PW } }), { status: 409 });
+});
+
+test('inloggen met 2FA: zonder code geen sessie, code één keer bruikbaar, herstelcode eenmalig', async () => {
+  const { user, email } = await localUser('mfa2@voorbeeld.nl');
+  const start = (await h.totpStart({ user, repo, env: tenv, body: { password: PW } })).jsonBody;
+  const t0 = new Date();
+  const step = Math.floor(t0.getTime() / 30000);
+  const { recoveryCodes } = (await h.totpEnable({ user, repo, env: tenv, body: { code: T.code(start.secret, step) }, now: t0 })).jsonBody;
+
+  const first = await h.login({ repo, env: tenv, body: { email, password: PW }, now: t0 });
+  assert.equal(first.jsonBody.mfaRequired, true);
+  assert.equal(first.cookies, undefined);
+  const ticket = first.jsonBody.ticket;
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket: 'troep', code: '123456' } }), { status: 401 });
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket, code: '000000' }, now: t0 }), { status: 401 });
+  // De code waarmee 2FA is ingesteld is al gebruikt en werkt niet nog eens; de volgende tijdstap wel.
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket, code: T.code(start.secret, step) }, now: t0 }), { status: 401 });
+  const t1 = new Date(t0.getTime() + 30000);
+  const ok = await h.loginMfa({ repo, env: tenv, body: { ticket, code: T.code(start.secret, step + 1) }, now: t1 });
+  assert.equal(ok.status, 200);
+  assert.ok(ok.cookies[0].value);
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket, code: T.code(start.secret, step + 1) }, now: t1 }), { status: 401 });
+
+  // herstelcode: werkt één keer
+  const again = (await h.login({ repo, env: tenv, body: { email, password: PW }, now: t1 })).jsonBody.ticket;
+  const rec = await h.loginMfa({ repo, env: tenv, body: { ticket: again, code: recoveryCodes[0].toUpperCase() }, now: t1 });
+  assert.equal(rec.jsonBody.recoveryCodesLeft, 7);
+  const again2 = (await h.login({ repo, env: tenv, body: { email, password: PW }, now: t1 })).jsonBody.ticket;
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket: again2, code: recoveryCodes[0] }, now: t1 }), { status: 401 });
+});
+
+test('2FA: te veel foute codes blokkeren; verlopen ticket werkt niet', async () => {
+  const { user, email } = await localUser('mfa3@voorbeeld.nl');
+  const start = (await h.totpStart({ user, repo, env: tenv, body: { password: PW } })).jsonBody;
+  const t0 = new Date();
+  await h.totpEnable({ user, repo, env: tenv, body: { code: T.code(start.secret, Math.floor(t0.getTime() / 30000)) }, now: t0 });
+  const ticket = (await h.login({ repo, env: tenv, body: { email, password: PW }, now: t0 })).jsonBody.ticket;
+  for (let i = 0; i < 5; i++) await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket, code: '000000' }, now: t0 }), { status: 401 });
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket, code: '000000' }, now: t0 }), { status: 429 });
+  await assert.rejects(h.loginMfa({ repo, env: tenv, body: { ticket, code: '000000' }, now: new Date(t0.getTime() + 6 * 60000) }), { status: 401 });
+});
+
+test('2FA uitzetten vraagt wachtwoord en code; reset door beheerder zet 2FA ook uit', async () => {
+  const { user, email } = await localUser('mfa4@voorbeeld.nl');
+  const start = (await h.totpStart({ user, repo, env: tenv, body: { password: PW } })).jsonBody;
+  const t0 = new Date();
+  const step = Math.floor(t0.getTime() / 30000);
+  await h.totpEnable({ user, repo, env: tenv, body: { code: T.code(start.secret, step) }, now: t0 });
+  await assert.rejects(h.totpDisable({ user, repo, env: tenv, body: { password: PW, code: '000000' }, now: t0 }), { status: 400 });
+  await h.totpDisable({ user, repo, env: tenv, body: { password: PW, code: T.code(start.secret, step + 1) }, now: new Date(t0.getTime() + 30000) });
+  assert.equal((await repo.getAccount(email)).totpSecret, '');
+  // opnieuw aanzetten en dan resetten
+  const s2 = (await h.totpStart({ user, repo, env: tenv, body: { password: PW } })).jsonBody;
+  await h.totpEnable({ user, repo, env: tenv, body: { code: T.code(s2.secret, step + 2) }, now: new Date(t0.getTime() + 60000) });
+  assert.ok((await repo.getAccount(email)).totpSecret);
+  await h.resetAccount({ user: admin, repo, params: { email } });
+  assert.equal((await repo.getAccount(email)).totpSecret, '');
+});

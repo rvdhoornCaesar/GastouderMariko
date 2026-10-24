@@ -101,14 +101,21 @@
 <main id="login" hidden>
   <form class="card" id="loginForm">
     <h2>Inloggen</h2>
-    <label for="loginEmail">E-mailadres</label>
-    <input type="email" id="loginEmail" autocomplete="username" required>
-    <label for="loginPw" style="margin-top:8px">Wachtwoord</label>
-    <input type="password" id="loginPw" autocomplete="current-password" required>
+    <div id="loginStep1">
+      <label for="loginEmail">E-mailadres</label>
+      <input type="email" id="loginEmail" autocomplete="username" required>
+      <label for="loginPw" style="margin-top:8px">Wachtwoord</label>
+      <input type="password" id="loginPw" autocomplete="current-password" required>
+    </div>
+    <div id="loginStep2" hidden>
+      <p class="hint">Vul de 6-cijferige code uit je authenticator-app in. Telefoon kwijt? Gebruik een herstelcode.</p>
+      <label for="loginCode">Code</label>
+      <input type="text" id="loginCode" autocomplete="one-time-code" inputmode="text" autocapitalize="off" spellcheck="false">
+    </div>
     <div class="err" id="loginErr"></div>
     <button class="btn" style="margin-top:10px">Inloggen</button>
-    <p class="hint" style="margin-top:14px">Of log in met je Microsoft-account:</p>
-    <a class="btn secondary" href="/.auth/login/aad?post_login_redirect_uri=/" style="display:inline-block;text-decoration:none;padding:10px 16px">Inloggen met Microsoft</a>
+    <p class="hint" style="margin-top:14px" id="loginMsHint">Of log in met je Microsoft-account:</p>
+    <a class="btn secondary" id="loginMs" href="/.auth/login/aad?post_login_redirect_uri=/" style="display:inline-block;text-decoration:none;padding:10px 16px">Inloggen met Microsoft</a>
   </form>
 </main>
 
@@ -264,8 +271,34 @@
     </div>
 
     <div class="card" id="ownPwCard" hidden>
-      <h2>Mijn wachtwoord</h2>
+      <h2>Mijn account</h2>
       <button class="btn secondary" id="pwOpen">Wachtwoord wijzigen</button>
+      <h3 style="font-size:1rem;margin:16px 0 4px">Tweestapsverificatie</h3>
+      <p class="hint" id="mfaState"></p>
+      <form id="mfaStartForm" hidden>
+        <p class="hint">Je krijgt een geheime sleutel voor een authenticator-app (bijv. Microsoft Authenticator of Google Authenticator). Bevestig met je wachtwoord.</p>
+        <label for="mfaStartPw">Wachtwoord</label>
+        <input type="password" id="mfaStartPw" autocomplete="current-password" required>
+        <button class="btn" style="margin-top:8px">Doorgaan</button>
+      </form>
+      <form id="mfaEnableForm" hidden>
+        <p class="hint">Voeg dit toe in je authenticator-app: kies "sleutel handmatig invoeren" en typ de sleutel hieronder, of open op je telefoon <a id="mfaLink" href="#">deze koppeling</a>. Vul daarna de code in die de app toont.</p>
+        <p style="font-family:monospace;font-size:1.1rem;overflow-wrap:anywhere;margin:6px 0" id="mfaSecret"></p>
+        <label for="mfaCode">Code uit de app</label>
+        <input type="text" id="mfaCode" inputmode="numeric" autocomplete="one-time-code" required>
+        <button class="btn" style="margin-top:8px">Aanzetten</button>
+      </form>
+      <div id="mfaCodes" class="card" hidden></div>
+      <form id="mfaOffForm" hidden>
+        <label for="mfaOffPw">Wachtwoord</label>
+        <input type="password" id="mfaOffPw" autocomplete="current-password" required>
+        <label for="mfaOffCode" style="margin-top:8px">Code uit de app (of een herstelcode)</label>
+        <input type="text" id="mfaOffCode" autocomplete="one-time-code" required>
+        <button class="btn secondary" style="margin-top:8px">Uitzetten</button>
+      </form>
+      <button class="btn secondary" id="mfaOffOpen" hidden>Tweestapsverificatie uitzetten</button>
+      <button class="btn" id="mfaOn" hidden>Tweestapsverificatie aanzetten</button>
+      <div class="err" id="mfaErr"></div>
     </div>
 
     <div class="card">
@@ -306,7 +339,7 @@
       body: body ? JSON.stringify(body) : undefined,
     });
     if (res.status === 401) {
-      if (path === 'auth/login') { /* verkeerde gegevens: gewone fout hieronder */ }
+      if (path === 'auth/login' || path === 'auth/login-mfa') { /* verkeerde gegevens: gewone fout hieronder */ }
       else { if (mode === 'ms') location.href = LOGIN; else showLogin(); throw Object.assign(new Error('Niet ingelogd'), { noAccess: true }); }
     }
     if (res.status === 204) return null;
@@ -946,11 +979,31 @@
     $('loginErr').textContent = '';
     try {
       mode = 'local';
-      const r = await api('POST', 'auth/login', { email: $('loginEmail').value, password: $('loginPw').value });
-      $('loginPw').value = '';
+      const r = mfaTicket
+        ? await api('POST', 'auth/login-mfa', { ticket: mfaTicket, code: $('loginCode').value })
+        : await api('POST', 'auth/login', { email: $('loginEmail').value, password: $('loginPw').value });
+      if (r.mfaRequired) {
+        mfaTicket = r.ticket;
+        $('loginStep1').hidden = true; $('loginStep2').hidden = false; $('loginMs').hidden = $('loginMsHint').hidden = true;
+        $('loginCode').focus();
+        return;
+      }
+      resetLoginForm();
+      if (r.recoveryCodesLeft !== undefined) toast(`Herstelcode gebruikt. Je hebt er nog ${r.recoveryCodesLeft}.`);
       await start(r.mustChange);
-    } catch (e) { if (!e.noAccess) $('loginErr').textContent = e.message; }
+    } catch (e) {
+      if (e.noAccess) return;
+      $('loginErr').textContent = e.message;
+      // Ticket verlopen of geblokkeerd: opnieuw beginnen met het wachtwoord.
+      if (mfaTicket && /verlopen|Te veel/.test(e.message)) resetLoginForm();
+    }
   });
+  let mfaTicket = null;
+  function resetLoginForm() {
+    mfaTicket = null;
+    $('loginPw').value = ''; $('loginCode').value = '';
+    $('loginStep1').hidden = false; $('loginStep2').hidden = true; $('loginMs').hidden = $('loginMsHint').hidden = false;
+  }
   $('logout').addEventListener('click', async (ev) => {
     ev.preventDefault();
     if (mode === 'ms') { location.href = '/.auth/logout?post_logout_redirect_uri=/'; return; }
@@ -971,13 +1024,54 @@
   $('pwOpen').onclick = () => showPwChange(false);
   $('pwCancel').onclick = () => showOnly('app');
 
+  // --- Tweestapsverificatie (eigen account) ---
+  function renderMfa() {
+    const on = !!(me && me.totp);
+    $('mfaState').textContent = on ? 'Aan: bij het inloggen is naast je wachtwoord een code uit je authenticator-app nodig.' : 'Uit. Met een extra code uit een app op je telefoon is je account veel beter beveiligd.';
+    $('mfaOn').hidden = on || !$('mfaStartForm').hidden || !$('mfaEnableForm').hidden;
+    $('mfaOffOpen').hidden = !on || !$('mfaOffForm').hidden;
+  }
+  $('mfaOn').onclick = () => { $('mfaStartForm').hidden = false; renderMfa(); };
+  $('mfaOffOpen').onclick = () => { $('mfaOffForm').hidden = false; renderMfa(); };
+  $('mfaStartForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault(); $('mfaErr').textContent = '';
+    try {
+      const r = await api('POST', 'auth/totp/start', { password: $('mfaStartPw').value });
+      $('mfaStartForm').reset(); $('mfaStartForm').hidden = true;
+      $('mfaSecret').textContent = r.secret.replace(/(.{4})/g, '$1 ').trim();
+      $('mfaLink').href = r.uri;
+      $('mfaEnableForm').hidden = false; renderMfa();
+    } catch (e) { if (!e.noAccess) $('mfaErr').textContent = e.message; }
+  });
+  $('mfaEnableForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault(); $('mfaErr').textContent = '';
+    try {
+      const r = await api('POST', 'auth/totp/enable', { code: $('mfaCode').value });
+      $('mfaEnableForm').reset(); $('mfaEnableForm').hidden = true; $('mfaSecret').textContent = '';
+      me.totp = true;
+      $('mfaCodes').hidden = false;
+      $('mfaCodes').innerHTML = `<p class="hint"><strong>Bewaar deze herstelcodes</strong> op een veilige plek (bijv. in een wachtwoordmanager). Elke code werkt één keer en je ziet ze alleen nu. Je hebt ze nodig als je je telefoon kwijtraakt.</p>
+        <p style="font-family:monospace;font-size:1.1rem;line-height:1.7;margin:6px 0">${r.recoveryCodes.map(esc).join('<br>')}</p><button class="btn secondary small" id="mfaCodesClose">Ik heb ze bewaard</button>`;
+      $('mfaCodesClose').onclick = () => { $('mfaCodes').hidden = true; $('mfaCodes').innerHTML = ''; };
+      renderMfa();
+    } catch (e) { if (!e.noAccess) $('mfaErr').textContent = e.message; }
+  });
+  $('mfaOffForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault(); $('mfaErr').textContent = '';
+    try {
+      await api('POST', 'auth/totp/disable', { password: $('mfaOffPw').value, code: $('mfaOffCode').value });
+      $('mfaOffForm').reset(); $('mfaOffForm').hidden = true; me.totp = false; renderMfa();
+    } catch (e) { if (!e.noAccess) $('mfaErr').textContent = e.message; }
+  });
+
   let accounts = [];
   function renderAccounts() {
     const card = $('accountsCard');
     card.hidden = !(me && me.admin);
     $('ownPwCard').hidden = !(me && me.kind === 'local');
+    renderMfa();
     if (card.hidden) return;
-    $('accountList').innerHTML = accounts.length ? accounts.map((a) => `<div class="entry"><div style="min-width:0;overflow-wrap:anywhere"><div class="who">${esc(a.email)}${a.mustChange ? '<span class="tag">tijdelijk wachtwoord</span>' : ''}</div>
+    $('accountList').innerHTML = accounts.length ? accounts.map((a) => `<div class="entry"><div style="min-width:0;overflow-wrap:anywhere"><div class="who">${esc(a.email)}${a.mustChange ? '<span class="tag">tijdelijk wachtwoord</span>' : ''}${a.totp ? '<span class="tag">2FA</span>' : ''}</div>
         <div class="meta">${a.lastLogin ? 'laatst ingelogd ' + nlDate(a.lastLogin.slice(0, 10)) : 'nog niet ingelogd'}</div></div>
         <div style="display:flex;gap:4px;align-items:center;flex-shrink:0"><button class="btn secondary small" data-resetacc="${esc(a.email)}">Nieuw ww</button>
         <button class="link" data-rmacc="${esc(a.email)}" title="Verwijderen">✕</button></div></div>`).join('') : '<div class="empty">Nog geen lokale accounts.</div>';
@@ -1006,7 +1100,7 @@
   });
   $('accountList').addEventListener('click', async (ev) => {
     const reset = ev.target.dataset.resetacc, rm = ev.target.dataset.rmacc;
-    if (reset && confirm(`Nieuw tijdelijk wachtwoord voor ${reset}? Het oude wachtwoord werkt dan niet meer en de gebruiker wordt overal uitgelogd.`)) {
+    if (reset && confirm(`Nieuw tijdelijk wachtwoord voor ${reset}? Het oude wachtwoord werkt dan niet meer, tweestapsverificatie wordt uitgezet en de gebruiker wordt overal uitgelogd.`)) {
       const r = await guard(() => api('POST', `accounts/${encodeURIComponent(reset)}/reset`));
       if (r) { showTemp(reset, r.tempPassword); await loadAccounts(); }
     }

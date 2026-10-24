@@ -1,6 +1,7 @@
 const { HttpError } = require('./errors');
 const { fixedUsers, sessionToken, sessionCookie, expiredCookie, SESSION_DAYS } = require('./auth');
 const P = require('./passwords');
+const T = require('./totp');
 const v = require('./validation');
 
 const newId = () => Math.random().toString(36).slice(2, 10).padEnd(8, '0');
@@ -100,8 +101,9 @@ async function putUsers({ user, repo, env, body }) {
 const MAX_FAILED = 5;   // na elke 5 mislukte pogingen een blokkade van 15 minuten, steeds twee keer zo lang (max. een dag)
 const lockMinutes = (count) => Math.min(15 * 2 ** (Math.floor(count / MAX_FAILED) - 1), 24 * 60);
 const throttleKey = (email) => P.hashToken(`login:${email}`);
-const toAccount = (e) => ({ email: e.rowKey, name: e.name, role: e.role, instanceId: e.instanceId, passwordHash: e.passwordHash, mustChange: e.mustChange, createdAt: e.createdAt, lastLogin: e.lastLogin });
-const publicAccount = ({ email, name, role, instanceId, mustChange, createdAt, lastLogin }) => ({ email, name, role, instanceId, mustChange: !!mustChange, createdAt, lastLogin: lastLogin || null });
+const toAccount = (e) => ({ email: e.rowKey, name: e.name, role: e.role, instanceId: e.instanceId, passwordHash: e.passwordHash, mustChange: e.mustChange, createdAt: e.createdAt, lastLogin: e.lastLogin,
+  totpSecret: e.totpSecret, totpPending: e.totpPending, totpLastStep: e.totpLastStep, recoveryCodes: e.recoveryCodes });
+const publicAccount = ({ email, name, role, instanceId, mustChange, createdAt, lastLogin, totpSecret }) => ({ email, name, role, instanceId, mustChange: !!mustChange, totp: !!totpSecret, createdAt, lastLogin: lastLogin || null });
 
 async function checkThrottle(repo, key, now) {
   const t = await repo.getThrottle(key);
@@ -114,7 +116,7 @@ async function recordFailure(repo, key, t, now) {
   await repo.setThrottle(key, { count, lockedUntil });
 }
 
-async function login({ repo, body, now = new Date() }) {
+async function login({ repo, body, env, now = new Date() }) {
   const raw = String((body && body.email) ?? '').trim().toLowerCase().slice(0, 200);
   const password = typeof (body && body.password) === 'string' ? body.password.slice(0, 1024) : '';
   let email = '';
@@ -128,13 +130,104 @@ async function login({ repo, body, now = new Date() }) {
     await recordFailure(repo, key, throttle, now);
     throw new HttpError(401, 'E-mailadres of wachtwoord klopt niet.');
   }
+  if (entity.totpSecret) {
+    // Wachtwoord klopt, maar er is nog een code nodig. De teller wordt pas na de tweede stap gewist.
+    return { status: 200, jsonBody: { mfaRequired: true, ticket: T.makeTicket(email, now, env) } };
+  }
   await repo.clearThrottle(key);
+  return startSession(repo, entity, now);
+}
+
+async function startSession(repo, entity, now) {
+  const email = entity.rowKey;
   const token = P.newToken();
   const expiresAt = new Date(now.getTime() + SESSION_DAYS * 86400000).toISOString();
   await repo.createSession(P.hashToken(token), { email, createdAt: now.toISOString(), expiresAt });
   await repo.saveAccount({ ...toAccount(entity), lastLogin: now.toISOString() });
   try { await repo.purgeExpiredSessions(now.toISOString()); } catch { /* opruimen mag falen */ }
   return { status: 200, jsonBody: { email, name: entity.name || email, mustChange: !!entity.mustChange }, cookies: [sessionCookie(token)] };
+}
+
+// Controleert een code uit de authenticator-app of een herstelcode. Geeft de bij te werken velden terug, of null.
+function checkSecondFactor(entity, input, now, env) {
+  const secret = T.decrypt(entity.totpSecret, env);
+  const step = T.verify(secret, input, now, entity.totpLastStep);
+  if (step) return { totpLastStep: step };
+  const hash = T.hashRecovery(input);
+  const codes = JSON.parse(entity.recoveryCodes || '[]');
+  if (T.normalizeRecovery(input).length === 10 && codes.includes(hash)) return { recoveryCodes: JSON.stringify(codes.filter((c) => c !== hash)), usedRecovery: true };
+  return null;
+}
+
+async function loginMfa({ repo, body, env, now = new Date() }) {
+  const email = T.readTicket(body && body.ticket, now, env);
+  if (!email) throw new HttpError(401, 'Inloggen is verlopen. Log opnieuw in.');
+  const key = throttleKey(email);
+  const throttle = await checkThrottle(repo, key, now);
+  const entity = await repo.getAccount(email);
+  const patch = entity && entity.totpSecret ? checkSecondFactor(entity, body && body.code, now, env) : null;
+  if (!patch) {
+    await recordFailure(repo, key, throttle, now);
+    throw new HttpError(401, 'De code klopt niet.');
+  }
+  const { usedRecovery, ...fields } = patch;
+  const updated = { ...entity, ...fields };
+  await repo.saveAccount({ ...toAccount(updated), ...fields });
+  await repo.clearThrottle(key);
+  const res = await startSession(repo, updated, now);
+  if (usedRecovery) res.jsonBody.recoveryCodesLeft = JSON.parse(updated.recoveryCodes).length;
+  return res;
+}
+
+// Tweestapsverificatie instellen: eerst geheim aanmaken (wachtwoord nodig), dan met een eerste code bevestigen.
+async function confirmPassword(user, repo, password, now) {
+  if (user.kind !== 'local') throw new HttpError(400, 'Alleen lokale accounts hebben tweestapsverificatie in deze app.');
+  const key = throttleKey(user.email);
+  const throttle = await checkThrottle(repo, key, now);
+  const entity = await repo.getAccount(user.email);
+  if (!(await P.verifyPassword(typeof password === 'string' ? password : '', entity.passwordHash))) {
+    await recordFailure(repo, key, throttle, now);
+    throw new HttpError(400, 'Het wachtwoord klopt niet.');
+  }
+  return entity;
+}
+
+async function totpStart({ user, repo, env, body, now = new Date() }) {
+  const entity = await confirmPassword(user, repo, body && body.password, now);
+  if (entity.totpSecret) throw new HttpError(409, 'Tweestapsverificatie staat al aan.');
+  const secret = T.newSecret();
+  await repo.saveAccount({ ...toAccount(entity), totpPending: T.encrypt(secret, env) });
+  return { status: 200, jsonBody: { secret, uri: T.otpauthUri(secret, user.email) } };
+}
+
+async function totpEnable({ user, repo, env, body, now = new Date() }) {
+  if (user.kind !== 'local') throw new HttpError(400, 'Alleen lokale accounts hebben tweestapsverificatie in deze app.');
+  const key = throttleKey(user.email);
+  const throttle = await checkThrottle(repo, key, now);
+  const entity = await repo.getAccount(user.email);
+  if (!entity.totpPending) throw new HttpError(400, 'Begin opnieuw met instellen.');
+  const secret = T.decrypt(entity.totpPending, env);
+  const step = T.verify(secret, body && body.code, now, 0);
+  if (!step) {
+    await recordFailure(repo, key, throttle, now);
+    throw new HttpError(400, 'De code klopt niet. Controleer de klok van je telefoon en probeer het opnieuw.');
+  }
+  const recoveryCodes = Array.from({ length: 8 }, () => T.newRecoveryCode());
+  await repo.saveAccount({ ...toAccount(entity), totpSecret: T.encrypt(secret, env), totpPending: '', totpLastStep: step, recoveryCodes: JSON.stringify(recoveryCodes.map(T.hashRecovery)) });
+  await repo.clearThrottle(key);
+  return { status: 200, jsonBody: { recoveryCodes } };
+}
+
+async function totpDisable({ user, repo, env, body, now = new Date() }) {
+  const entity = await confirmPassword(user, repo, body && body.password, now);
+  if (!entity.totpSecret) throw new HttpError(400, 'Tweestapsverificatie staat niet aan.');
+  if (!checkSecondFactor(entity, body && body.code, now, env)) {
+    const key = throttleKey(user.email);
+    await recordFailure(repo, key, await repo.getThrottle(key), now);
+    throw new HttpError(400, 'De code klopt niet.');
+  }
+  await repo.saveAccount({ ...toAccount(entity), totpSecret: '', totpPending: '', totpLastStep: 0, recoveryCodes: '[]' });
+  return { status: 200, jsonBody: { ok: true } };
 }
 
 async function logout({ repo, headers }) {
@@ -144,7 +237,7 @@ async function logout({ repo, headers }) {
 }
 
 async function me({ user }) {
-  return { status: 200, jsonBody: { kind: user.kind, email: user.email, name: user.name, admin: user.admin, role: user.role, mustChange: user.mustChange } };
+  return { status: 200, jsonBody: { kind: user.kind, email: user.email, name: user.name, admin: user.admin, role: user.role, mustChange: user.mustChange, totp: !!user.totp } };
 }
 
 async function changePassword({ user, repo, body, now = new Date() }) {
@@ -194,7 +287,7 @@ async function resetAccount({ user, repo, params }) {
   const entity = await repo.getAccount(email);
   if (!entity) throw new HttpError(404, 'Account niet gevonden.');
   const tempPassword = P.generateTempPassword();
-  await repo.saveAccount({ ...toAccount(entity), passwordHash: await P.hashPassword(tempPassword), mustChange: true });
+  await repo.saveAccount({ ...toAccount(entity), passwordHash: await P.hashPassword(tempPassword), mustChange: true, totpSecret: '', totpPending: '', totpLastStep: 0, recoveryCodes: '[]' }); // ook 2FA terugzetten: telefoon kwijt is een gewone reden voor een reset
   await repo.deleteSessionsOf(email);
   await repo.clearThrottle(throttleKey(email));
   return { status: 200, jsonBody: { tempPassword } };
@@ -209,4 +302,4 @@ async function deleteAccount({ user, repo, params }) {
   return { status: 204 };
 }
 
-module.exports = { login, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putOpening, putOwnChildren, putUsers };
+module.exports = { login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putOpening, putOwnChildren, putUsers };

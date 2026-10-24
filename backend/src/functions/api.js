@@ -63,9 +63,13 @@ route('putUsers', ['PUT'], 'settings/users', handlers.putUsers);
 
 // Inloggen met een lokaal account
 route('login', ['POST'], 'auth/login', handlers.login, { auth: 'public' });
+route('loginMfa', ['POST'], 'auth/login-mfa', handlers.loginMfa, { auth: 'public' });
 route('logout', ['POST'], 'auth/logout', handlers.logout, { auth: 'public' });
 route('me', ['GET'], 'me', handlers.me, { allowMustChange: true });
 route('changePassword', ['POST'], 'auth/change-password', handlers.changePassword, { auth: 'session', allowMustChange: true });
+route('totpStart', ['POST'], 'auth/totp/start', handlers.totpStart, { auth: 'session' });
+route('totpEnable', ['POST'], 'auth/totp/enable', handlers.totpEnable, { auth: 'session' });
+route('totpDisable', ['POST'], 'auth/totp/disable', handlers.totpDisable, { auth: 'session' });
 // Accountbeheer: alleen voor beheerders met een Microsoft-login
 route('listAccounts', ['GET'], 'accounts', handlers.listAccounts, { auth: 'ms' });
 route('createAccount', ['POST'], 'accounts', handlers.createAccount, { auth: 'ms' });
