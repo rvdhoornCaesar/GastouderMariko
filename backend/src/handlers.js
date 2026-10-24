@@ -64,13 +64,19 @@ async function deleteEntry({ repo, params }) {
 // "fixedUsers" komen uit de app-setting ALLOWED_USERS en kunnen niet in de app worden verwijderd.
 async function getSettings({ user, repo, env }) {
   const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: await repo.getUsers(), fixedUsers: fixedUsers(env), me: user.email, opening } };
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: await repo.getUsers(), fixedUsers: fixedUsers(env), me: user.email, opening, ownChildren: await repo.getOwnChildren() } };
 }
 
 async function putRates({ repo, body }) {
   const rates = v.parseRates(body && body.rates, newId);
   await repo.setRates(rates);
   return { status: 200, jsonBody: { rates } };
+}
+
+async function putOwnChildren({ repo, body }) {
+  const ownChildren = v.parseOwnChildren(body && body.ownChildren, newId);
+  await repo.setOwnChildren(ownChildren);
+  return { status: 200, jsonBody: { ownChildren } };
 }
 
 async function putOpening({ repo, body }) {
@@ -87,4 +93,4 @@ async function putUsers({ user, repo, env, body }) {
   return { status: 200, jsonBody: { users } };
 }
 
-module.exports = { listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putOpening, putUsers };
+module.exports = { listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putOpening, putOwnChildren, putUsers };

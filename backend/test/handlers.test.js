@@ -220,3 +220,18 @@ test('contract: alleen de periode is verplicht; naam, nummer, uren en tijden zij
     (e) => e.status === 400 && e.message.startsWith('Contract 2:'));
   await call(h.deleteChild, { params: { id: min.id } });
 });
+
+test('eigen kinderen: opslaan, sorteren op geboortedatum, validatie', async () => {
+  const res = await call(h.putOwnChildren, { body: { ownChildren: [{ firstName: ' Sam ', birthDate: '2021-05-06' }, { firstName: 'Noor', birthDate: '2016-01-02' }] } });
+  assert.deepEqual(res.jsonBody.ownChildren.map((c) => [c.firstName, c.birthDate]), [['Noor', '2016-01-02'], ['Sam', '2021-05-06']]);
+  assert.ok(res.jsonBody.ownChildren.every((c) => c.id));
+  assert.deepEqual((await call(h.getSettings)).jsonBody.ownChildren, res.jsonBody.ownChildren);
+  const bad = (list) => assert.rejects(call(h.putOwnChildren, { body: { ownChildren: list } }), { status: 400 });
+  await bad([{ firstName: ' ', birthDate: '2021-05-06' }]);
+  await bad([{ firstName: 'A' }]);
+  await bad([{ firstName: 'A', birthDate: '2021-02-30' }]);
+  await bad([{ firstName: 'A', birthDate: '2999-01-01' }]);
+  await assert.rejects(call(h.putOwnChildren, { body: {} }), { status: 400 });
+  // leeg maken mag
+  assert.deepEqual((await call(h.putOwnChildren, { body: { ownChildren: [] } })).jsonBody.ownChildren, []);
+});

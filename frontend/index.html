@@ -120,6 +120,7 @@
     <div class="card">
       <h2 id="dayTitle">Vandaag</h2>
       <div id="dayEntries"></div>
+      <div class="warn" id="dayCap"></div>
       <div class="total"><span>Totaal deze dag</span><span class="hours" id="dayTotal">0:00</span></div>
     </div>
 
@@ -139,6 +140,7 @@
         <div style="grid-column: 1 / -1"><label for="note">Opmerking (optioneel)</label><input type="text" id="note"></div>
       </div>
       <div class="warn" id="entryWarn"></div>
+      <div class="warn" id="entryCap"></div>
       <div class="err" id="entryErr"></div>
       <button class="btn" type="submit">Toevoegen</button>
     </form>
@@ -190,6 +192,21 @@
     </div>
 
     <div class="card">
+      <h2>Eigen kinderen</h2>
+      <p class="hint"><strong>Maximaal aantal kinderen.</strong> Hoeveel kinderen je mag opvangen, hangt af van hun leeftijd. Je mag per dag in totaal 6 kinderen van 0 tot 13 jaar tegelijk opvangen. Daarnaast geldt: maximaal 5 kinderen tot 4 jaar, maximaal 4 kinderen tot 2 jaar en maximaal 2 baby’s tot 1 jaar tegelijk. Je eigen kinderen tot 8 jaar tellen mee.
+        <a href="https://ondernemersplein.overheid.nl/wetten-en-regels/eisen-aan-gastouders/#art:hoeveel-kinderen-mag-een-gastouder-opvangen" target="_blank" rel="noopener">Bron: Ondernemersplein (RVO)</a><br>
+        <strong>Let op:</strong> ook vriendjes en vriendinnetjes onder de 13 jaar die komen spelen tellen mee, ook als ze in de tuin zijn. Dit staat niet op de pagina hierboven; vraag het na bij je gastouderbureau.</p>
+      <div id="ownList"></div>
+      <div class="hint" id="ownSummary" style="margin-top: 8px"></div>
+      <form class="grid2" id="ownForm" style="margin-top: 10px">
+        <div><label for="ownName">Voornaam</label><input id="ownName" required></div>
+        <div><label for="ownBirth">Geboortedatum</label><input type="date" id="ownBirth" required></div>
+        <div class="wide"><button class="btn secondary">Eigen kind toevoegen</button></div>
+      </form>
+      <div class="err" id="ownErr"></div>
+    </div>
+
+    <div class="card">
       <h2>Openingstijden en toeslag</h2>
       <p class="hint">Binnen de openingstijden geldt het gewone uurtarief. Uren buiten de openingstijden krijgen een toeslag: het tarief wordt vermenigvuldigd met de factor (2 = dubbel tarief, 1 = geen toeslag). Op een gesloten dag valt alles buiten de openingstijden.</p>
       <div id="openingList"></div>
@@ -223,7 +240,7 @@
   const euro = (n) => n.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  const state = { children: [], entries: [], settings: { rates: [], users: [], fixedUsers: [], me: '', opening: { days: [], factor: 1 } } };
+  const state = { children: [], entries: [], settings: { rates: [], users: [], fixedUsers: [], me: '', opening: { days: [], factor: 1 }, ownChildren: [] } };
   const loadedMonths = new Set();
 
   // --- API ---
@@ -311,6 +328,40 @@
   // Melding als een datum buiten de periode van het contract valt (invullen blijft mogelijk).
   const contractWarning = (k, date) => (k.start && k.end && (date < k.start || date > k.end)
     ? `Let op: ${nlDate(date)} valt buiten het contract (${nlDate(k.start)} t/m ${nlDate(k.end)}).` : '');
+  // Te veel kinderen tegelijk: totaal maximaal 6, waarvan maximaal 5 jonger dan 4 jaar, 4 jonger dan 2 jaar en 2 jonger dan 1 jaar.
+  // Eigen kinderen tot 8 jaar tellen mee en zijn de hele dag aanwezig; één kind telt één keer, ook met meerdere registraties.
+  // Een registratie die je nog aan het invullen bent kun je als 'extra' meegeven.
+  const CAP = { total: 6, u4: 5, u2: 4, u1: 2 };
+  const hm = (min) => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
+  function capacityIssues(date, extra) {
+    const spans = new Map();
+    [...state.entries.filter((e) => e.date === date), ...(extra ? [extra] : [])].forEach((e) => {
+      const x = findContract(e.contractId);
+      if (!x || !e.start || !e.end || toMin(e.end) <= toMin(e.start)) return;
+      const c = spans.get(x.child.id) || { birth: x.child.birthDate, list: [] };
+      c.list.push([toMin(e.start), toMin(e.end)]);
+      spans.set(x.child.id, c);
+    });
+    const own = state.settings.ownChildren.map((c) => ageMonths(c.birthDate, date)).filter((m) => m < 8 * 12);
+    const points = [...new Set([...spans.values()].flatMap((c) => c.list.flat()))].sort((a, b) => a - b);
+    const issues = [];
+    for (let i = 0; i < points.length - 1; i++) {
+      const t = points[i], next = points[i + 1];
+      const present = [...spans.values()].filter((c) => c.list.some(([a, b]) => a <= t && t < b)).map((c) => (c.birth ? ageMonths(c.birth, date) : null));
+      if (!present.length) continue;
+      const ages = [...present, ...own];
+      const counts = { total: ages.length, u4: ages.filter((m) => m !== null && m < 48).length,
+        u2: ages.filter((m) => m !== null && m < 24).length, u1: ages.filter((m) => m !== null && m < 12).length };
+      Object.keys(CAP).filter((k) => counts[k] > CAP[k]).forEach((k) => {
+        const last = issues.find((x) => x.kind === k && x.to === t);
+        if (last) { last.to = next; last.count = Math.max(last.count, counts[k]); } else issues.push({ kind: k, from: t, to: next, count: counts[k] });
+      });
+    }
+    return issues;
+  }
+  const CAP_LABEL = { total: 'kinderen tegelijk', u4: 'kinderen jonger dan 4 jaar tegelijk', u2: 'kinderen jonger dan 2 jaar tegelijk', u1: 'kinderen jonger dan 1 jaar tegelijk' };
+  const capacityLine = (i) => `<div>Let op: ${i.count} ${CAP_LABEL[i.kind]} (maximaal ${CAP[i.kind]}, eigen kinderen meegeteld) van ${hm(i.from)} tot ${hm(i.to)}.</div>`;
+
   // Doorbetaalde vakanties: een contract met vaste tijden (zonder vaste uren) en 'Vakanties doorbetalen' telt de uren van de vaste
   // tijden mee op elke vakantiedag van het kind binnen de contractperiode, tenzij er die dag al uren zijn ingevuld.
   // Bij vaste uren zijn vakanties altijd doorbetaald (de uren tellen elke maand vol mee); zonder vaste uren of tijden vul je het zelf in.
@@ -358,7 +409,20 @@
     $('entryWarn').textContent = x ? contractWarning(x.contract, date) : '';
     const d = prefill && x && scheduleFor(x.contract, date);
     if (d) { $('start').value = d.from; $('end').value = d.to; }
+    updateEntryCap();
   }
+  // Waarschuwing als de registratie die je invult tot te veel kinderen tegelijk leidt (alleen het deel dat overlapt met jouw tijden).
+  function updateEntryCap() {
+    const x = findContract($('contract').value), date = $('day').value, start = $('start').value, end = $('end').value;
+    let html = '';
+    if (x && start && end && toMin(end) > toMin(start)) {
+      const a = toMin(start), b = toMin(end);
+      html = capacityIssues(date, { contractId: x.contract.id, start, end }).filter((i) => i.from < b && i.to > a).map(capacityLine).join('');
+    }
+    $('entryCap').innerHTML = html;
+  }
+  $('start').addEventListener('input', updateEntryCap);
+  $('end').addEventListener('input', updateEntryCap);
 
   async function renderDay(prefill) {
     const day = $('day').value;
@@ -376,6 +440,7 @@
       ? contracts().map((x) => `<option value="${x.contract.id}">${esc(label(x))}</option>`).join('')
       : '<option value="">Voeg eerst een kind + contract toe (tab Kinderen)</option>';
     if (prev) sel.value = prev;
+    $('dayCap').innerHTML = capacityIssues(day).map(capacityLine).join('');
     updateEntryHints(prefill === true);
   }
 
@@ -454,6 +519,7 @@
       if (rate === null) missing = true; else p.rates.add(rate);
     });
     const outsideContract = list.filter((e) => { const x = findContract(e.contractId); return x && contractWarning(x.contract, e.date); }).length;
+    const capDays = [...new Set(list.map((e) => e.date))].filter((d) => capacityIssues(d).length);
     let totMin = 0, totEur = 0;
     const rows = Object.values(per).map((p) => {
       totMin += p.min; totEur += p.eur;
@@ -467,7 +533,8 @@
       ? `<table><tr><th>Kind – contract</th><th class="num">Uren</th><th class="num">Tarief</th><th class="num">Bedrag</th></tr>${rows.join('')}
          <tr><th>Totaal</th><th class="num">${fmt(totMin)}</th><th></th><th class="num">${euro(totEur)}</th></tr></table>
          ${missing ? '<div class="warn">Voor sommige uren is geen tarief bekend (bedrag telt als € 0). Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.</div>' : ''}
-         ${outsideContract ? `<div class="warn">${outsideContract} registratie${outsideContract === 1 ? '' : 's'} ${outsideContract === 1 ? 'valt' : 'vallen'} buiten de contractperiode.</div>` : ''}`
+         ${outsideContract ? `<div class="warn">${outsideContract} registratie${outsideContract === 1 ? '' : 's'} ${outsideContract === 1 ? 'valt' : 'vallen'} buiten de contractperiode.</div>` : ''}
+         ${capDays.length ? `<div class="warn">Op ${capDays.length} dag${capDays.length === 1 ? '' : 'en'} zijn er te veel kinderen tegelijk (${capDays.map(nlDate).join(', ')}). Zie de dag in het tabblad Uren invullen.</div>` : ''}`
       : '<div class="empty">Geen uren in deze maand.</div>';
     $('monthEntries').innerHTML = (list.length ? list.map((e) => entryRow(e, true)).join('') : '<div class="empty">Geen registraties.</div>')
       + (holidayEntries.length ? `<h3 class="subhead">Doorbetaalde vakantiedagen</h3>${holidayEntries.map(holidayRow).join('')}` : '');
@@ -728,7 +795,36 @@
     if (ok) { renderOpening(); $('openingOk').textContent = 'Opgeslagen.'; }
   };
 
+  // Leeftijd in hele maanden: eigen kinderen tellen mee tot hun 8e verjaardag.
+  const ageMonths = (birth, on) => {
+    const b = new Date(birth + 'T12:00'), n = on ? new Date(on + 'T12:00') : new Date();
+    return (n.getFullYear() - b.getFullYear()) * 12 + n.getMonth() - b.getMonth() - (n.getDate() < b.getDate() ? 1 : 0);
+  };
+  const ageText = (birth) => { const m = ageMonths(birth); return m < 24 ? `${m} maanden` : `${Math.floor(m / 12)} jaar`; };
+  const countsOwn = (c) => ageMonths(c.birthDate) < 8 * 12;
+
+  function renderOwnChildren() {
+    const list = state.settings.ownChildren;
+    $('ownList').innerHTML = list.length ? list.map((c) => `<div class="entry"><div><div class="who">${esc(c.firstName)}
+        ${countsOwn(c) ? '<span class="tag">telt mee</span>' : '<span class="tag">telt niet meer mee</span>'}</div>
+        <div class="meta">geboren ${nlDate(c.birthDate)} · ${ageText(c.birthDate)}</div></div>
+        <button class="link" data-rmown="${c.id}" title="Verwijderen">✕</button></div>`).join('') : '<div class="empty">Nog geen eigen kinderen.</div>';
+    const n = list.filter(countsOwn).length;
+    $('ownSummary').textContent = list.length
+      ? `Eigen kinderen die meetellen: ${n}. Indicatie: er is dan plek voor maximaal ${Math.max(0, 6 - n)} gastkinderen tegelijk (6 min ${n}); de maxima voor jonge kinderen gelden daarnaast.` : '';
+  }
+  $('ownForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const c = { firstName: $('ownName').value.trim(), birthDate: $('ownBirth').value };
+    if (await saveSetting($('ownErr'), 'own-children', { ownChildren: [...state.settings.ownChildren, c] }, (res) => { state.settings.ownChildren = res.ownChildren; })) ev.target.reset();
+  });
+  $('ownList').addEventListener('click', (ev) => {
+    const id = ev.target.dataset.rmown;
+    if (id && confirm('Dit eigen kind verwijderen?')) saveSetting($('ownErr'), 'own-children', { ownChildren: state.settings.ownChildren.filter((c) => c.id !== id) }, (res) => { state.settings.ownChildren = res.ownChildren; });
+  });
+
   function renderSettings() {
+    renderOwnChildren();
     const { rates, users, fixedUsers, me } = state.settings;
     $('rateList').innerHTML = rates.length
       ? `<table><tr><th>Van</th><th>Tot en met</th><th class="num">€ / uur</th><th></th></tr>${rates.map((r) =>

@@ -4,7 +4,7 @@ Online urenregistratie voor gastouder Mariko: meerdere kinderen, per kind meerde
 
 ```
 frontend/   Statische site (vanilla HTML/JS) + staticwebapp.config.json (Microsoft-login)
-backend/    Azure Functions-code (Node.js 20, v4-model) met Azure Table Storage; draait als managed functions in de Static Web App
+backend/    Azure Functions-code (Node.js 24, v4-model) met Azure Table Storage; draait als managed functions in de Static Web App
 infra/      Bicep: Static Web App (Free) + Storage
 ```
 
@@ -24,14 +24,15 @@ infra/      Bicep: Static Web App (Free) + Storage
 | GET | `/api/entries?month=JJJJ-MM` | uren van een maand |
 | POST | `/api/entries` | uren toevoegen (`date, contractId, start, end, note`) |
 | DELETE | `/api/entries/{id}` | uren verwijderen |
-| GET | `/api/settings` | algemene tarieven, openingstijden, toegevoegde gebruikers, beheerders en het ingelogde adres |
+| GET | `/api/settings` | algemene tarieven, openingstijden, eigen kinderen, toegevoegde gebruikers, beheerders en het ingelogde adres |
 | PUT | `/api/settings/rates` | lijst algemene tarieven opslaan (`{ rates: [{ from, to, rate }] }`; `to` is tot en met; periodes mogen niet overlappen) |
 | PUT | `/api/settings/opening` | openingstijden en toeslagfactor opslaan (`{ days: [7 × { open, from, to }], factor }`, maandag eerst) |
+| PUT | `/api/settings/own-children` | eigen kinderen opslaan (`{ ownChildren: [{ firstName, birthDate }] }`) |
 | PUT | `/api/settings/users` | lijst toegevoegde gebruikers opslaan (`{ users: [email] }`) |
 
 ## Lokaal draaien
 
-Vereist Node.js 20+, [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) en de [SWA CLI](https://azure.github.io/static-web-apps-cli/).
+Vereist Node.js 22+ (productie en CI draaien op 24), [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) en de [SWA CLI](https://azure.github.io/static-web-apps-cli/).
 
 ```bash
 cd backend
@@ -95,6 +96,8 @@ Per omgeving is één `CNAME`-record nodig bij de registrar:
 ### Instellingen in de app
 Op het tabblad **Instellingen** beheer je:
 - **Algemeen uurtarief:** een lijst met periodes (van, tot en met, € per uur), bijvoorbeeld 1-1 t/m 31-12. “Tot en met” leeg = doorlopend; periodes mogen niet overlappen. De periode van het huidige jaar staat vet. Een contract zonder eigen tarief gebruikt het algemene tarief dat geldt op de datum van elke registratie; een contract met eigen tarief houdt dat. Is er voor een datum geen tarief bekend, dan telt het bedrag als € 0 en toont het overzicht een waarschuwing.
+- **Eigen kinderen:** voornaam en geboortedatum van je eigen kinderen. Ze tellen mee voor het maximum aantal kinderen dat je tegelijk mag opvangen; de app toont daarbij de regels als infotekst en een indicatie van het aantal plekken voor gastkinderen (6 min de eigen kinderen onder 8 jaar). De infotekst volgt [Ondernemersplein/RVO](https://ondernemersplein.overheid.nl/wetten-en-regels/eisen-aan-gastouders/#art:hoeveel-kinderen-mag-een-gastouder-opvangen) (per dag maximaal 6 kinderen van 0 tot 13 jaar tegelijk; maximaal 5 tot 4 jaar, 4 tot 2 jaar en 2 baby's tot 1 jaar; eigen kinderen tot 8 jaar tellen mee) en staat in `frontend/index.html`; pas die tekst aan als de regels wijzigen. Daaronder staat de opmerking dat ook vriendjes en vriendinnetjes onder de 13 jaar die komen spelen meetellen (ook in de tuin); dat komt van de gastouder zelf en staat niet op de Ondernemersplein-pagina. De indicatie rekent de staffels voor jonge kinderen niet door.
+  **Melding bij te veel kinderen tegelijk:** de app telt per tijdstip hoeveel kinderen tegelijk aanwezig zijn (op basis van de ingevulde uren van alle kinderen, plus de eigen kinderen onder 8 jaar, die de hele dag meetellen; één kind telt één keer) en waarschuwt bij meer dan 6, meer dan 5 jonger dan 4 jaar, meer dan 4 jonger dan 2 jaar of meer dan 2 jonger dan 1 jaar. De melding verschijnt tijdens het invullen van de uren (ook bij tijden die uit de vaste tijden zijn ingevuld), boven de lijst van die dag en als regel in het maandoverzicht. Invullen blijft altijd mogelijk. Vriendjes en vriendinnetjes die komen spelen worden niet bijgehouden en tellen dus niet mee in de berekening; eigen kinderen worden ook in de staffels voor jonge kinderen meegeteld (voorzichtig gerekend).
 - **Openingstijden en toeslag:** per weekdag open of gesloten, met een van- en tottijd, plus een *factor buiten openingstijden* (2 = dubbel tarief, 1 = geen toeslag). Een registratie wordt per minuut verdeeld: binnen de openingstijden geldt het tarief, daarbuiten tarief × factor; op een gesloten dag valt alles buiten de openingstijden. Het overzicht toont per contract hoeveel uur buiten de openingstijden viel. Dit geldt voor geregistreerde uren, niet voor vaste uren per maand.
 - **Toegestane gebruikers:** iedereen in deze lijst kan inloggen en ziet dezelfde gegevens. Wie niet in de lijst staat, krijgt na het inloggen het scherm *Geen toegang*. Een toegevoegde gebruiker kan zichzelf niet verwijderen.
 
@@ -134,10 +137,13 @@ Kinderen en contracten uit een eerdere versie hebben nog geen startdatum, t/m da
 - De vooraf ingestelde Microsoft-login van Static Web Apps accepteert werk- en schoolaccounts (Entra ID). Heeft Mariko alleen een persoonlijk Microsoft-account, dan is een eigen app-registratie nodig (custom auth provider).
 - De Bicep-template en de deploy-pipeline zijn niet tegen een echte Azure-omgeving uitgevoerd; controleer na de eerste deploy of `/api/children` ingelogd werkt en uitgelogd een 401 geeft.
 
+### Node-versie
+CI, de deploy-pipeline en de API in de Static Web App draaien op **Node.js 24** (LTS tot april 2028); de runtime van de API staat in `frontend/staticwebapp.config.json` (`apiRuntime`). Weigert Static Web Apps een nieuwere versie, zet `apiRuntime` dan terug op de nieuwste ondersteunde (`node:22`) en pas `node-version` in de workflows daarop aan. De GitHub-acties zelf (`checkout`, `setup-node`, `azure/login`) staan op versies die op Node 24 draaien.
+
 ### Later opschalen
 De API-code is gewone Azure Functions en staat los van de hosting. Groeit het gebruik of heb je een eigen Function App nodig (scaling, monitoring, VNet), dan:
 1. Zet de SKU van de Static Web App in `infra/main.bicep` op `Standard` (ca. € 9 per maand per omgeving).
-2. Voeg een Function App (Consumption, Node 20) toe met dezelfde app-settings (`TABLES_CONNECTION`, `ALLOWED_USERS`) en een `Microsoft.Web/staticSites/linkedBackends`-resource die ernaar verwijst.
+2. Voeg een Function App (Consumption, Node 24) toe met dezelfde app-settings (`TABLES_CONNECTION`, `ALLOWED_USERS`) en een `Microsoft.Web/staticSites/linkedBackends`-resource die ernaar verwijst.
 3. Deploy `backend/` naar die Function App (`Azure/functions-action`) en haal `api_location` uit de Static Web App-deploy; managed functions en een gekoppelde backend kunnen niet naast elkaar bestaan.
 
 De frontend (`/api/...`), de login en de data in Table Storage veranderen niet.
