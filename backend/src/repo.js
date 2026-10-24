@@ -18,7 +18,7 @@ function createRepo(connectionString) {
   };
 
   const toChild = (r) => ({ id: r.rowKey, name: r.name, contracts: JSON.parse(r.contracts || '[]') });
-  const toEntry = (r) => ({ id: r.rowKey, date: r.rowKey.slice(0, 10), contractId: r.contractId, start: r.start, end: r.end, pause: r.pause, note: r.note });
+  const toEntry = (r) => ({ id: r.rowKey, date: r.rowKey.slice(0, 10), contractId: r.contractId, start: r.start, end: r.end, note: r.note });
 
   const listEntries = async (user, filter) => {
     const t = await table('entries');
@@ -54,7 +54,7 @@ function createRepo(connectionString) {
     },
     async saveEntry(user, e) {
       const t = await table('entries');
-      await t.upsertEntity({ partitionKey: user, rowKey: e.id, contractId: e.contractId, start: e.start, end: e.end, pause: e.pause, note: e.note }, 'Replace');
+      await t.upsertEntity({ partitionKey: user, rowKey: e.id, contractId: e.contractId, start: e.start, end: e.end, note: e.note }, 'Replace');
     },
     async deleteEntry(user, id) {
       await (await table('entries')).deleteEntity(user, id);

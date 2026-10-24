@@ -42,7 +42,7 @@ test('kind + contracten aanmaken en teruglezen', async () => {
 test('uren: toevoegen, per maand ophalen, andere gebruiker ziet niets, verwijderen', async () => {
   const [child] = (await call(h.listChildren)).jsonBody;
   const contractId = child.contracts[0].id;
-  const body = { date: '2026-10-21', contractId, start: '08:00', end: '17:00', pause: 60, note: 'x' };
+  const body = { date: '2026-10-21', contractId, start: '08:00', end: '17:00', note: 'x' };
   const created = (await call(h.createEntry, { body })).jsonBody;
   await call(h.createEntry, { body: { ...body, date: '2026-11-01' } });
   await call(h.createEntry, { body: { ...body, date: '2026-09-30' } });
@@ -63,7 +63,7 @@ test('validatie', async () => {
   const ok = { date: '2026-10-21', contractId: child.contracts[0].id, start: '08:00', end: '17:00' };
   for (const bad of [
     { ...ok, date: '2026-02-30' }, { ...ok, start: '9:00' }, { ...ok, end: '07:00' },
-    { ...ok, pause: 600 }, { ...ok, contractId: 'bestaatniet' }, { ...ok, pause: -5 },
+    { ...ok, contractId: 'bestaatniet' }, { ...ok, end: '08:00' },
   ]) await assert.rejects(call(h.createEntry, { body: bad }), { status: 400 });
   await assert.rejects(call(h.createChild, { body: { name: '  ' } }), { status: 400 });
   await assert.rejects(call(h.createChild, { body: { name: 'A', contracts: [{ name: 'k', rate: -1 }] } }), { status: 400 });

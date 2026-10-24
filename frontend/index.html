@@ -106,7 +106,6 @@
       <div class="row">
         <div><label for="start">Van</label><input type="time" id="start" required></div>
         <div><label for="end">Tot</label><input type="time" id="end" required></div>
-        <div><label for="pause">Pauze (min)</label><input type="number" id="pause" min="0" step="5" value="0"></div>
       </div>
       <div class="row">
         <div style="grid-column: 1 / -1"><label for="note">Opmerking (optioneel)</label><input type="text" id="note"></div>
@@ -206,7 +205,7 @@
   // --- helpers ---
   const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
   const fmt = (min) => `${Math.floor(min / 60)}:${pad(min % 60)}`;
-  const entryMin = (e) => toMin(e.end) - toMin(e.start) - (e.pause || 0);
+  const entryMin = (e) => toMin(e.end) - toMin(e.start);
   const contracts = () => state.children.flatMap((c) => c.contracts.map((k) => ({ child: c, contract: k })));
   const findContract = (id) => contracts().find((x) => x.contract.id === id);
   const label = (x) => x ? `${x.child.name} – ${x.contract.name}` : '(verwijderd contract)';
@@ -247,24 +246,24 @@
   function entryRow(e, withDate) {
     const x = findContract(e.contractId);
     return `<div class="entry"><div><div class="who">${withDate ? esc(e.date.split('-').reverse().join('-')) + ' · ' : ''}${esc(label(x))}</div>
-      <div class="meta">${e.start}–${e.end}${e.pause ? ` · pauze ${e.pause} min` : ''}${e.note ? ' · ' + esc(e.note) : ''}</div></div>
+      <div class="meta">${e.start}–${e.end}${e.note ? ' · ' + esc(e.note) : ''}</div></div>
       <div><span class="hours">${fmt(entryMin(e))}</span> <button class="link noprint" data-del="${e.id}" title="Verwijderen">✕</button></div></div>`;
   }
 
   $('entryForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const e = { date: $('day').value, contractId: $('contract').value, start: $('start').value,
-      end: $('end').value, pause: Number($('pause').value) || 0, note: $('note').value.trim() };
+      end: $('end').value, note: $('note').value.trim() };
     const err = $('entryErr');
     if (!e.contractId) return err.textContent = 'Kies een kind/contract.';
-    if (entryMin(e) <= 0) return err.textContent = 'Eindtijd moet na de begintijd liggen (na aftrek pauze).';
+    if (entryMin(e) <= 0) return err.textContent = 'Eindtijd moet na de begintijd liggen.';
     err.textContent = '';
     const btn = ev.submitter; btn.disabled = true;
     const saved = await guard(() => api('POST', 'entries', e));
     btn.disabled = false;
     if (!saved) return;
     state.entries.push(saved);
-    $('note').value = ''; $('pause').value = 0;
+    $('note').value = '';
     renderDay();
   });
 
@@ -315,10 +314,10 @@
   $('print').onclick = () => window.print();
   $('csv').onclick = () => {
     const q = (v) => `"${String(v).replace(/"/g, '""')}"`;
-    const lines = [['Datum', 'Kind', 'Contract', 'Van', 'Tot', 'Pauze (min)', 'Uren', 'Tarief', 'Bedrag', 'Opmerking'].join(';')];
+    const lines = [['Datum', 'Kind', 'Contract', 'Van', 'Tot', 'Uren', 'Tarief', 'Bedrag', 'Opmerking'].join(';')];
     monthEntries().forEach((e) => {
       const x = findContract(e.contractId), h = entryMin(e) / 60;
-      lines.push([e.date, q(x ? x.child.name : ''), q(x ? x.contract.name : ''), e.start, e.end, e.pause || 0,
+      lines.push([e.date, q(x ? x.child.name : ''), q(x ? x.contract.name : ''), e.start, e.end,
         h.toFixed(2).replace('.', ','), rateOf(x).toFixed(2).replace('.', ','), (h * rateOf(x)).toFixed(2).replace('.', ','), q(e.note || '')].join(';'));
     });
     const a = document.createElement('a');

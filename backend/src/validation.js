@@ -42,12 +42,11 @@ function parseChild(body, newId) {
 
 function parseEntry(body) {
   const b = body || {};
-  const e = { date: b.date, contractId: b.contractId, start: b.start, end: b.end, pause: Number(b.pause) || 0, note: text(b.note, 200) };
+  const e = { date: b.date, contractId: b.contractId, start: b.start, end: b.end, note: text(b.note, 200) };
   if (!validDate(e.date)) throw bad('Ongeldige datum.');
   if (typeof e.contractId !== 'string' || !ID.test(e.contractId)) throw bad('Ongeldig contract.');
   if (!TIME.test(e.start || '') || !TIME.test(e.end || '')) throw bad('Ongeldige tijd.');
-  if (!Number.isInteger(e.pause) || e.pause < 0 || e.pause > 720) throw bad('Ongeldige pauze.');
-  if (toMin(e.end) - toMin(e.start) - e.pause <= 0) throw bad('Eindtijd moet na de begintijd liggen (na aftrek pauze).');
+  if (toMin(e.end) <= toMin(e.start)) throw bad('Eindtijd moet na de begintijd liggen.');
   return e;
 }
 

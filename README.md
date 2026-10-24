@@ -22,7 +22,7 @@ infra/      Bicep: Static Web App (Free) + Storage
 | GET / POST | `/api/children` | kinderen met contracten ophalen / kind toevoegen |
 | PUT / DELETE | `/api/children/{id}` | kind (met contracten) opslaan / verwijderen; verwijderde contracten nemen hun uren mee |
 | GET | `/api/entries?month=JJJJ-MM` | uren van een maand |
-| POST | `/api/entries` | uren toevoegen (`date, contractId, start, end, pause, note`) |
+| POST | `/api/entries` | uren toevoegen (`date, contractId, start, end, note`) |
 | DELETE | `/api/entries/{id}` | uren verwijderen |
 
 ## Lokaal draaien
