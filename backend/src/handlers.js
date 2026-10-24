@@ -64,7 +64,7 @@ async function deleteEntry({ repo, params }) {
 // "fixedUsers" komen uit de app-setting ALLOWED_USERS en kunnen niet in de app worden verwijderd.
 async function getSettings({ user, repo, env }) {
   const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: await repo.getUsers(), fixedUsers: fixedUsers(env), me: user.email, opening, ownChildren: await repo.getOwnChildren() } };
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: await repo.getUsers(), fixedUsers: fixedUsers(env), me: user.email, opening, ownChildren: await repo.getOwnChildren(), runtime: process.version } };
 }
 
 async function putRates({ repo, body }) {

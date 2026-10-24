@@ -32,7 +32,7 @@ infra/      Bicep: Static Web App (Free) + Storage
 
 ## Lokaal draaien
 
-Vereist Node.js 22+ (productie en CI draaien op 24), [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) en de [SWA CLI](https://azure.github.io/static-web-apps-cli/).
+Vereist Node.js 24 (`engines` in `backend/package.json`; de bouwstap van Static Web Apps kiest zijn Node-versie daaruit), [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) en de [SWA CLI](https://azure.github.io/static-web-apps-cli/).
 
 ```bash
 cd backend
@@ -138,7 +138,7 @@ Kinderen en contracten uit een eerdere versie hebben nog geen startdatum, t/m da
 - De Bicep-template en de deploy-pipeline zijn niet tegen een echte Azure-omgeving uitgevoerd; controleer na de eerste deploy of `/api/children` ingelogd werkt en uitgelogd een 401 geeft.
 
 ### Node-versie
-CI, de deploy-pipeline en de API in de Static Web App draaien op **Node.js 24** (LTS tot april 2028); de runtime van de API staat in `frontend/staticwebapp.config.json` (`apiRuntime`). Weigert Static Web Apps een nieuwere versie, zet `apiRuntime` dan terug op de nieuwste ondersteunde (`node:22`) en pas `node-version` in de workflows daarop aan. De GitHub-acties zelf (`checkout`, `setup-node`, `azure/login`) staan op versies die op Node 24 draaien.
+CI, de deploy-pipeline en de API in de Static Web App draaien op **Node.js 24** (LTS tot april 2028); de runtime van de API staat in `frontend/staticwebapp.config.json` (`apiRuntime`). Bij Instellingen staat onderaan op welke Node-versie de API echt draait. Weigert Static Web Apps een nieuwere versie (of kiest het een andere), zet `apiRuntime` en `engines` dan terug op de nieuwste ondersteunde (`node:22`) en pas `node-version` in de workflows daarop aan. De GitHub-acties zelf (`checkout`, `setup-node`, `azure/login`) staan op versies die op Node 24 draaien.
 
 ### Later opschalen
 De API-code is gewone Azure Functions en staat los van de hosting. Groeit het gebruik of heb je een eigen Function App nodig (scaling, monitoring, VNet), dan:
