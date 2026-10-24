@@ -235,3 +235,98 @@ test('eigen kinderen: opslaan, sorteren op geboortedatum, validatie', async () =
   // leeg maken mag
   assert.deepEqual((await call(h.putOwnChildren, { body: { ownChildren: [] } })).jsonBody.ownChildren, []);
 });
+
+// --- Lokale accounts ---
+const admin = { email: 'mariko@voorbeeld.nl', kind: 'microsoft', fixed: true, admin: true };
+const PW = 'koekjes-tomaat-fiets-42';
+const hdr = (cookie) => ({ get: (n) => (n === 'cookie' ? cookie : null) });
+const cookieOf = (res) => `${res.cookies[0].name}=${res.cookies[0].value}`;
+const { authorizeSession } = require('../src/auth');
+const P = require('../src/passwords');
+
+async function newAccount(email) {
+  const r = await h.createAccount({ user: admin, repo, body: { email, name: 'Test' } });
+  return r.jsonBody;
+}
+
+test('account aanmaken: tijdelijk wachtwoord wordt niet leesbaar opgeslagen', async () => {
+  const { tempPassword, account } = await newAccount('Lokaal1@Voorbeeld.nl');
+  assert.equal(account.email, 'lokaal1@voorbeeld.nl');
+  assert.equal(account.mustChange, true);
+  const stored = await repo.getAccount('lokaal1@voorbeeld.nl');
+  assert.ok(stored.passwordHash.startsWith('scrypt$'));
+  assert.ok(!JSON.stringify(stored).includes(tempPassword));
+  await assert.rejects(h.createAccount({ user: admin, repo, body: { email: 'lokaal1@voorbeeld.nl' } }), { status: 409 });
+});
+
+test('accountbeheer is alleen voor beheerders', async () => {
+  await assert.rejects(h.listAccounts({ user: { ...admin, admin: false }, repo }), { status: 403 });
+  await assert.rejects(h.createAccount({ user: { kind: 'local', admin: false }, repo, body: { email: 'x@y.nl' } }), { status: 403 });
+});
+
+test('inloggen, sessie, wachtwoord wijzigen en uitloggen', async () => {
+  const { tempPassword } = await newAccount('lokaal2@voorbeeld.nl');
+  const res = await h.login({ repo, body: { email: 'lokaal2@voorbeeld.nl', password: tempPassword } });
+  assert.equal(res.jsonBody.mustChange, true);
+  assert.equal(res.cookies[0].httpOnly, true);
+  assert.equal(res.cookies[0].sameSite, 'Strict');
+  const token = res.cookies[0].value;
+  // Alleen de hash van de sessiesleutel staat in de opslag
+  assert.ok(await repo.getSession(P.hashToken(token)));
+  assert.equal(await repo.getSession(token), undefined ?? null);
+  const user = await authorizeSession(hdr(cookieOf(res)), 'GET', repo);
+  assert.equal(user.kind, 'local');
+  assert.equal(user.mustChange, true);
+
+  await assert.rejects(h.changePassword({ user, repo, body: { current: 'fout', next: PW } }), { status: 400 });
+  await assert.rejects(h.changePassword({ user, repo, body: { current: tempPassword, next: 'kort' } }), { status: 400 });
+  await h.changePassword({ user, repo, body: { current: tempPassword, next: PW } });
+  assert.equal((await repo.getAccount('lokaal2@voorbeeld.nl')).mustChange, false);
+  await assert.rejects(h.login({ repo, body: { email: 'lokaal2@voorbeeld.nl', password: tempPassword } }), { status: 401 });
+
+  const second = await h.login({ repo, body: { email: 'lokaal2@voorbeeld.nl', password: PW } });
+  const out = await h.logout({ repo, headers: hdr(cookieOf(second)) });
+  assert.equal(out.cookies[0].maxAge, 0);
+  await assert.rejects(authorizeSession(hdr(cookieOf(second)), 'GET', repo), { status: 401 });
+});
+
+test('wachtwoord wijzigen beëindigt andere sessies', async () => {
+  const { tempPassword } = await newAccount('lokaal3@voorbeeld.nl');
+  const a = await h.login({ repo, body: { email: 'lokaal3@voorbeeld.nl', password: tempPassword } });
+  const b = await h.login({ repo, body: { email: 'lokaal3@voorbeeld.nl', password: tempPassword } });
+  const user = await authorizeSession(hdr(cookieOf(a)), 'GET', repo);
+  await h.changePassword({ user, repo, body: { current: tempPassword, next: PW } });
+  await authorizeSession(hdr(cookieOf(a)), 'GET', repo);
+  await assert.rejects(authorizeSession(hdr(cookieOf(b)), 'GET', repo), { status: 401 });
+});
+
+test('verlopen sessie wordt geweigerd', async () => {
+  const { tempPassword } = await newAccount('lokaal4@voorbeeld.nl');
+  const res = await h.login({ repo, body: { email: 'lokaal4@voorbeeld.nl', password: tempPassword } });
+  const later = new Date(Date.now() + 8 * 86400000);
+  await assert.rejects(authorizeSession(hdr(cookieOf(res)), 'GET', repo, later), { status: 401 });
+});
+
+test('blokkade na vijf mislukte pogingen, ook voor onbekende adressen', async () => {
+  const { tempPassword } = await newAccount('lokaal5@voorbeeld.nl');
+  for (let i = 0; i < 5; i++) await assert.rejects(h.login({ repo, body: { email: 'lokaal5@voorbeeld.nl', password: 'fout' } }), { status: 401 });
+  await assert.rejects(h.login({ repo, body: { email: 'lokaal5@voorbeeld.nl', password: tempPassword } }), { status: 429 });
+  const later = new Date(Date.now() + 16 * 60000);
+  assert.equal((await h.login({ repo, body: { email: 'lokaal5@voorbeeld.nl', password: tempPassword }, now: later })).status, 200);
+  for (let i = 0; i < 5; i++) await assert.rejects(h.login({ repo, body: { email: 'bestaat-niet@voorbeeld.nl', password: 'fout' } }), { status: 401 });
+  await assert.rejects(h.login({ repo, body: { email: 'bestaat-niet@voorbeeld.nl', password: 'fout' } }), { status: 429 });
+});
+
+test('reset geeft nieuw tijdelijk wachtwoord en beëindigt sessies; verwijderen ruimt op', async () => {
+  const { tempPassword } = await newAccount('lokaal6@voorbeeld.nl');
+  const res = await h.login({ repo, body: { email: 'lokaal6@voorbeeld.nl', password: tempPassword } });
+  const r = await h.resetAccount({ user: admin, repo, params: { email: 'lokaal6%40voorbeeld.nl' } });
+  assert.notEqual(r.jsonBody.tempPassword, tempPassword);
+  assert.equal((await repo.getAccount('lokaal6@voorbeeld.nl')).mustChange, true);
+  await assert.rejects(authorizeSession(hdr(cookieOf(res)), 'GET', repo), { status: 401 });
+  await h.login({ repo, body: { email: 'lokaal6@voorbeeld.nl', password: r.jsonBody.tempPassword } });
+  assert.equal((await h.deleteAccount({ user: admin, repo, params: { email: 'lokaal6@voorbeeld.nl' } })).status, 204);
+  await assert.rejects(h.login({ repo, body: { email: 'lokaal6@voorbeeld.nl', password: r.jsonBody.tempPassword } }), { status: 401 });
+  const list = (await h.listAccounts({ user: admin, repo })).jsonBody;
+  assert.ok(list.every((a) => !('passwordHash' in a)));
+});

@@ -182,4 +182,12 @@ function parseOwnChildren(list, newId) {
   }).sort((a, b) => a.birthDate.localeCompare(b.birthDate));
 }
 
-module.exports = { parseOwnChildren, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
+// Lokale accounts: het e-mailadres is de sleutel in Table Storage, dus geen tekens die daar niet mogen.
+const ACCOUNT_EMAIL = /^[^\s@,;/\\#?'"%]+@[^\s@,;/\\#?'"%]+\.[^\s@,;/\\#?'"%]+$/;
+function parseAccountEmail(v) {
+  const e = String(v ?? '').trim().toLowerCase();
+  if (e.length > 200 || !ACCOUNT_EMAIL.test(e)) throw bad('Ongeldig e-mailadres.');
+  return e;
+}
+
+module.exports = { parseAccountEmail, parseOwnChildren, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
