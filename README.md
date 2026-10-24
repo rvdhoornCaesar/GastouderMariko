@@ -4,7 +4,7 @@ Online urenregistratie voor gastouder Mariko: meerdere kinderen, per kind meerde
 
 ```
 frontend/   Statische site (vanilla HTML/JS) + staticwebapp.config.json (Microsoft-login)
-backend/    Azure Functions-code (Node.js 20, v4-model) met Azure Table Storage; draait als managed functions in de Static Web App
+backend/    Azure Functions-code (Node.js 24, v4-model) met Azure Table Storage; draait als managed functions in de Static Web App
 infra/      Bicep: Static Web App (Free) + Storage
 ```
 
@@ -32,7 +32,7 @@ infra/      Bicep: Static Web App (Free) + Storage
 
 ## Lokaal draaien
 
-Vereist Node.js 20+, [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) en de [SWA CLI](https://azure.github.io/static-web-apps-cli/).
+Vereist Node.js 22+ (productie en CI draaien op 24), [Azure Functions Core Tools](https://learn.microsoft.com/azure/azure-functions/functions-run-local) en de [SWA CLI](https://azure.github.io/static-web-apps-cli/).
 
 ```bash
 cd backend
@@ -137,10 +137,13 @@ Kinderen en contracten uit een eerdere versie hebben nog geen startdatum, t/m da
 - De vooraf ingestelde Microsoft-login van Static Web Apps accepteert werk- en schoolaccounts (Entra ID). Heeft Mariko alleen een persoonlijk Microsoft-account, dan is een eigen app-registratie nodig (custom auth provider).
 - De Bicep-template en de deploy-pipeline zijn niet tegen een echte Azure-omgeving uitgevoerd; controleer na de eerste deploy of `/api/children` ingelogd werkt en uitgelogd een 401 geeft.
 
+### Node-versie
+CI, de deploy-pipeline en de API in de Static Web App draaien op **Node.js 24** (LTS tot april 2028); de runtime van de API staat in `frontend/staticwebapp.config.json` (`apiRuntime`). Weigert Static Web Apps een nieuwere versie, zet `apiRuntime` dan terug op de nieuwste ondersteunde (`node:22`) en pas `node-version` in de workflows daarop aan. De GitHub-acties zelf (`checkout`, `setup-node`, `azure/login`) staan op versies die op Node 24 draaien.
+
 ### Later opschalen
 De API-code is gewone Azure Functions en staat los van de hosting. Groeit het gebruik of heb je een eigen Function App nodig (scaling, monitoring, VNet), dan:
 1. Zet de SKU van de Static Web App in `infra/main.bicep` op `Standard` (ca. € 9 per maand per omgeving).
-2. Voeg een Function App (Consumption, Node 20) toe met dezelfde app-settings (`TABLES_CONNECTION`, `ALLOWED_USERS`) en een `Microsoft.Web/staticSites/linkedBackends`-resource die ernaar verwijst.
+2. Voeg een Function App (Consumption, Node 24) toe met dezelfde app-settings (`TABLES_CONNECTION`, `ALLOWED_USERS`) en een `Microsoft.Web/staticSites/linkedBackends`-resource die ernaar verwijst.
 3. Deploy `backend/` naar die Function App (`Azure/functions-action`) en haal `api_location` uit de Static Web App-deploy; managed functions en een gekoppelde backend kunnen niet naast elkaar bestaan.
 
 De frontend (`/api/...`), de login en de data in Table Storage veranderen niet.
