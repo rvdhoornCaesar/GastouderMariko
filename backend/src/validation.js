@@ -32,9 +32,25 @@ function parseMonthlyHours(v) {
   return h === 0 ? null : Math.round(h * 100) / 100;
 }
 
-function parseOptionalMonth(v) {
-  if (v === null || v === undefined || v === '') return null;
-  if (!MONTH.test(v)) throw bad('Ongeldige maand.');
+// Vaste tijden per weekdag (maandag = eerste): { open, from, to }. Alles gesloten telt als "geen vaste tijden".
+function parseDays(days, what) {
+  if (!Array.isArray(days) || days.length !== 7) throw bad(`Ongeldige ${what}.`);
+  return days.map((d) => {
+    if (!d || !d.open) return { open: false, from: null, to: null };
+    if (!TIME.test(d.from || '') || !TIME.test(d.to || '')) throw bad(`Ongeldige tijd bij de ${what}.`);
+    if (toMin(d.to) <= toMin(d.from)) throw bad(`De eindtijd moet na de begintijd liggen bij de ${what}.`);
+    return { open: true, from: d.from, to: d.to };
+  });
+}
+
+function parseSchedule(v) {
+  if (v === null || v === undefined) return null;
+  const days = parseDays(v, 'vaste tijden');
+  return days.some((d) => d.open) ? days : null;
+}
+
+function requiredDate(v, msg) {
+  if (!validDate(v)) throw bad(msg);
   return v;
 }
 
@@ -42,27 +58,49 @@ function parseContracts(list, newId) {
   if (list === undefined) return [];
   if (!Array.isArray(list) || list.length > 50) throw bad('Ongeldige contracten.');
   const seen = new Set();
-  return list.map((k) => {
-    const name = text(k && k.name, 100);
-    if (!name) throw bad('Een contract heeft een naam nodig.');
+  return list.map((k, i) => {
+    const who = `Contract ${i + 1}`;
+    const number = text(k && k.number, 50);   // optioneel
     // Leeg tarief = het algemene tarief (uit de instellingen) geldt.
     const rate = k.rate === null || k.rate === undefined || k.rate === '' ? null : parseRate(k.rate);
-    // Vaste uren per maand, geldig van een startmaand tot en met een (optionele) laatste maand.
     const monthlyHours = parseMonthlyHours(k.monthlyHours);
-    const from = monthlyHours ? parseOptionalMonth(k.from) : null;
-    const until = monthlyHours ? parseOptionalMonth(k.until) : null;
-    if (monthlyHours && !from) throw bad('Vaste uren hebben een startmaand nodig.');
-    if (from && until && until < from) throw bad('De laatste maand ligt voor de startmaand.');
+    const start = requiredDate(k.start, `${who}: vul een geldige startdatum in.`);
+    const end = requiredDate(k.end, `${who}: vul een geldige t/m datum in.`);
+    if (end < start) throw bad(`${who}: de t/m datum ligt voor de startdatum.`);
     const id = k.id && ID.test(k.id) && !seen.has(k.id) ? k.id : newId();
     seen.add(id);
-    return { id, name, rate, monthlyHours, from, until };
+    // Optioneel (standaard uit): worden vakanties van het kind doorbetaald?
+    return { id, number, rate, monthlyHours, start, end, schedule: parseSchedule(k.schedule), paidHolidays: k.paidHolidays === true };
   });
 }
 
+// Vakanties van een kind: lijst van { from, to (t/m) }, gesorteerd op begindatum.
+function parseHolidays(list, newId) {
+  if (list === undefined) return [];
+  if (!Array.isArray(list) || list.length > 200) throw bad('Ongeldige vakanties.');
+  return list.map((h) => {
+    const from = requiredDate(h && h.from, 'Vakantie: ongeldige begindatum.');
+    const to = requiredDate(h.to, 'Vakantie: ongeldige t/m datum.');
+    if (to < from) throw bad('Vakantie: de t/m datum ligt voor de begindatum.');
+    return { id: h.id && ID.test(h.id) ? h.id : newId(), from, to };
+  }).sort((a, b) => a.from.localeCompare(b.from));
+}
+
 function parseChild(body, newId) {
-  const name = text(body && body.name, 100);
-  if (!name) throw bad('Een kind heeft een naam nodig.');
-  return { name, contracts: parseContracts(body.contracts, newId) };
+  const b = body || {};
+  const firstName = text(b.firstName ?? b.name, 100);
+  if (!firstName) throw bad('Een kind heeft een voornaam nodig.');
+  const lastName = text(b.lastName, 100);
+  let birthDate = null;
+  if (b.birthDate !== null && b.birthDate !== undefined && b.birthDate !== '') {
+    birthDate = requiredDate(b.birthDate, 'Ongeldige geboortedatum.');
+    if (birthDate > new Date().toISOString().slice(0, 10)) throw bad('De geboortedatum ligt in de toekomst.');
+  }
+  const parents = [0, 1].map((i) => text(Array.isArray(b.parents) ? b.parents[i] : '', 100));
+  return {
+    firstName, lastName, name: [firstName, lastName].filter(Boolean).join(' '), birthDate, parents,
+    contracts: parseContracts(b.contracts, newId), holidays: parseHolidays(b.holidays, newId),
+  };
 }
 
 function parseEntry(body) {
@@ -124,13 +162,8 @@ const DEFAULT_OPENING = {
 };
 
 function parseOpening(b) {
-  if (!b || !Array.isArray(b.days) || b.days.length !== 7) throw bad('Ongeldige openingstijden.');
-  const days = b.days.map((d) => {
-    if (!d || !d.open) return { open: false, from: null, to: null };
-    if (!TIME.test(d.from || '') || !TIME.test(d.to || '')) throw bad('Ongeldige tijd bij de openingstijden.');
-    if (toMin(d.to) <= toMin(d.from)) throw bad('De sluitingstijd moet na de openingstijd liggen.');
-    return { open: true, from: d.from, to: d.to };
-  });
+  if (!b) throw bad('Ongeldige openingstijden.');
+  const days = parseDays(b.days, 'openingstijden');
   const factor = Number(b.factor);
   if (!Number.isFinite(factor) || factor < 0 || factor > 10) throw bad('Ongeldige toeslagfactor (0 tot 10).');
   return { days, factor: Math.round(factor * 100) / 100 };

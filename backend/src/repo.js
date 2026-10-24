@@ -19,7 +19,16 @@ function createRepo(connectionString) {
     return out;
   };
 
-  const toChild = (r) => ({ id: r.rowKey, name: r.name, contracts: JSON.parse(r.contracts || '[]') });
+  // Oudere kinderen hebben alleen 'name': dat wordt de voornaam.
+  const toChild = (r) => {
+    const firstName = r.firstName ?? r.name ?? '';
+    const lastName = r.lastName ?? '';
+    return {
+      id: r.rowKey, name: [firstName, lastName].filter(Boolean).join(' '), firstName, lastName,
+      birthDate: r.birthDate || null, parents: r.parents ? JSON.parse(r.parents) : ['', ''],
+      contracts: JSON.parse(r.contracts || '[]'), holidays: JSON.parse(r.holidays || '[]'),
+    };
+  };
   const toEntry = (r) => ({ id: r.rowKey, date: r.rowKey.slice(0, 10), contractId: r.contractId, start: r.start, end: r.end, note: r.note });
 
   const listEntries = async (filter) => {
@@ -67,7 +76,11 @@ function createRepo(connectionString) {
     },
     async saveChild(child) {
       const t = await table('children');
-      await t.upsertEntity({ partitionKey: PK, rowKey: child.id, name: child.name, contracts: JSON.stringify(child.contracts) }, 'Replace');
+      await t.upsertEntity({
+        partitionKey: PK, rowKey: child.id, name: child.name, firstName: child.firstName, lastName: child.lastName,
+        birthDate: child.birthDate || '', parents: JSON.stringify(child.parents),
+        contracts: JSON.stringify(child.contracts), holidays: JSON.stringify(child.holidays),
+      }, 'Replace');
     },
     async deleteChild(id) {
       await (await table('children')).deleteEntity(PK, id);

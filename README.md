@@ -19,7 +19,7 @@ infra/      Bicep: Static Web App (Free) + Storage
 
 | Methode | Pad | Doel |
 |---|---|---|
-| GET / POST | `/api/children` | kinderen met contracten (`name, rate, monthlyHours, from, until`) ophalen / kind toevoegen |
+| GET / POST | `/api/children` | kinderen ophalen / kind toevoegen (`firstName, lastName, birthDate, parents[2], contracts[{ start, end, number, rate, monthlyHours, schedule, paidHolidays }], holidays[{ from, to }]`) |
 | PUT / DELETE | `/api/children/{id}` | kind (met contracten) opslaan / verwijderen; verwijderde contracten nemen hun uren mee |
 | GET | `/api/entries?month=JJJJ-MM` | uren van een maand |
 | POST | `/api/entries` | uren toevoegen (`date, contractId, start, end, note`) |
@@ -113,8 +113,20 @@ exceptions | order by timestamp desc
 
 Eenmalig nodig: de resource providers `Microsoft.OperationalInsights` en `Microsoft.Insights` moeten op de subscription geregistreerd zijn (`az provider register --namespace Microsoft.OperationalInsights`); de pipeline kan dat zelf niet, want zijn rol geldt alleen op de resource groups.
 
-### Vaste uren per maand
-Bij een contract (tab *Kinderen*) kun je *Vaste uren / maand* invullen, met een *Vanaf maand* en een optionele *Tot en met maand*. Het overzicht telt die uren dan elke maand in die periode mee, tegen het tarief van het contract (of het algemene tarief op de eerste dag van de maand), naast eventueel geregistreerde uren. Zo kun je een vast contract en een extra contract voor losse uren naast elkaar gebruiken.
+### Kinderen en contracten
+Het tabblad **Kinderen** toont eerst een lijst; met *Bewerken* (of *Kind toevoegen*) open je de details. Wijzigingen worden pas bewaard met *Opslaan*.
+
+- **Kind:** voornaam, achternaam, geboortedatum, twee ouders (namen).
+- **Contracten (één of meer):** alleen de **startdatum en t/m datum zijn verplicht**. Een contract heeft geen naam; in lijsten herken je het aan de periode (en het contractnummer). Optioneel zijn: contractnummer, uurprijs (leeg = algemeen tarief), vast aantal uren per maand en vaste tijden per weekdag. Verder is er per contract de optie *Vakanties doorbetalen* (standaard uit, zie hieronder).
+  - *Buiten de contractperiode:* uren invullen blijft mogelijk, maar het formulier toont een melding, de registratie krijgt een waarschuwing en het maandoverzicht telt hoeveel registraties buiten het contract vallen.
+  - *Vaste tijden:* kies je een contract en een datum, dan vult het formulier de begin- en eindtijd van die weekdag alvast in.
+  - *Vast aantal uren per maand:* het overzicht en de CSV tellen die uren elke maand mee waarin het contract loopt (een maand telt als de contractperiode die maand raakt, niet naar rato), tegen het tarief van het contract of het algemene tarief op de eerste dag van de maand, naast geregistreerde uren.
+- **Vakanties:** een lijst met periodes (van, t/m). Of een vakantie wordt doorbetaald, hangt van het contract af:
+  - **Vast aantal uren per maand:** vakanties zijn altijd doorbetaald; de vaste uren tellen elke maand vol mee. De optie staat dan aan en is niet te wijzigen.
+  - **Vaste tijden en *Vakanties doorbetalen* aan:** op elke vakantiedag van het kind binnen de contractperiode tellen de uren van die weekdag (volgens de vaste tijden) mee, tegen het tarief van die dag. Heb je op zo'n dag al zelf uren ingevuld voor dat contract, dan telt alleen wat je invulde. Het overzicht toont per contract hoeveel daarvan doorbetaalde vakantie is en lijst de dagen op; de CSV bevat ze met de opmerking *Doorbetaalde vakantie*.
+  - **Geen vaste uren en geen vaste tijden:** er wordt niets automatisch berekend; je vult de uren in vakanties zelf in. De optie is dan niet te kiezen. Vakanties die vóór de vorige maand eindigden, staan verborgen en zijn zichtbaar met *Toon eerdere vakanties*. Vakanties zijn voorlopig alleen informatie: ze beïnvloeden de berekening niet.
+
+Kinderen en contracten uit een eerdere versie hebben nog geen startdatum, t/m datum of achternaam; bij het eerstvolgende opslaan vraagt de app daarom om die in te vullen.
 
 ### Kosten en aandachtspunten
 

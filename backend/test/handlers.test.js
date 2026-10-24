@@ -12,6 +12,7 @@ const h = require('../src/handlers');
 let azurite, repo, dir;
 const env = { ALLOWED_USERS: 'mariko@voorbeeld.nl' };
 const fixedUser = { email: 'mariko@voorbeeld.nl', fixed: true };
+const K = (k) => ({ start: '2026-01-01', end: '2026-12-31', ...k });
 const call = (fn, extra = {}) => fn({ user: fixedUser, repo, env, params: {}, query: {}, ...extra });
 
 const waitForPort = (port) => new Promise((resolve, reject) => {
@@ -31,10 +32,12 @@ test.before(async () => {
 test.after(() => { azurite.kill(); fs.rmSync(dir, { recursive: true, force: true }); });
 
 test('kind + contracten aanmaken en teruglezen', async () => {
-  const res = await call(h.createChild, { body: { name: ' Noah ', contracts: [{ name: 'Ma-Wo', rate: 8.5 }] } });
+  const res = await call(h.createChild, { body: { name: ' Noah ', contracts: [K({ rate: 8.5, number: ' 123 ' })] } });
   assert.equal(res.status, 201);
   assert.equal(res.jsonBody.name, 'Noah');
   assert.ok(res.jsonBody.contracts[0].id);
+  assert.equal(res.jsonBody.contracts[0].number, '123');
+  assert.equal(res.jsonBody.firstName, 'Noah');
   const list = await call(h.listChildren);
   assert.equal(list.jsonBody.length, 1);
   assert.equal(list.jsonBody[0].contracts[0].rate, 8.5);
@@ -64,12 +67,12 @@ test('validatie', async () => {
     { ...ok, contractId: 'bestaatniet' }, { ...ok, end: '08:00' },
   ]) await assert.rejects(call(h.createEntry, { body: bad }), { status: 400 });
   await assert.rejects(call(h.createChild, { body: { name: '  ' } }), { status: 400 });
-  await assert.rejects(call(h.createChild, { body: { name: 'A', contracts: [{ name: 'k', rate: -1 }] } }), { status: 400 });
+  await assert.rejects(call(h.createChild, { body: { name: 'A', contracts: [K({ rate: -1 })] } }), { status: 400 });
   await assert.rejects(call(h.listEntries, { query: { month: '2026-13' } }), { status: 400 });
 });
 
 test('contract verwijderen en kind verwijderen nemen uren mee', async () => {
-  const child = (await call(h.createChild, { body: { name: 'Sam', contracts: [{ name: 'A', rate: 9 }, { name: 'B', rate: 10 }] } })).jsonBody;
+  const child = (await call(h.createChild, { body: { name: 'Sam', contracts: [K({ rate: 9 }), K({ rate: 10 })] } })).jsonBody;
   const [a, b] = child.contracts;
   const base = { date: '2026-12-01', start: '08:00', end: '12:00' };
   await call(h.createEntry, { body: { ...base, contractId: a.id } });
@@ -86,7 +89,7 @@ test('contract verwijderen en kind verwijderen nemen uren mee', async () => {
 });
 
 test('contract zonder tarief gebruikt het algemene tarief (rate = null)', async () => {
-  const res = await call(h.createChild, { body: { name: 'Lisa', contracts: [{ name: 'Standaard', rate: '' }, { name: 'Vast', rate: 9.456 }] } });
+  const res = await call(h.createChild, { body: { name: 'Lisa', contracts: [K({ rate: '' }), K({ rate: 9.456 })] } });
   assert.deepEqual(res.jsonBody.contracts.map((k) => k.rate), [null, 9.46]);
   await call(h.deleteChild, { params: { id: res.jsonBody.id } });
 });
@@ -128,18 +131,57 @@ test('gebruikers: een toegevoegde gebruiker kan zichzelf niet verwijderen', asyn
   assert.deepEqual((await call(h.putUsers, { body: { users: [] } })).jsonBody.users, []);
 });
 
-test('vaste uren per maand: startmaand verplicht, periode gecontroleerd', async () => {
-  const mk = (k) => call(h.createChild, { body: { name: 'Vast', contracts: [{ name: 'Vast', rate: '', ...k }] } });
-  const ok = (await mk({ monthlyHours: '80', from: '2026-01', until: '2026-12' })).jsonBody.contracts[0];
-  assert.deepEqual([ok.monthlyHours, ok.from, ok.until], [80, '2026-01', '2026-12']);
-  const open = (await mk({ monthlyHours: 40.256, from: '2026-03' })).jsonBody.contracts[0];
-  assert.deepEqual([open.monthlyHours, open.until], [40.26, null]);
-  const none = (await mk({ monthlyHours: 0, from: '2026-03' })).jsonBody.contracts[0];
-  assert.deepEqual([none.monthlyHours, none.from, none.until], [null, null, null]);
-  await assert.rejects(mk({ monthlyHours: 80 }), { status: 400 });
-  await assert.rejects(mk({ monthlyHours: 80, from: '2026-05', until: '2026-04' }), { status: 400 });
-  await assert.rejects(mk({ monthlyHours: 800, from: '2026-05' }), { status: 400 });
-  await assert.rejects(mk({ monthlyHours: 80, from: '2026-13' }), { status: 400 });
+test('contract: periode verplicht, vaste uren en vaste tijden', async () => {
+  const mk = (k) => call(h.createChild, { body: { name: 'Vast', contracts: [{ rate: '', ...k }] } });
+  const ok = (await mk({ start: '2026-01-01', end: '2026-12-31', monthlyHours: '80' })).jsonBody.contracts[0];
+  assert.deepEqual([ok.monthlyHours, ok.start, ok.end, ok.schedule], [80, '2026-01-01', '2026-12-31', null]);
+  const rounded = (await mk({ start: '2026-03-01', end: '2026-03-31', monthlyHours: 40.256 })).jsonBody.contracts[0];
+  assert.equal(rounded.monthlyHours, 40.26);
+  const none = (await mk({ start: '2026-03-01', end: '2026-03-31', monthlyHours: 0 })).jsonBody.contracts[0];
+  assert.equal(none.monthlyHours, null);
+  // start en einde zijn verplicht en moeten kloppen
+  await assert.rejects(mk({}), { status: 400 });
+  await assert.rejects(mk({ start: '2026-01-01' }), { status: 400 });
+  await assert.rejects(mk({ end: '2026-01-01' }), { status: 400 });
+  await assert.rejects(mk({ start: '2026-05-02', end: '2026-05-01' }), { status: 400 });
+  await assert.rejects(mk({ start: '2026-02-30', end: '2026-03-01' }), { status: 400 });
+  await assert.rejects(mk({ start: '2026-01-01', end: '2026-12-31', monthlyHours: 800 }), { status: 400 });
+  // vaste tijden: alleen geopende dagen tellen; alles gesloten = geen vaste tijden
+  const closed = { open: false, from: null, to: null };
+  const mon = { open: true, from: '08:00', to: '17:00' };
+  const withTimes = (await mk({ start: '2026-01-01', end: '2026-12-31', schedule: [mon, closed, closed, closed, closed, closed, closed] })).jsonBody.contracts[0];
+  assert.deepEqual(withTimes.schedule[0], mon);
+  const allClosed = (await mk({ start: '2026-01-01', end: '2026-12-31', schedule: Array(7).fill(closed) })).jsonBody.contracts[0];
+  assert.equal(allClosed.schedule, null);
+  await assert.rejects(mk({ start: '2026-01-01', end: '2026-12-31', schedule: [{ open: true, from: '17:00', to: '08:00' }, ...Array(6).fill(closed)] }), { status: 400 });
+  await assert.rejects(mk({ start: '2026-01-01', end: '2026-12-31', schedule: [mon] }), { status: 400 });
+});
+
+test('kind: gegevens, ouders, vakanties', async () => {
+  const body = {
+    firstName: ' Emma ', lastName: 'de Vries', birthDate: '2022-03-04', parents: [' Anna ', 'Piet', 'derde'],
+    contracts: [K({})],
+    holidays: [{ from: '2026-08-01', to: '2026-08-15' }, { from: '2026-02-14', to: '2026-02-22' }],
+  };
+  const c = (await call(h.createChild, { body })).jsonBody;
+  assert.deepEqual([c.firstName, c.lastName, c.name, c.birthDate], ['Emma', 'de Vries', 'Emma de Vries', '2022-03-04']);
+  assert.deepEqual(c.parents, ['Anna', 'Piet']);
+  assert.deepEqual(c.holidays.map((x) => [x.from, x.to]), [['2026-02-14', '2026-02-22'], ['2026-08-01', '2026-08-15']]);
+  // opslaan en teruglezen
+  const again = (await call(h.listChildren)).jsonBody.find((x) => x.id === c.id);
+  assert.deepEqual(again, c);
+  // optionele velden mogen leeg
+  const min = (await call(h.createChild, { body: { firstName: 'Lars' } })).jsonBody;
+  assert.deepEqual([min.name, min.birthDate, min.parents, min.holidays, min.contracts], ['Lars', null, ['', ''], [], []]);
+  // validatie
+  const bad = (b) => assert.rejects(call(h.createChild, { body: b }), { status: 400 });
+  await bad({ firstName: ' ' });
+  await bad({ firstName: 'A', birthDate: '2022-02-30' });
+  await bad({ firstName: 'A', birthDate: '2999-01-01' });
+  await bad({ firstName: 'A', holidays: [{ from: '2026-08-15', to: '2026-08-01' }] });
+  await bad({ firstName: 'A', holidays: [{ from: '2026-08-15' }] });
+  await call(h.deleteChild, { params: { id: c.id } });
+  await call(h.deleteChild, { params: { id: min.id } });
 });
 
 test('openingstijden: standaard, opslaan en validatie', async () => {
@@ -159,4 +201,22 @@ test('openingstijden: standaard, opslaan en validatie', async () => {
   await bad({ days: days.slice(0, 6), factor: 2 });
   await bad({ days: days.map((d, i) => (i === 0 ? { open: true, from: '18:00', to: '07:00' } : d)), factor: 2 });
   await bad({ days: days.map((d, i) => (i === 0 ? { open: true, from: '7:00', to: '18:00' } : d)), factor: 2 });
+});
+
+test('contract: alleen de periode is verplicht; naam, nummer, uren en tijden zijn optioneel; vakanties doorbetalen staat standaard uit', async () => {
+  const mk = (k) => call(h.createChild, { body: { firstName: 'Opt', contracts: [k] } });
+  const min = (await mk({ start: '2026-01-01', end: '2026-12-31' })).jsonBody;
+  const c = min.contracts[0];
+  assert.deepEqual([c.number, c.rate, c.monthlyHours, c.schedule, c.paidHolidays], ['', null, null, null, false]);
+  assert.equal('name' in c, false);   // een oude contractnaam wordt niet meer bewaard
+  const named = (await mk({ name: 'oud', start: '2026-01-01', end: '2026-12-31' })).jsonBody.contracts[0];
+  assert.equal('name' in named, false);
+  // doorbetalen: alleen een echte true telt
+  const paid = (await mk({ start: '2026-01-01', end: '2026-12-31', paidHolidays: true })).jsonBody.contracts[0];
+  const notPaid = (await mk({ start: '2026-01-01', end: '2026-12-31', paidHolidays: 'ja' })).jsonBody.contracts[0];
+  assert.deepEqual([paid.paidHolidays, notPaid.paidHolidays], [true, false]);
+  // foutmeldingen noemen het contractnummer in de lijst
+  await assert.rejects(call(h.createChild, { body: { firstName: 'X', contracts: [{ start: '2026-01-01', end: '2026-12-31' }, { start: '2026-01-01' }] } }),
+    (e) => e.status === 400 && e.message.startsWith('Contract 2:'));
+  await call(h.deleteChild, { params: { id: min.id } });
 });
