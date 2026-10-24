@@ -33,8 +33,9 @@ async function authorizeMicrosoft(headers, repo, env = process.env) {
   const user = parsePrincipal(headers);
   const fixed = fixedUsers(env).includes(user.email);
   if (!fixed && !(await repo.getUsers()).includes(user.email)) throw new HttpError(403, 'Geen toegang.', { user: user.email });
-  // admin = mag lokale accounts beheren. role/instanceId: nu één rol en één instantie, maar al wel vastgelegd.
-  return { ...user, kind: 'microsoft', fixed, admin: fixed, role: 'beheerder', instanceId: 'main', mustChange: false };
+  // instanceId: nu één instantie, maar al wel vastgelegd.
+  // Vaste gebruikers (ALLOWED_USERS) zijn admin; in de app toegevoegde Microsoft-gebruikers zijn beheerder.
+  return { ...user, kind: 'microsoft', fixed, role: fixed ? 'admin' : 'beheerder', instanceId: 'main', mustChange: false };
 }
 
 function sessionToken(headers) {
@@ -61,7 +62,7 @@ async function authorizeSession(headers, method, repo, now = new Date()) {
   const account = await repo.getAccount(session.email);
   if (!account) throw new HttpError(401, 'Niet ingelogd.');
   return {
-    kind: 'local', email: account.rowKey, name: account.name || account.rowKey, fixed: false, admin: false,
+    kind: 'local', email: account.rowKey, name: account.name || account.rowKey, fixed: false,
     role: account.role, instanceId: account.instanceId, mustChange: !!account.mustChange, totp: !!account.totpSecret, sessionHash: hash,
   };
 }

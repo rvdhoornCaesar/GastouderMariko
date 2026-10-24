@@ -190,4 +190,10 @@ function parseAccountEmail(v) {
   return e;
 }
 
-module.exports = { parseAccountEmail, parseOwnChildren, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
+function parseRole(v) {
+  const r = String(v ?? '').trim();
+  if (!require('./permissions').ROLES.includes(r)) throw bad('Ongeldige rol.');
+  return r;
+}
+
+module.exports = { parseRole, parseAccountEmail, parseOwnChildren, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };

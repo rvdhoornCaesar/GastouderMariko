@@ -19,18 +19,18 @@ test('niemand toegestaan als beide lijsten leeg zijn', async () => {
   await assert.rejects(authorizeMicrosoft(headers(mariko), repoWith([]), {}), { status: 403 });
 });
 
-test('vaste gebruiker uit ALLOWED_USERS is beheerder (hoofdletterongevoelig)', async () => {
+test('vaste gebruiker uit ALLOWED_USERS is admin (hoofdletterongevoelig)', async () => {
   const u = await authorizeMicrosoft(headers(mariko), repoWith([]), { ALLOWED_USERS: 'ander@x.nl, mariko@voorbeeld.nl' });
   assert.equal(u.email, 'mariko@voorbeeld.nl');
   assert.equal(u.fixed, true);
-  assert.equal(u.admin, true);
+  assert.equal(u.role, 'admin');
   assert.equal(u.kind, 'microsoft');
 });
 
-test('toegevoegde gebruiker uit de app is geen vaste gebruiker en geen admin', async () => {
+test('toegevoegde gebruiker uit de app is geen vaste gebruiker en alleen beheerder', async () => {
   const u = await authorizeMicrosoft(headers(mariko), repoWith(['mariko@voorbeeld.nl']), { ALLOWED_USERS: 'ander@x.nl' });
   assert.equal(u.fixed, false);
-  assert.equal(u.admin, false);
+  assert.equal(u.role, 'beheerder');
 });
 
 test('fixedUsers leest lijst', () => {
