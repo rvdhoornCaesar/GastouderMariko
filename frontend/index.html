@@ -71,7 +71,16 @@
   </nav>
 </header>
 
-<main>
+<main id="noaccess" hidden>
+  <div class="card">
+    <h2>Geen toegang</h2>
+    <p>Je bent ingelogd als <strong id="noaccessUser"></strong>, maar dit account heeft geen toegang tot deze omgeving.</p>
+    <p>Vraag de beheerder om dit e-mailadres toe te voegen, of log uit en kies een ander Microsoft-account.</p>
+    <a class="btn" href="/.auth/logout" style="display:inline-block;text-decoration:none">Uitloggen</a>
+  </div>
+</main>
+
+<main id="app">
   <!-- UREN -->
   <section id="tab-uren">
     <div class="datebar">
@@ -160,6 +169,7 @@
       body: body ? JSON.stringify(body) : undefined,
     });
     if (res.status === 401) { location.href = LOGIN; throw new Error('Niet ingelogd'); }
+    if (res.status === 403) { showNoAccess(); throw Object.assign(new Error('Geen toegang.'), { noAccess: true }); }
     if (res.status === 204) return null;
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || `Fout ${res.status}`);
@@ -175,7 +185,15 @@
   }
   // Voert een actie uit en meldt fouten; geeft undefined terug bij falen.
   async function guard(fn) {
-    try { return await fn(); } catch (e) { toast(e.message); }
+    try { return await fn(); } catch (e) { if (!e.noAccess) toast(e.message); }
+  }
+
+  let currentUser = '';
+  function showNoAccess() {
+    $('noaccessUser').textContent = currentUser;
+    $('app').hidden = true;
+    document.querySelector('nav').hidden = true;
+    $('noaccess').hidden = false;
   }
 
   async function ensureMonth(m, force) {
@@ -388,7 +406,8 @@
     try {
       const me = await (await fetch('/.auth/me')).json();
       if (!me.clientPrincipal) { location.href = LOGIN; return; }
-      $('user').textContent = me.clientPrincipal.userDetails;
+      currentUser = me.clientPrincipal.userDetails;
+      $('user').textContent = currentUser;
     } catch (e) { /* lokaal zonder auth-emulator: doorgaan */ }
     const children = await guard(() => api('GET', 'children'));
     if (children) state.children = children;

@@ -74,6 +74,13 @@ Bij elke deploy worden de resources uit `infra/main.bicep` aangemaakt of bijgewe
 
 Handmatig één omgeving aanmaken kan ook: `az deployment group create -g <rg> -f infra/main.bicep -p allowedUsers=mariko@voorbeeld.nl environmentName=test`.
 
+### Gebruikers toevoegen of verwijderen
+Wie erin mag, staat per omgeving in de GitHub-variabele `ALLOWED_USERS` (Settings → Environments → *test* / *production* → Variables): komma-gescheiden e-mailadressen, precies zoals ze bij Microsoft inloggen (hoofdletters maken niet uit), bijvoorbeeld `mariko@voorbeeld.nl, partner@voorbeeld.nl`.
+
+Pas de variabele aan en start de deploy opnieuw (*Actions → Deploy → Run workflow*, of *Re-run*). De pipeline zet de waarde dan als app-setting op de Static Web App. Het direct aanpassen in de Azure Portal werkt tot de volgende deploy, daarna wordt het weer overschreven door de variabele.
+
+Heeft iemand met een ander account geen toegang, dan krijgt die na het inloggen het scherm *Geen toegang*. De pagina zelf is voor elk ingelogd Microsoft-account te laden, maar bevat geen gegevens: alle data zit achter de API, en die controleert `ALLOWED_USERS`. Wil je de pagina ook blokkeren, dan kan dat met rollen/uitnodigingen van Static Web Apps.
+
 ### Kosten en aandachtspunten
 
 - Static Web App **Free** met managed functions kost niets, ook niet voor twee omgevingen; het storage-account kost bij dit gebruik centen per maand. Grenzen van Free: 100 GB bandwidth per maand, alleen HTTP-triggers, geen VNet. Test kun je tussendoor verwijderen (resource group weggooien); de pipeline maakt hem bij de volgende run opnieuw aan.
