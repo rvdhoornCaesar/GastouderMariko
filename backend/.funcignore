@@ -1,0 +1,7 @@
+test
+local.settings.json
+local.settings.json.example
+.azurite
+__azurite_db_*.json
+__blobstorage__
+__queuestorage__

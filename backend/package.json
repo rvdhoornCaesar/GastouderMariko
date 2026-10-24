@@ -1,0 +1,21 @@
+{
+  "name": "gastouder-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "API voor de gastouder urenregistratie (Azure Functions, Node.js)",
+  "main": "src/functions/*.js",
+  "scripts": {
+    "start": "func start",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@azure/data-tables": "^13.3.2",
+    "@azure/functions": "^4.16.5"
+  },
+  "devDependencies": {
+    "azurite": "^3.37.0"
+  }
+}

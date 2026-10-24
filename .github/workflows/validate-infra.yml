@@ -1,0 +1,58 @@
+name: Validate infra
+
+# Controleert de Bicep-template bij elke pull request die infra raakt.
+# Compileren/linten heeft geen Azure nodig; validate en what-if draaien alleen als de Azure-login is ingesteld.
+on:
+  pull_request:
+    paths:
+      - infra/**
+      - .github/workflows/validate-infra.yml
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  bicep:
+    runs-on: ubuntu-latest
+    # Alleen-lezen controle met de test-omgeving (zelfde login en resource group als de test-deploy).
+    environment: test
+    env:
+      HAS_AZURE: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' }}
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'gastouder-test-rg' }}
+      # De waarde doet er voor validatie niet toe.
+      ALLOWED_USERS: validatie@example.com
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bicep compileren en linten
+        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+
+      - uses: azure/login@v2
+        if: env.HAS_AZURE == 'true'
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Valideren en what-if
+        if: env.HAS_AZURE == 'true'
+        run: |
+          if [ "$(az group exists -n "$RESOURCE_GROUP")" != "true" ]; then
+            echo "::notice::Resource group $RESOURCE_GROUP bestaat nog niet (eerste deploy volgt); alleen gecompileerd, niet gevalideerd."
+            exit 0
+          fi
+          for env in test production; do
+            echo "::group::validate ($env)"
+            az deployment group validate -g "$RESOURCE_GROUP" -f infra/main.bicep \
+              -p allowedUsers="$ALLOWED_USERS" environmentName="$env" -o none
+            echo "::endgroup::"
+          done
+          {
+            echo '### What-if (test)'
+            echo '```'
+            az deployment group what-if -g "$RESOURCE_GROUP" -f infra/main.bicep \
+              -p allowedUsers="$ALLOWED_USERS" environmentName=test --no-pretty-print --result-format ResourceIdOnly 2>&1 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,86 @@
+name: Deploy (één omgeving)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: GitHub-environment en Azure-omgeving (test of production)
+        required: true
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || format('gastouder-{0}-rg', inputs.environment) }}
+      LOCATION: ${{ vars.AZURE_LOCATION || 'westeurope' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Infrastructuur (Bicep)
+        id: infra
+        env:
+          ALLOWED_USERS: ${{ vars.ALLOWED_USERS }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          if [ -z "$ALLOWED_USERS" ]; then echo "::error::Stel de variabele ALLOWED_USERS in voor environment $ENVIRONMENT."; exit 1; fi
+          if [ "$(az group exists -n "$RESOURCE_GROUP")" != "true" ]; then az group create -n "$RESOURCE_GROUP" -l "$LOCATION" -o none; fi
+          out=$(az deployment group create -g "$RESOURCE_GROUP" -f infra/main.bicep \
+                  -p allowedUsers="$ALLOWED_USERS" environmentName="$ENVIRONMENT" location="$LOCATION" \
+                  --query properties.outputs -o json)
+          {
+            echo "static_web_app=$(jq -r .staticWebAppName.value <<<"$out")"
+            echo "frontend_url=$(jq -r .frontendUrl.value <<<"$out")"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      # De API draait als managed functions in de Static Web App: stage alleen wat de runtime nodig heeft
+      # (geen tests, geen dev-dependencies zoals azurite) en lever het vooraf gebouwd aan.
+      - name: API klaarzetten
+        run: |
+          mkdir api
+          cp -r backend/src backend/host.json backend/package.json backend/package-lock.json api/
+          npm ci --omit=dev --prefix api
+          du -sh api
+
+      - name: Deployment-token Static Web App ophalen
+        id: swa
+        run: |
+          token=$(az staticwebapp secrets list -n "${{ steps.infra.outputs.static_web_app }}" -g "$RESOURCE_GROUP" --query properties.apiKey -o tsv)
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+
+      - name: Frontend uitrollen (Static Web App)
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.swa.outputs.token }}
+          action: upload
+          app_location: frontend
+          api_location: api
+          skip_app_build: true
+          skip_api_build: true
+
+      - name: Samenvatting
+        run: |
+          echo "### ${{ inputs.environment }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Frontend: ${{ steps.infra.outputs.frontend_url }}" >> "$GITHUB_STEP_SUMMARY"

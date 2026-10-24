@@ -1,0 +1,47 @@
+name: Deploy
+
+# Push naar main: tests → test → (goedkeuring) → production.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      only_test:
+        description: Alleen naar test uitrollen (niet naar production)
+        type: boolean
+        default: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  deploy-test:
+    needs: test
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: test
+    secrets: inherit
+
+  deploy-production:
+    needs: deploy-test
+    if: github.event_name == 'push' || !inputs.only_test
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: production
+    secrets: inherit

@@ -1,0 +1,401 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gastouder Uren</title>
+<style>
+  :root {
+    --bg: #fdf8f3; --card: #fff; --ink: #2b2b2b; --muted: #777; --line: #e8ddd0;
+    --accent: #e07a5f; --accent-ink: #fff; --ok: #3d9970; --danger: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #1d1b19; --card: #292624; --ink: #eee; --muted: #aaa; --line: #3e3a36; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 16px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--ink); }
+  header { padding: 14px 16px 0; max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.3rem; margin: 0 0 10px; display: flex; align-items: baseline; gap: 10px; }
+  h1 small { font-size: .8rem; font-weight: 400; color: var(--muted); margin-left: auto; }
+  h1 a { font-size: .8rem; font-weight: 400; color: var(--muted); }
+  #toast { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 728px; margin: 0 auto; padding: 12px 14px;
+    background: var(--danger); color: #fff; border-radius: 8px; z-index: 10; }
+  nav { display: flex; gap: 4px; }
+  nav button { flex: 1; padding: 10px 6px; border: 0; background: transparent; color: var(--muted);
+    font: inherit; font-weight: 600; border-bottom: 3px solid transparent; cursor: pointer; }
+  nav button.active { color: var(--accent); border-color: var(--accent); }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; margin-bottom: 14px; }
+  .card h2 { font-size: 1.05rem; margin: 0 0 10px; }
+  label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 3px; }
+  input, select, textarea { width: 100%; padding: 10px; font: inherit; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--bg); color: var(--ink); }
+  .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-bottom: 10px; }
+  button.btn { padding: 10px 16px; border: 0; border-radius: 8px; font: inherit; font-weight: 600;
+    background: var(--accent); color: var(--accent-ink); cursor: pointer; }
+  button.btn.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+  button.btn.small { padding: 5px 10px; font-size: .85rem; }
+  button.link { background: none; border: 0; color: var(--danger); cursor: pointer; font: inherit; padding: 4px; }
+  .datebar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
+  .datebar input { flex: 1; text-align: center; }
+  .entry { display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .entry:last-child { border-bottom: 0; }
+  .entry .who { font-weight: 600; }
+  .entry .meta { color: var(--muted); font-size: .85rem; }
+  .hours { font-variant-numeric: tabular-nums; font-weight: 700; white-space: nowrap; }
+  .total { display: flex; justify-content: space-between; padding-top: 10px; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; font-size: .92rem; }
+  th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 600; font-size: .8rem; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); text-align: center; padding: 14px 0; }
+  .err { color: var(--danger); font-size: .9rem; min-height: 1.2em; }
+  .contract { display: grid; grid-template-columns: 1fr 100px auto; gap: 8px; margin-bottom: 8px; align-items: end; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  [hidden] { display: none !important; }
+  @media print {
+    header, .noprint { display: none !important; }
+    body { background: #fff; color: #000; }
+    .card { border: 0; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Gastouder Uren <small id="user" class="noprint"></small> <a href="/.auth/logout" class="noprint" id="logout">uitloggen</a></h1>
+  <nav>
+    <button data-tab="uren" class="active">Uren invullen</button>
+    <button data-tab="overzicht">Overzicht</button>
+    <button data-tab="kinderen">Kinderen</button>
+  </nav>
+</header>
+
+<main>
+  <!-- UREN -->
+  <section id="tab-uren">
+    <div class="datebar">
+      <button class="btn secondary" id="prevDay" aria-label="Vorige dag">‹</button>
+      <input type="date" id="day">
+      <button class="btn secondary" id="nextDay" aria-label="Volgende dag">›</button>
+    </div>
+
+    <div class="card">
+      <h2 id="dayTitle">Vandaag</h2>
+      <div id="dayEntries"></div>
+      <div class="total"><span>Totaal deze dag</span><span class="hours" id="dayTotal">0:00</span></div>
+    </div>
+
+    <form class="card" id="entryForm">
+      <h2>Uren toevoegen</h2>
+      <div class="row">
+        <div style="grid-column: 1 / -1">
+          <label for="contract">Kind / contract</label>
+          <select id="contract" required></select>
+        </div>
+      </div>
+      <div class="row">
+        <div><label for="start">Van</label><input type="time" id="start" required></div>
+        <div><label for="end">Tot</label><input type="time" id="end" required></div>
+        <div><label for="pause">Pauze (min)</label><input type="number" id="pause" min="0" step="5" value="0"></div>
+      </div>
+      <div class="row">
+        <div style="grid-column: 1 / -1"><label for="note">Opmerking (optioneel)</label><input type="text" id="note"></div>
+      </div>
+      <div class="err" id="entryErr"></div>
+      <button class="btn" type="submit">Toevoegen</button>
+    </form>
+  </section>
+
+  <!-- OVERZICHT -->
+  <section id="tab-overzicht" hidden>
+    <div class="datebar noprint">
+      <button class="btn secondary" id="prevMonth" aria-label="Vorige maand">‹</button>
+      <input type="month" id="month">
+      <button class="btn secondary" id="nextMonth" aria-label="Volgende maand">›</button>
+    </div>
+    <div class="card">
+      <h2 id="monthTitle"></h2>
+      <div id="summary"></div>
+    </div>
+    <div class="card">
+      <h2>Alle registraties</h2>
+      <div id="monthEntries"></div>
+    </div>
+    <div class="actions noprint">
+      <button class="btn" id="csv">Download CSV</button>
+      <button class="btn secondary" id="print">Afdrukken</button>
+    </div>
+  </section>
+
+  <!-- KINDEREN -->
+  <section id="tab-kinderen" hidden>
+    <div id="childList"></div>
+    <form class="card" id="childForm">
+      <h2>Kind toevoegen</h2>
+      <div class="row"><div><label for="childName">Naam</label><input id="childName" required></div></div>
+      <button class="btn" type="submit">Toevoegen</button>
+    </form>
+  </section>
+</main>
+<div id="toast" role="alert" hidden></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const pad = (n) => String(n).padStart(2, '0');
+  const iso = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const euro = (n) => n.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });
+  const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  const state = { children: [], entries: [] };
+  const loadedMonths = new Set();
+
+  // --- API ---
+  const LOGIN = '/.auth/login/aad?post_login_redirect_uri=/';
+  async function api(method, path, body) {
+    const res = await fetch('/api/' + path, {
+      method,
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (res.status === 401) { location.href = LOGIN; throw new Error('Niet ingelogd'); }
+    if (res.status === 204) return null;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Fout ${res.status}`);
+    return data;
+  }
+
+  let toastTimer;
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg; t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
+  }
+  // Voert een actie uit en meldt fouten; geeft undefined terug bij falen.
+  async function guard(fn) {
+    try { return await fn(); } catch (e) { toast(e.message); }
+  }
+
+  async function ensureMonth(m, force) {
+    if (loadedMonths.has(m) && !force) return;
+    const list = await api('GET', 'entries?month=' + m);
+    state.entries = state.entries.filter((e) => !e.date.startsWith(m)).concat(list);
+    loadedMonths.add(m);
+  }
+
+  // --- helpers ---
+  const toMin = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+  const fmt = (min) => `${Math.floor(min / 60)}:${pad(min % 60)}`;
+  const entryMin = (e) => toMin(e.end) - toMin(e.start) - (e.pause || 0);
+  const contracts = () => state.children.flatMap((c) => c.contracts.map((k) => ({ child: c, contract: k })));
+  const findContract = (id) => contracts().find((x) => x.contract.id === id);
+  const label = (x) => x ? `${x.child.name} – ${x.contract.name}` : '(verwijderd contract)';
+  const rateOf = (x) => (x ? Number(x.contract.rate) || 0 : 0);
+
+  // --- tabs ---
+  document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('active', x === b));
+    ['uren', 'overzicht', 'kinderen'].forEach((t) => $('tab-' + t).hidden = t !== b.dataset.tab);
+    render();
+  }));
+
+  // --- uren tab ---
+  const shiftDay = (n) => { const d = new Date($('day').value + 'T12:00'); d.setDate(d.getDate() + n); $('day').value = iso(d); renderDay(); };
+  $('prevDay').onclick = () => shiftDay(-1);
+  $('nextDay').onclick = () => shiftDay(1);
+  $('day').onchange = renderDay;
+
+  let daySeq = 0;
+  async function renderDay() {
+    const day = $('day').value;
+    if (!day) return;
+    const seq = ++daySeq;
+    await guard(() => ensureMonth(day.slice(0, 7)));
+    if (seq !== daySeq) return;
+    $('dayTitle').textContent = new Date(day + 'T12:00').toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
+    const list = state.entries.filter((e) => e.date === day).sort((a, b) => a.start.localeCompare(b.start));
+    $('dayEntries').innerHTML = list.length ? list.map((e) => entryRow(e)).join('') : '<div class="empty">Nog geen uren voor deze dag.</div>';
+    $('dayTotal').textContent = fmt(list.reduce((s, e) => s + entryMin(e), 0));
+
+    const sel = $('contract'), prev = sel.value;
+    sel.innerHTML = contracts().length
+      ? contracts().map((x) => `<option value="${x.contract.id}">${esc(label(x))}</option>`).join('')
+      : '<option value="">Voeg eerst een kind + contract toe (tab Kinderen)</option>';
+    if (prev) sel.value = prev;
+  }
+
+  function entryRow(e, withDate) {
+    const x = findContract(e.contractId);
+    return `<div class="entry"><div><div class="who">${withDate ? esc(e.date.split('-').reverse().join('-')) + ' · ' : ''}${esc(label(x))}</div>
+      <div class="meta">${e.start}–${e.end}${e.pause ? ` · pauze ${e.pause} min` : ''}${e.note ? ' · ' + esc(e.note) : ''}</div></div>
+      <div><span class="hours">${fmt(entryMin(e))}</span> <button class="link noprint" data-del="${e.id}" title="Verwijderen">✕</button></div></div>`;
+  }
+
+  $('entryForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const e = { date: $('day').value, contractId: $('contract').value, start: $('start').value,
+      end: $('end').value, pause: Number($('pause').value) || 0, note: $('note').value.trim() };
+    const err = $('entryErr');
+    if (!e.contractId) return err.textContent = 'Kies een kind/contract.';
+    if (entryMin(e) <= 0) return err.textContent = 'Eindtijd moet na de begintijd liggen (na aftrek pauze).';
+    err.textContent = '';
+    const btn = ev.submitter; btn.disabled = true;
+    const saved = await guard(() => api('POST', 'entries', e));
+    btn.disabled = false;
+    if (!saved) return;
+    state.entries.push(saved);
+    $('note').value = ''; $('pause').value = 0;
+    renderDay();
+  });
+
+  document.addEventListener('click', async (ev) => {
+    const id = ev.target.dataset && ev.target.dataset.del;
+    if (id && confirm('Deze registratie verwijderen?')) {
+      if (await guard(() => api('DELETE', 'entries/' + id).then(() => true))) {
+        state.entries = state.entries.filter((e) => e.id !== id);
+        render();
+      }
+    }
+  });
+
+  // --- overzicht ---
+  const shiftMonth = (n) => { const [y, m] = $('month').value.split('-').map(Number); $('month').value = iso(new Date(y, m - 1 + n, 1)).slice(0, 7); renderMonth(); };
+  $('prevMonth').onclick = () => shiftMonth(-1);
+  $('nextMonth').onclick = () => shiftMonth(1);
+  $('month').onchange = renderMonth;
+
+  const monthEntries = () => state.entries.filter((e) => e.date.startsWith($('month').value))
+    .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
+
+  let monthSeq = 0;
+  async function renderMonth() {
+    const m = $('month').value;
+    if (!m) return;
+    const seq = ++monthSeq;
+    await guard(() => ensureMonth(m));
+    if (seq !== monthSeq) return;
+    const [y, mo] = m.split('-').map(Number);
+    $('monthTitle').textContent = new Date(y, mo - 1, 1).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
+    const list = monthEntries();
+    const per = {};
+    list.forEach((e) => { per[e.contractId] = (per[e.contractId] || 0) + entryMin(e); });
+    let totMin = 0, totEur = 0;
+    const rows = Object.entries(per).map(([cid, min]) => {
+      const x = findContract(cid), eur = (min / 60) * rateOf(x);
+      totMin += min; totEur += eur;
+      return `<tr><td>${esc(label(x))}</td><td class="num">${fmt(min)}</td><td class="num">${euro(rateOf(x))}</td><td class="num">${euro(eur)}</td></tr>`;
+    });
+    $('summary').innerHTML = rows.length
+      ? `<table><tr><th>Kind – contract</th><th class="num">Uren</th><th class="num">Tarief</th><th class="num">Bedrag</th></tr>${rows.join('')}
+         <tr><th>Totaal</th><th class="num">${fmt(totMin)}</th><th></th><th class="num">${euro(totEur)}</th></tr></table>`
+      : '<div class="empty">Geen uren in deze maand.</div>';
+    $('monthEntries').innerHTML = list.length ? list.map((e) => entryRow(e, true)).join('') : '<div class="empty">Geen registraties.</div>';
+  }
+
+  $('print').onclick = () => window.print();
+  $('csv').onclick = () => {
+    const q = (v) => `"${String(v).replace(/"/g, '""')}"`;
+    const lines = [['Datum', 'Kind', 'Contract', 'Van', 'Tot', 'Pauze (min)', 'Uren', 'Tarief', 'Bedrag', 'Opmerking'].join(';')];
+    monthEntries().forEach((e) => {
+      const x = findContract(e.contractId), h = entryMin(e) / 60;
+      lines.push([e.date, q(x ? x.child.name : ''), q(x ? x.contract.name : ''), e.start, e.end, e.pause || 0,
+        h.toFixed(2).replace('.', ','), rateOf(x).toFixed(2).replace('.', ','), (h * rateOf(x)).toFixed(2).replace('.', ','), q(e.note || '')].join(';'));
+    });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
+    a.download = `uren-${$('month').value}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+
+  // --- kinderen ---
+  function renderChildren() {
+    $('childList').innerHTML = state.children.map((c) => `
+      <div class="card" data-child="${c.id}">
+        <h2>${esc(c.name)} <button class="link" data-rmchild="${c.id}">verwijderen</button></h2>
+        ${c.contracts.map((k) => `<div class="contract"><div><label>Contract</label><input value="${esc(k.name)}" data-k="${k.id}" data-f="name"></div>
+          <div><label>€ / uur</label><input type="number" step="0.01" min="0" value="${k.rate}" data-k="${k.id}" data-f="rate"></div>
+          <button class="link" data-rmk="${k.id}" title="Contract verwijderen">✕</button></div>`).join('')}
+        <form data-addk="${c.id}" class="contract">
+          <div><label>Nieuw contract (bijv. “Ma–Wo”, “Opvang extra”)</label><input name="n" required></div>
+          <div><label>€ / uur</label><input name="r" type="number" step="0.01" min="0" required></div>
+          <button class="btn small">+</button>
+        </form>
+      </div>`).join('') || '<div class="empty">Nog geen kinderen. Voeg hieronder een kind toe.</div>';
+  }
+
+  const replaceChild = (c) => { state.children = state.children.map((x) => (x.id === c.id ? c : x)); };
+  // Slaat een gewijzigd kind (met contracten) op en vervangt het lokaal door het antwoord van de server.
+  async function saveChild(child) {
+    const saved = await guard(() => api('PUT', 'children/' + child.id, child));
+    if (saved) replaceChild(saved);
+    render();
+    return saved;
+  }
+
+  $('childForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const c = await guard(() => api('POST', 'children', { name: $('childName').value.trim() }));
+    if (!c) return;
+    state.children.push(c);
+    state.children.sort((a, b) => a.name.localeCompare(b.name, 'nl'));
+    $('childName').value = '';
+    render();
+  });
+
+  $('childList').addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    const c = state.children.find((x) => x.id === ev.target.dataset.addk);
+    if (c) saveChild({ ...c, contracts: [...c.contracts, { name: ev.target.n.value.trim(), rate: Number(ev.target.r.value) || 0 }] });
+  });
+
+  $('childList').addEventListener('change', (ev) => {
+    const t = ev.target, kid = t.dataset.k;
+    if (!kid) return;
+    const c = state.children.find((x) => x.contracts.some((k) => k.id === kid));
+    const v = t.dataset.f === 'rate' ? Number(t.value) || 0 : t.value.trim();
+    saveChild({ ...c, contracts: c.contracts.map((k) => (k.id === kid ? { ...k, [t.dataset.f]: v } : k)) });
+  });
+
+  $('childList').addEventListener('click', async (ev) => {
+    const t = ev.target;
+    if (t.dataset.rmchild) {
+      const c = state.children.find((x) => x.id === t.dataset.rmchild);
+      if (!confirm(`${c.name} en alle bijbehorende uren verwijderen?`)) return;
+      if (await guard(() => api('DELETE', 'children/' + c.id).then(() => true))) {
+        const ids = c.contracts.map((k) => k.id);
+        state.entries = state.entries.filter((e) => !ids.includes(e.contractId));
+        state.children = state.children.filter((x) => x !== c);
+        render();
+      }
+    } else if (t.dataset.rmk) {
+      if (!confirm('Contract en bijbehorende uren verwijderen?')) return;
+      const c = state.children.find((x) => x.contracts.some((k) => k.id === t.dataset.rmk));
+      if (await saveChild({ ...c, contracts: c.contracts.filter((k) => k.id !== t.dataset.rmk) })) {
+        state.entries = state.entries.filter((e) => e.contractId !== t.dataset.rmk);
+        render();
+      }
+    }
+  });
+
+  function render() { renderDay(); renderMonth(); renderChildren(); }
+
+  async function init() {
+    $('day').value = iso(new Date());
+    $('month').value = iso(new Date()).slice(0, 7);
+    $('start').value = '08:00'; $('end').value = '17:00';
+    try {
+      const me = await (await fetch('/.auth/me')).json();
+      if (!me.clientPrincipal) { location.href = LOGIN; return; }
+      $('user').textContent = me.clientPrincipal.userDetails;
+    } catch (e) { /* lokaal zonder auth-emulator: doorgaan */ }
+    const children = await guard(() => api('GET', 'children'));
+    if (children) state.children = children;
+    render();
+  }
+  init();
+})();
+</script>
+</body>
+</html>
