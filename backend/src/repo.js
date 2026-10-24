@@ -1,7 +1,9 @@
 const { TableClient } = require('@azure/data-tables');
 
-// Azure Table Storage. PartitionKey = gebruiker, RowKey = id.
-// Uren hebben RowKey "JJJJ-MM-DD_xxxx", zodat een maand een simpele range-query is.
+// Azure Table Storage. Alle gegevens van een omgeving worden gedeeld door alle toegestane gebruikers
+// (PartitionKey is altijd 'main'). Uren hebben RowKey "JJJJ-MM-DD_xxxx", zodat een maand een simpele range-query is.
+const PK = 'main';
+
 function createRepo(connectionString) {
   const tables = {};
   const table = (name) => {
@@ -20,49 +22,69 @@ function createRepo(connectionString) {
   const toChild = (r) => ({ id: r.rowKey, name: r.name, contracts: JSON.parse(r.contracts || '[]') });
   const toEntry = (r) => ({ id: r.rowKey, date: r.rowKey.slice(0, 10), contractId: r.contractId, start: r.start, end: r.end, note: r.note });
 
-  const listEntries = async (user, filter) => {
+  const listEntries = async (filter) => {
     const t = await table('entries');
-    const rows = await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${user}'${filter}` } }));
+    const rows = await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${PK}'${filter}` } }));
     return rows.map(toEntry);
   };
 
+  // Instellingen: één rij per soort, de lijst staat als JSON in 'value'.
+  const getSetting = async (key) => {
+    const t = await table('settings');
+    try {
+      return JSON.parse((await t.getEntity(PK, key)).value);
+    } catch (e) {
+      if (e.statusCode === 404) return [];
+      throw e;
+    }
+  };
+  const setSetting = async (key, list) => {
+    const t = await table('settings');
+    await t.upsertEntity({ partitionKey: PK, rowKey: key, value: JSON.stringify(list) }, 'Replace');
+  };
+
   return {
-    async listChildren(user) {
+    getUsers: () => getSetting('users'),
+    setUsers: (list) => setSetting('users', list),
+    getRates: () => getSetting('rates'),
+    setRates: (list) => setSetting('rates', list),
+
+    async listChildren() {
       const t = await table('children');
-      const rows = await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${user}'` } }));
+      const rows = await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${PK}'` } }));
       return rows.map(toChild).sort((a, b) => a.name.localeCompare(b.name, 'nl'));
     },
-    async getChild(user, id) {
+    async getChild(id) {
       const t = await table('children');
       try {
-        return toChild(await t.getEntity(user, id));
+        return toChild(await t.getEntity(PK, id));
       } catch (e) {
         if (e.statusCode === 404) return null;
         throw e;
       }
     },
-    async saveChild(user, child) {
+    async saveChild(child) {
       const t = await table('children');
-      await t.upsertEntity({ partitionKey: user, rowKey: child.id, name: child.name, contracts: JSON.stringify(child.contracts) }, 'Replace');
+      await t.upsertEntity({ partitionKey: PK, rowKey: child.id, name: child.name, contracts: JSON.stringify(child.contracts) }, 'Replace');
     },
-    async deleteChild(user, id) {
-      await (await table('children')).deleteEntity(user, id);
+    async deleteChild(id) {
+      await (await table('children')).deleteEntity(PK, id);
     },
     // '-' en '.' liggen naast elkaar in ASCII, dus dit selecteert precies één maand.
-    listEntriesOfMonth(user, month) {
-      return listEntries(user, ` and RowKey ge '${month}-' and RowKey lt '${month}.'`);
+    listEntriesOfMonth(month) {
+      return listEntries(` and RowKey ge '${month}-' and RowKey lt '${month}.'`);
     },
-    async saveEntry(user, e) {
+    async saveEntry(e) {
       const t = await table('entries');
-      await t.upsertEntity({ partitionKey: user, rowKey: e.id, contractId: e.contractId, start: e.start, end: e.end, note: e.note }, 'Replace');
+      await t.upsertEntity({ partitionKey: PK, rowKey: e.id, contractId: e.contractId, start: e.start, end: e.end, note: e.note }, 'Replace');
     },
-    async deleteEntry(user, id) {
-      await (await table('entries')).deleteEntity(user, id);
+    async deleteEntry(id) {
+      await (await table('entries')).deleteEntity(PK, id);
     },
-    async deleteEntriesOfContracts(user, contractIds) {
+    async deleteEntriesOfContracts(contractIds) {
       const t = await table('entries');
       const ids = new Set(contractIds);
-      for (const e of await listEntries(user, '')) if (ids.has(e.contractId)) await t.deleteEntity(user, e.id);
+      for (const e of await listEntries('')) if (ids.has(e.contractId)) await t.deleteEntity(PK, e.id);
     },
   };
 }

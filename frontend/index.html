@@ -53,6 +53,11 @@
   .err { color: var(--danger); font-size: .9rem; min-height: 1.2em; }
   .contract { display: grid; grid-template-columns: 1fr 100px auto; gap: 8px; margin-bottom: 8px; align-items: end; }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .hint { color: var(--muted); font-size: .9rem; margin: 0 0 10px; }
+  .rate-row { display: grid; grid-template-columns: 1fr 1fr 90px auto; gap: 8px; align-items: end; margin-top: 10px; }
+  .user-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-top: 10px; }
+  .tag { font-size: .75rem; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin-left: 6px; }
+  .warn { color: var(--danger); font-size: .9rem; margin-top: 8px; }
   [hidden] { display: none !important; }
   @media print {
     header, .noprint { display: none !important; }
@@ -68,6 +73,7 @@
     <button data-tab="uren" class="active">Uren invullen</button>
     <button data-tab="overzicht">Overzicht</button>
     <button data-tab="kinderen">Kinderen</button>
+    <button data-tab="instellingen">Instellingen</button>
   </nav>
 </header>
 
@@ -145,6 +151,33 @@
       <button class="btn" type="submit">Toevoegen</button>
     </form>
   </section>
+
+  <!-- INSTELLINGEN -->
+  <section id="tab-instellingen" hidden>
+    <div class="card">
+      <h2>Algemeen uurtarief</h2>
+      <p class="hint">Geldt voor contracten zonder eigen tarief, volgens de datum van de registratie. Laat “Tot” leeg als de periode doorloopt.</p>
+      <div id="rateList"></div>
+      <form class="rate-row" id="rateForm">
+        <div><label for="rateFrom">Van</label><input type="date" id="rateFrom" required></div>
+        <div><label for="rateTo">Tot</label><input type="date" id="rateTo"></div>
+        <div><label for="rateValue">€ / uur</label><input type="number" id="rateValue" step="0.01" min="0" required></div>
+        <button class="btn small">+</button>
+      </form>
+      <div class="err" id="rateErr"></div>
+    </div>
+
+    <div class="card">
+      <h2>Toegestane gebruikers</h2>
+      <p class="hint">Iedereen in deze lijst kan inloggen en ziet dezelfde gegevens. Gebruik het adres waarmee ze bij Microsoft inloggen.</p>
+      <div id="userList"></div>
+      <form class="user-row" id="userForm">
+        <div><label for="userEmail">E-mailadres</label><input type="email" id="userEmail" required></div>
+        <button class="btn small">+</button>
+      </form>
+      <div class="err" id="userErr"></div>
+    </div>
+  </section>
 </main>
 <div id="toast" role="alert" hidden></div>
 
@@ -156,7 +189,7 @@
   const euro = (n) => n.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  const state = { children: [], entries: [] };
+  const state = { children: [], entries: [], settings: { rates: [], users: [], fixedUsers: [], me: '' } };
   const loadedMonths = new Set();
 
   // --- API ---
@@ -209,12 +242,15 @@
   const contracts = () => state.children.flatMap((c) => c.contracts.map((k) => ({ child: c, contract: k })));
   const findContract = (id) => contracts().find((x) => x.contract.id === id);
   const label = (x) => x ? `${x.child.name} – ${x.contract.name}` : '(verwijderd contract)';
-  const rateOf = (x) => (x ? Number(x.contract.rate) || 0 : 0);
+  // Tarief voor een registratie: eigen contracttarief, anders het algemene tarief op die datum (null = onbekend).
+  const generalRate = (date) => { const r = state.settings.rates.find((x) => x.from <= date && (!x.to || date <= x.to)); return r ? r.rate : null; };
+  const rateFor = (x, date) => (!x ? null : x.contract.rate !== null && x.contract.rate !== undefined ? Number(x.contract.rate) : generalRate(date));
+  const nlDate = (d) => d.split('-').reverse().join('-');
 
   // --- tabs ---
   document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('active', x === b));
-    ['uren', 'overzicht', 'kinderen'].forEach((t) => $('tab-' + t).hidden = t !== b.dataset.tab);
+    ['uren', 'overzicht', 'kinderen', 'instellingen'].forEach((t) => $('tab-' + t).hidden = t !== b.dataset.tab);
     render();
   }));
 
@@ -297,16 +333,24 @@
     $('monthTitle').textContent = new Date(y, mo - 1, 1).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
     const list = monthEntries();
     const per = {};
-    list.forEach((e) => { per[e.contractId] = (per[e.contractId] || 0) + entryMin(e); });
+    let missing = false;
+    list.forEach((e) => {
+      const x = findContract(e.contractId), rate = rateFor(x, e.date), min = entryMin(e);
+      const p = (per[e.contractId] ||= { x, min: 0, eur: 0, rates: new Set() });
+      p.min += min;
+      p.eur += (min / 60) * (rate ?? 0);
+      if (rate === null) missing = true; else p.rates.add(rate);
+    });
     let totMin = 0, totEur = 0;
-    const rows = Object.entries(per).map(([cid, min]) => {
-      const x = findContract(cid), eur = (min / 60) * rateOf(x);
-      totMin += min; totEur += eur;
-      return `<tr><td>${esc(label(x))}</td><td class="num">${fmt(min)}</td><td class="num">${euro(rateOf(x))}</td><td class="num">${euro(eur)}</td></tr>`;
+    const rows = Object.values(per).map((p) => {
+      totMin += p.min; totEur += p.eur;
+      const tarief = p.rates.size === 1 ? euro([...p.rates][0]) : p.rates.size > 1 ? 'wisselend' : '–';
+      return `<tr><td>${esc(label(p.x))}</td><td class="num">${fmt(p.min)}</td><td class="num">${tarief}</td><td class="num">${euro(p.eur)}</td></tr>`;
     });
     $('summary').innerHTML = rows.length
       ? `<table><tr><th>Kind – contract</th><th class="num">Uren</th><th class="num">Tarief</th><th class="num">Bedrag</th></tr>${rows.join('')}
-         <tr><th>Totaal</th><th class="num">${fmt(totMin)}</th><th></th><th class="num">${euro(totEur)}</th></tr></table>`
+         <tr><th>Totaal</th><th class="num">${fmt(totMin)}</th><th></th><th class="num">${euro(totEur)}</th></tr></table>
+         ${missing ? '<div class="warn">Voor sommige registraties is geen tarief bekend (bedrag telt als € 0). Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.</div>' : ''}`
       : '<div class="empty">Geen uren in deze maand.</div>';
     $('monthEntries').innerHTML = list.length ? list.map((e) => entryRow(e, true)).join('') : '<div class="empty">Geen registraties.</div>';
   }
@@ -316,9 +360,10 @@
     const q = (v) => `"${String(v).replace(/"/g, '""')}"`;
     const lines = [['Datum', 'Kind', 'Contract', 'Van', 'Tot', 'Uren', 'Tarief', 'Bedrag', 'Opmerking'].join(';')];
     monthEntries().forEach((e) => {
-      const x = findContract(e.contractId), h = entryMin(e) / 60;
+      const x = findContract(e.contractId), h = entryMin(e) / 60, rate = rateFor(x, e.date);
+      const dec = (n) => n.toFixed(2).replace('.', ',');
       lines.push([e.date, q(x ? x.child.name : ''), q(x ? x.contract.name : ''), e.start, e.end,
-        h.toFixed(2).replace('.', ','), rateOf(x).toFixed(2).replace('.', ','), (h * rateOf(x)).toFixed(2).replace('.', ','), q(e.note || '')].join(';'));
+        dec(h), rate === null ? '' : dec(rate), dec(h * (rate ?? 0)), q(e.note || '')].join(';'));
     });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
@@ -332,11 +377,11 @@
       <div class="card" data-child="${c.id}">
         <h2>${esc(c.name)} <button class="link" data-rmchild="${c.id}">verwijderen</button></h2>
         ${c.contracts.map((k) => `<div class="contract"><div><label>Contract</label><input value="${esc(k.name)}" data-k="${k.id}" data-f="name"></div>
-          <div><label>€ / uur</label><input type="number" step="0.01" min="0" value="${k.rate}" data-k="${k.id}" data-f="rate"></div>
+          <div><label>€ / uur</label><input type="number" step="0.01" min="0" value="${k.rate ?? ''}" placeholder="algemeen" data-k="${k.id}" data-f="rate"></div>
           <button class="link" data-rmk="${k.id}" title="Contract verwijderen">✕</button></div>`).join('')}
         <form data-addk="${c.id}" class="contract">
-          <div><label>Nieuw contract (bijv. “Ma–Wo”, “Opvang extra”)</label><input name="n" required></div>
-          <div><label>€ / uur</label><input name="r" type="number" step="0.01" min="0" required></div>
+          <div><label>Nieuw contract (bijv. “Ma–Wo”); tarief leeg = algemeen</label><input name="n" required></div>
+          <div><label>€ / uur</label><input name="r" type="number" step="0.01" min="0" placeholder="algemeen"></div>
           <button class="btn small">+</button>
         </form>
       </div>`).join('') || '<div class="empty">Nog geen kinderen. Voeg hieronder een kind toe.</div>';
@@ -364,14 +409,14 @@
   $('childList').addEventListener('submit', (ev) => {
     ev.preventDefault();
     const c = state.children.find((x) => x.id === ev.target.dataset.addk);
-    if (c) saveChild({ ...c, contracts: [...c.contracts, { name: ev.target.n.value.trim(), rate: Number(ev.target.r.value) || 0 }] });
+    if (c) saveChild({ ...c, contracts: [...c.contracts, { name: ev.target.n.value.trim(), rate: ev.target.r.value === '' ? null : Number(ev.target.r.value) }] });
   });
 
   $('childList').addEventListener('change', (ev) => {
     const t = ev.target, kid = t.dataset.k;
     if (!kid) return;
     const c = state.children.find((x) => x.contracts.some((k) => k.id === kid));
-    const v = t.dataset.f === 'rate' ? Number(t.value) || 0 : t.value.trim();
+    const v = t.dataset.f === 'rate' ? (t.value === '' ? null : Number(t.value)) : t.value.trim();
     saveChild({ ...c, contracts: c.contracts.map((k) => (k.id === kid ? { ...k, [t.dataset.f]: v } : k)) });
   });
 
@@ -396,7 +441,52 @@
     }
   });
 
-  function render() { renderDay(); renderMonth(); renderChildren(); }
+  // --- instellingen ---
+  function renderSettings() {
+    const { rates, users, fixedUsers, me } = state.settings;
+    $('rateList').innerHTML = rates.length
+      ? `<table><tr><th>Van</th><th>Tot</th><th class="num">€ / uur</th><th></th></tr>${rates.map((r) =>
+          `<tr><td>${nlDate(r.from)}</td><td>${r.to ? nlDate(r.to) : 'doorlopend'}</td><td class="num">${euro(r.rate)}</td>
+           <td class="num"><button class="link" data-rmrate="${r.id}" title="Verwijderen">✕</button></td></tr>`).join('')}</table>`
+      : '<div class="empty">Nog geen algemeen tarief.</div>';
+    const row = (e, fixed) => `<div class="entry"><div class="who">${esc(e)}${fixed ? '<span class="tag">beheerder</span>' : ''}${e === me ? '<span class="tag">jij</span>' : ''}</div>
+      ${fixed || e === me ? '' : `<button class="link" data-rmuser="${esc(e)}" title="Verwijderen">✕</button>`}</div>`;
+    $('userList').innerHTML = fixedUsers.map((e) => row(e, true)).join('') + users.map((e) => row(e, false)).join('')
+      || '<div class="empty">Nog geen gebruikers.</div>';
+  }
+
+  // Slaat een instelling op; fouten komen onder het formulier te staan.
+  async function saveSetting(errEl, path, body, apply) {
+    errEl.textContent = '';
+    try {
+      apply(await api('PUT', 'settings/' + path, body));
+      render();
+      return true;
+    } catch (e) {
+      if (!e.noAccess) errEl.textContent = e.message;
+      return false;
+    }
+  }
+
+  $('rateForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const r = { from: $('rateFrom').value, to: $('rateTo').value || null, rate: Number($('rateValue').value) };
+    if (await saveSetting($('rateErr'), 'rates', { rates: [...state.settings.rates, r] }, (res) => { state.settings.rates = res.rates; })) ev.target.reset();
+  });
+  $('rateList').addEventListener('click', (ev) => {
+    const id = ev.target.dataset.rmrate;
+    if (id && confirm('Dit tarief verwijderen?')) saveSetting($('rateErr'), 'rates', { rates: state.settings.rates.filter((r) => r.id !== id) }, (res) => { state.settings.rates = res.rates; });
+  });
+  $('userForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    if (await saveSetting($('userErr'), 'users', { users: [...state.settings.users, $('userEmail').value] }, (res) => { state.settings.users = res.users; })) ev.target.reset();
+  });
+  $('userList').addEventListener('click', (ev) => {
+    const email = ev.target.dataset.rmuser;
+    if (email && confirm(`${email} de toegang ontnemen?`)) saveSetting($('userErr'), 'users', { users: state.settings.users.filter((e) => e !== email) }, (res) => { state.settings.users = res.users; });
+  });
+
+  function render() { renderDay(); renderMonth(); renderChildren(); renderSettings(); }
 
   async function init() {
     $('day').value = iso(new Date());
@@ -408,8 +498,9 @@
       currentUser = me.clientPrincipal.userDetails;
       $('user').textContent = currentUser;
     } catch (e) { /* lokaal zonder auth-emulator: doorgaan */ }
-    const children = await guard(() => api('GET', 'children'));
+    const [children, settings] = await Promise.all([guard(() => api('GET', 'children')), guard(() => api('GET', 'settings'))]);
     if (children) state.children = children;
+    if (settings) state.settings = settings;
     render();
   }
   init();

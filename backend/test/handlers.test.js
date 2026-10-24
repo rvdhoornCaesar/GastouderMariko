@@ -10,8 +10,9 @@ const h = require('../src/handlers');
 
 // Draait tegen een echte Azurite (lokale Table Storage-emulator).
 let azurite, repo, dir;
-const user = { id: 'u1', name: 'mariko@voorbeeld.nl' };
-const call = (fn, extra = {}) => fn({ user, repo, params: {}, query: {}, ...extra });
+const env = { ALLOWED_USERS: 'mariko@voorbeeld.nl' };
+const fixedUser = { email: 'mariko@voorbeeld.nl', fixed: true };
+const call = (fn, extra = {}) => fn({ user: fixedUser, repo, env, params: {}, query: {}, ...extra });
 
 const waitForPort = (port) => new Promise((resolve, reject) => {
   const deadline = Date.now() + 20000;
@@ -39,7 +40,7 @@ test('kind + contracten aanmaken en teruglezen', async () => {
   assert.equal(list.jsonBody[0].contracts[0].rate, 8.5);
 });
 
-test('uren: toevoegen, per maand ophalen, andere gebruiker ziet niets, verwijderen', async () => {
+test('uren: toevoegen, per maand ophalen, verwijderen', async () => {
   const [child] = (await call(h.listChildren)).jsonBody;
   const contractId = child.contracts[0].id;
   const body = { date: '2026-10-21', contractId, start: '08:00', end: '17:00', note: 'x' };
@@ -50,9 +51,6 @@ test('uren: toevoegen, per maand ophalen, andere gebruiker ziet niets, verwijder
   const okt = (await call(h.listEntries, { query: { month: '2026-10' } })).jsonBody;
   assert.equal(okt.length, 1);
   assert.deepEqual(okt[0], created);
-
-  const other = await h.listEntries({ user: { id: 'u2' }, repo, query: { month: '2026-10' } });
-  assert.equal(other.jsonBody.length, 0);
 
   assert.equal((await call(h.deleteEntry, { params: { id: created.id } })).status, 204);
   assert.equal((await call(h.listEntries, { query: { month: '2026-10' } })).jsonBody.length, 0);
@@ -85,4 +83,47 @@ test('contract verwijderen en kind verwijderen nemen uren mee', async () => {
   left = (await call(h.listEntries, { query: { month: '2026-12' } })).jsonBody;
   assert.equal(left.length, 0);
   await assert.rejects(call(h.updateChild, { params: { id: child.id }, body: { name: 'x' } }), { status: 404 });
+});
+
+test('contract zonder tarief gebruikt het algemene tarief (rate = null)', async () => {
+  const res = await call(h.createChild, { body: { name: 'Lisa', contracts: [{ name: 'Standaard', rate: '' }, { name: 'Vast', rate: 9.456 }] } });
+  assert.deepEqual(res.jsonBody.contracts.map((k) => k.rate), [null, 9.46]);
+  await call(h.deleteChild, { params: { id: res.jsonBody.id } });
+});
+
+test('algemene tarieven: opslaan, sorteren, open einddatum', async () => {
+  const body = { rates: [{ from: '2027-01-01', to: null, rate: 9 }, { from: '2026-01-01', to: '2026-12-31', rate: '8.5' }] };
+  const res = await call(h.putRates, { body });
+  assert.deepEqual(res.jsonBody.rates.map((r) => [r.from, r.to, r.rate]), [['2026-01-01', '2026-12-31', 8.5], ['2027-01-01', null, 9]]);
+  const settings = (await call(h.getSettings)).jsonBody;
+  assert.equal(settings.rates.length, 2);
+  assert.deepEqual(settings.fixedUsers, ['mariko@voorbeeld.nl']);
+  assert.equal(settings.me, 'mariko@voorbeeld.nl');
+});
+
+test('algemene tarieven: validatie en overlap', async () => {
+  const r = (from, to, rate = 8) => ({ from, to, rate });
+  for (const rates of [
+    [r('2026-02-30', null)], [r('2026-05-01', '2026-04-01')], [r('2026-01-01', '2026-12-31', -1)],
+    [r('2026-01-01', '2026-06-30'), r('2026-06-30', null)],   // overlap op 30 juni
+    [r('2026-01-01', null), r('2027-01-01', null)],           // eerste is open einde
+  ]) await assert.rejects(call(h.putRates, { body: { rates } }), { status: 400 });
+  await assert.rejects(call(h.putRates, { body: {} }), { status: 400 });
+});
+
+test('gebruikers: toevoegen, normaliseren, vaste gebruikers niet dubbel', async () => {
+  const res = await call(h.putUsers, { body: { users: [' Partner@Voorbeeld.nl ', 'partner@voorbeeld.nl', 'mariko@voorbeeld.nl'] } });
+  assert.deepEqual(res.jsonBody.users, ['partner@voorbeeld.nl']);
+  assert.deepEqual(await repo.getUsers(), ['partner@voorbeeld.nl']);
+  await assert.rejects(call(h.putUsers, { body: { users: ['geen-adres'] } }), { status: 400 });
+});
+
+test('gebruikers: een toegevoegde gebruiker kan zichzelf niet verwijderen', async () => {
+  const partner = { email: 'partner@voorbeeld.nl', fixed: false };
+  await assert.rejects(h.putUsers({ user: partner, repo, env, body: { users: [] } }), { status: 400, message: 'Je kunt jezelf niet verwijderen.' });
+  // anderen verwijderen of zichzelf behouden mag wel
+  const ok = await h.putUsers({ user: partner, repo, env, body: { users: ['partner@voorbeeld.nl', 'extra@voorbeeld.nl'] } });
+  assert.equal(ok.jsonBody.users.length, 2);
+  // een vaste gebruiker mag de lijst leegmaken
+  assert.deepEqual((await call(h.putUsers, { body: { users: [] } })).jsonBody.users, []);
 });
