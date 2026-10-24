@@ -14,6 +14,11 @@ param location string = 'westeurope'
 @description('Komma-gescheiden e-mailadressen (Microsoft-account) die de app mogen gebruiken.')
 param allowedUsers string
 
+@description('Sleutel waarmee de geheimen voor tweestapsverificatie worden versleuteld. De pipeline behoudt de bestaande waarde en maakt er bij de eerste deploy een aan; wijzig hem niet handmatig (dan moet iedereen 2FA opnieuw instellen).')
+@secure()
+@minLength(32)
+param totpKey string
+
 var envShort = environmentName == 'production' ? 'prd' : 'tst'
 var prefix = '${baseName}-${envShort}'
 var suffix = uniqueString(resourceGroup().id)
@@ -70,6 +75,7 @@ resource appSettings 'Microsoft.Web/staticSites/config@2023-12-01' = {
   properties: {
     TABLES_CONNECTION: storageConnection
     ALLOWED_USERS: allowedUsers
+    TOTP_KEY: totpKey
     APPLICATIONINSIGHTS_CONNECTION_STRING: insights.properties.ConnectionString
   }
 }

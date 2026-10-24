@@ -45,8 +45,17 @@ jobs:
         run: |
           if [ -z "$ALLOWED_USERS" ]; then echo "::error::Stel de variabele ALLOWED_USERS in voor environment $ENVIRONMENT."; exit 1; fi
           if [ "$(az group exists -n "$RESOURCE_GROUP")" != "true" ]; then az group create -n "$RESOURCE_GROUP" -l "$LOCATION" -o none; fi
+          # TOTP_KEY (versleutelt de 2FA-geheimen): bestaande waarde uit de Static Web App behouden, anders eenmalig een nieuwe maken.
+          # Hij staat dus niet in GitHub en niet in de repository; opnieuw deployen verandert hem niet.
+          swa_existing=$(az staticwebapp list -g "$RESOURCE_GROUP" --query "[0].name" -o tsv 2>/dev/null || true)
+          TOTP_KEY=""
+          if [ -n "$swa_existing" ] && [ "$swa_existing" != "None" ]; then
+            TOTP_KEY=$(az staticwebapp appsettings list -n "$swa_existing" -g "$RESOURCE_GROUP" --query "properties.TOTP_KEY" -o tsv 2>/dev/null || true)
+          fi
+          if [ "${#TOTP_KEY}" -lt 32 ]; then TOTP_KEY=$(openssl rand -base64 32); echo "Nieuwe TOTP_KEY aangemaakt voor $ENVIRONMENT."; fi
+          echo "::add-mask::$TOTP_KEY"
           out=$(az deployment group create -g "$RESOURCE_GROUP" -f infra/main.bicep \
-                  -p allowedUsers="$ALLOWED_USERS" environmentName="$ENVIRONMENT" location="$LOCATION" \
+                  -p allowedUsers="$ALLOWED_USERS" totpKey="$TOTP_KEY" environmentName="$ENVIRONMENT" location="$LOCATION" \
                   --query properties.outputs -o json)
           {
             echo "static_web_app=$(jq -r .staticWebAppName.value <<<"$out")"
