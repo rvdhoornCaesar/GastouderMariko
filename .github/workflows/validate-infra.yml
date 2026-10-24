@@ -23,6 +23,7 @@ jobs:
       RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || 'gastouder-test-rg' }}
       # De waarde doet er voor validatie niet toe.
       ALLOWED_USERS: validatie@example.com
+      TOTP_KEY: validatie-sleutel-validatie-sleutel-0123456789
     steps:
       - uses: actions/checkout@v5
 
@@ -46,13 +47,13 @@ jobs:
           for env in test production; do
             echo "::group::validate ($env)"
             az deployment group validate -g "$RESOURCE_GROUP" -f infra/main.bicep \
-              -p allowedUsers="$ALLOWED_USERS" environmentName="$env" -o none
+              -p allowedUsers="$ALLOWED_USERS" totpKey="$TOTP_KEY" environmentName="$env" -o none
             echo "::endgroup::"
           done
           {
             echo '### What-if (test)'
             echo '```'
             az deployment group what-if -g "$RESOURCE_GROUP" -f infra/main.bicep \
-              -p allowedUsers="$ALLOWED_USERS" environmentName=test --no-pretty-print --result-format ResourceIdOnly 2>&1 || true
+              -p allowedUsers="$ALLOWED_USERS" totpKey="$TOTP_KEY" environmentName=test --no-pretty-print --result-format ResourceIdOnly 2>&1 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
