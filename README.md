@@ -78,6 +78,13 @@ Bij elke deploy worden de resources uit `infra/main.bicep` aangemaakt of bijgewe
 
 Handmatig één omgeving aanmaken kan ook: `az deployment group create -g <rg> -f infra/main.bicep -p allowedUsers=mariko@voorbeeld.nl environmentName=test`.
 
+### Eigen domein (gastouderuren.nl)
+**test** hoort bij `test.gastouderuren.nl` en **production** bij `gastouderuren.nl`; de namen staan in `.github/workflows/deploy.yml` (`domain:`). De DNS staat bij de registrar en beheer je zelf. Bij elke deploy koppelt de pipeline het domein aan de Static Web App (idempotent) en zet in de samenvatting van de run welke DNS-records nog nodig zijn. Die stap laat de deploy nooit falen; de status verschijnt als waarschuwing.
+
+1. **test** (subdomein): maak een `CNAME`-record `test` → de standaard-hostnaam van de test-Static Web App (`happy-rock-0e5676603.5.azurestaticapps.net`). Zet het record **vóór** de deploy, anders kan Azure het domein nog niet koppelen; draai de workflow daarna opnieuw.
+2. **production** (kaal domein): Azure valideert het kale domein met een `TXT`-record op `@` (de waarde staat in de samenvatting van de run) en het verkeer gaat via een `ALIAS`/`ANAME`-record op `@` naar de standaard-hostnaam, of een `A`-record naar het IP dat de portal toont (Static Web App → Custom domains) als je registrar geen ALIAS kent. Na het eerste deploy van production staan de waarden in de samenvatting.
+3. Draai de workflow opnieuw tot de status *Ready* is. Het HTTPS-certificaat regelt Azure zelf (gratis). Inloggen met Microsoft werkt op het eigen domein zonder extra instellingen.
+
 ### Instellingen in de app
 Op het tabblad **Instellingen** beheer je:
 - **Algemeen uurtarief:** een lijst met periodes (van, tot en met, € per uur), bijvoorbeeld 1-1 t/m 31-12. “Tot en met” leeg = doorlopend; periodes mogen niet overlappen. De periode van het huidige jaar staat vet. Een contract zonder eigen tarief gebruikt het algemene tarief dat geldt op de datum van elke registratie; een contract met eigen tarief houdt dat. Is er voor een datum geen tarief bekend, dan telt het bedrag als € 0 en toont het overzicht een waarschuwing.
