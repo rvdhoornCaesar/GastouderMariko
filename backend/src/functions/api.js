@@ -73,5 +73,6 @@ route('totpDisable', ['POST'], 'auth/totp/disable', handlers.totpDisable, { auth
 // Accountbeheer: alleen voor beheerders met een Microsoft-login
 route('listAccounts', ['GET'], 'accounts', handlers.listAccounts, { auth: 'ms' });
 route('createAccount', ['POST'], 'accounts', handlers.createAccount, { auth: 'ms' });
+route('setAccountRole', ['PUT'], 'accounts/{email}/role', handlers.setAccountRole, { auth: 'ms' });
 route('resetAccount', ['POST'], 'accounts/{email}/reset', handlers.resetAccount, { auth: 'ms' });
 route('deleteAccount', ['DELETE'], 'accounts/{email}', handlers.deleteAccount, { auth: 'ms' });

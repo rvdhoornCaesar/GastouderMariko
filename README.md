@@ -141,7 +141,16 @@ Naast Microsoft kan een gebruiker inloggen met een account dat alleen in deze ap
 - **Gokken tegen gegaan:** na 5 mislukte pogingen per e-mailadres volgt een blokkade van 15 minuten (steeds langer, maximaal een dag); ook bij onbekende adressen, zodat niet te zien is of een account bestaat.
 - **Twee routesets:** `/api/ms/*` vereist een Microsoft-login (afgedwongen door Static Web Apps) en `/api/*` werkt met de sessiecookie. De sessieroutes negeren `x-ms-client-principal`, omdat die header op een openbare route door iedereen te vervalsen is. Accountbeheer bestaat alleen op `/api/ms/*`.
 - **Tweestapsverificatie (TOTP):** een lokale gebruiker kan bij *Instellingen → Mijn account* een authenticator-app koppelen (RFC 6238, 6 cijfers). Bij het inloggen volgt na het wachtwoord een codestap; een code werkt maar één keer en foute codes tellen mee voor dezelfde blokkade. Bij het aanzetten krijgt de gebruiker 8 herstelcodes (eenmalig, alleen als hash opgeslagen). Het TOTP-geheim moet terug te lezen zijn en staat daarom versleuteld (AES-256-GCM) in de opslag. De sleutel is de app-setting `TOTP_KEY`: de pipeline maakt er bij de eerste deploy van een omgeving een willekeurige aan en behoudt hem daarna uit de Static Web App zelf (hij staat dus niet in GitHub of de repository en verschilt per omgeving). Hij staat los van de opslagsleutel, dus een uitgelezen opslagaccount geeft de 2FA-geheimen niet prijs. Wijzig of verwijder hem niet: dan moeten gebruikers hun 2FA opnieuw instellen. Alleen lokaal zonder `TOTP_KEY` wordt een sleutel afgeleid van `TABLES_CONNECTION`. Later kan dit naar Azure Key Vault, zodra de API een eigen identiteit heeft (Standard-plan of eigen Function App). Een beheerder die een nieuw tijdelijk wachtwoord instelt, zet 2FA van dat account ook uit (telefoon kwijt en geen herstelcodes). Voor Microsoft-logins regelt Microsoft zelf of er MFA is; zet dat aan op beheerdersaccounts.
-- **Voorbereid op later:** elk account heeft een `role` (nu alleen `beheerder`) en een `instanceId` (nu `main`), zodat er later een adminrol, beheerders per gastouder en gewone gebruikers zonder instellingen bij kunnen.
+- **Rollen:** elke gebruiker heeft een rol; alle rechten staan op één plek (`backend/src/permissions.js`) en de server controleert ze bij elk verzoek, het verbergen van tabbladen in de pagina is alleen weergave.
+
+  | Rol | Mag |
+  | --- | --- |
+  | `gebruiker` | uren invullen en het overzicht zien (kinderen, contracten en tarieven alleen lezen), plus het tabblad Account (wachtwoord en 2FA). Geen Kinderen of Instellingen. |
+  | `beheerder` | alles wat de app biedt: kinderen, contracten, instellingen en toegestane gebruikers. |
+  | `admin` | alles van de beheerder, plus het tabblad Admin (nu nog leeg) en het beheren van lokale accounts. |
+
+  Microsoft-gebruikers: de vaste gebruikers uit `ALLOWED_USERS` zijn admin, in de app toegevoegde gebruikers zijn beheerder. Lokale accounts krijgen hun rol van de admin bij het aanmaken (standaard `gebruiker`) en die kan daarna worden gewijzigd (de gebruiker wordt dan uitgelogd). Accountbeheer bestaat alleen op `/api/ms/*`, dus ook een lokale admin beheert accounts alleen via een Microsoft-login. Bestaande lokale accounts uit de eerste versie hadden de rol beheerder en houden die.
+- **Voorbereid op later:** per-gastouder-beheerders (`instanceId`, nu `main`).
 - Controleer na de eerste deploy op test dat inloggen (cookie) via Static Web Apps werkt; zo niet, dan is een token in een header het alternatief.
 
 ### Kosten en aandachtspunten

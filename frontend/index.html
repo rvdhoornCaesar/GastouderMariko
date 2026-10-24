@@ -93,8 +93,10 @@
   <nav>
     <button data-tab="uren" class="active">Uren invullen</button>
     <button data-tab="overzicht">Overzicht</button>
-    <button data-tab="kinderen">Kinderen</button>
-    <button data-tab="instellingen">Instellingen</button>
+    <button data-tab="kinderen" data-perm="children:write" hidden>Kinderen</button>
+    <button data-tab="instellingen" data-perm="settings:write" hidden>Instellingen</button>
+    <button data-tab="account" data-local="1" hidden>Account</button>
+    <button data-tab="admin" data-perm="admin:view" hidden>Admin</button>
   </nav>
 </header>
 
@@ -264,12 +266,31 @@
       <form class="user-row" id="accountForm">
         <div><label for="accEmail">E-mailadres</label><input type="email" id="accEmail" required></div>
         <button class="btn small">+</button>
+        <div style="grid-column:1/-1"><label for="accRole">Rol</label><select id="accRole"></select></div>
       </form>
+      <p class="hint" style="margin-top:8px"><strong>Gebruiker:</strong> uren invullen en het overzicht zien. <strong>Beheerder:</strong> ook kinderen, contracten en instellingen beheren. <strong>Admin:</strong> alles, plus het tabblad Admin.</p>
       <div class="err" id="accountErr"></div>
     </div>
 
-    <div class="card" id="ownPwCard" hidden>
+
+    <div class="card">
+      <h2>Toegestane gebruikers</h2>
+      <p class="hint">Iedereen in deze lijst kan inloggen en ziet dezelfde gegevens. Gebruik het adres waarmee ze bij Microsoft inloggen.</p>
+      <div id="userList"></div>
+      <form class="user-row" id="userForm">
+        <div><label for="userEmail">E-mailadres</label><input type="email" id="userEmail" required></div>
+        <button class="btn small">+</button>
+      </form>
+      <div class="err" id="userErr"></div>
+    </div>
+
+    <p class="hint" id="runtimeInfo"></p>
+  </section>
+  <!-- ACCOUNT (alleen lokale accounts) -->
+  <section id="tab-account" hidden>
+    <div class="card" id="ownPwCard">
       <h2>Mijn account</h2>
+      <p class="hint" id="accountInfo"></p>
       <button class="btn secondary" id="pwOpen">Wachtwoord wijzigen</button>
       <h3 style="font-size:1rem;margin:16px 0 4px">Tweestapsverificatie</h3>
       <p class="hint" id="mfaState"></p>
@@ -298,19 +319,14 @@
       <button class="btn" id="mfaOn" hidden>Tweestapsverificatie aanzetten</button>
       <div class="err" id="mfaErr"></div>
     </div>
+  </section>
 
+  <!-- ADMIN -->
+  <section id="tab-admin" hidden>
     <div class="card">
-      <h2>Toegestane gebruikers</h2>
-      <p class="hint">Iedereen in deze lijst kan inloggen en ziet dezelfde gegevens. Gebruik het adres waarmee ze bij Microsoft inloggen.</p>
-      <div id="userList"></div>
-      <form class="user-row" id="userForm">
-        <div><label for="userEmail">E-mailadres</label><input type="email" id="userEmail" required></div>
-        <button class="btn small">+</button>
-      </form>
-      <div class="err" id="userErr"></div>
+      <h2>Admin</h2>
+      <p class="hint">Hier komen later de beheeronderdelen voor admins. Nu is er nog niets.</p>
     </div>
-
-    <p class="hint" id="runtimeInfo"></p>
   </section>
 </main>
 <div id="toast" role="alert" hidden></div>
@@ -494,7 +510,7 @@
   // --- tabs ---
   document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('active', x === b));
-    ['uren', 'overzicht', 'kinderen', 'instellingen'].forEach((t) => $('tab-' + t).hidden = t !== b.dataset.tab);
+    ['uren', 'overzicht', 'kinderen', 'instellingen', 'account', 'admin'].forEach((t) => $('tab-' + t).hidden = t !== b.dataset.tab);
     render();
   }));
 
@@ -936,7 +952,7 @@
           `<tr class="${isCurrentYear(r) ? 'cur' : ''}"><td>${nlDate(r.from)}</td><td>${r.to ? nlDate(r.to) : 'doorlopend'}</td><td class="num">${euro(r.rate)}</td>
            <td class="num"><button class="link" data-rmrate="${r.id}" title="Verwijderen">✕</button></td></tr>`).join('')}</table>`
       : '<div class="empty">Nog geen algemeen tarief.</div>';
-    const row = (e, fixed) => `<div class="entry"><div class="who">${esc(e)}${fixed ? '<span class="tag">beheerder</span>' : ''}${e === me ? '<span class="tag">jij</span>' : ''}</div>
+    const row = (e, fixed) => `<div class="entry"><div class="who">${esc(e)}${fixed ? '<span class="tag">admin</span>' : '<span class="tag">beheerder</span>'}${e === me ? '<span class="tag">jij</span>' : ''}</div>
       ${fixed || e === me ? '' : `<button class="link" data-rmuser="${esc(e)}" title="Verwijderen">✕</button>`}</div>`;
     $('userList').innerHTML = fixedUsers.map((e) => row(e, true)).join('') + users.map((e) => row(e, false)).join('')
       || '<div class="empty">Nog geen gebruikers.</div>';
@@ -1064,20 +1080,35 @@
     } catch (e) { if (!e.noAccess) $('mfaErr').textContent = e.message; }
   });
 
+  // --- Rollen: wat iemand ziet en mag, volgt uit me.permissions (de server controleert alles opnieuw) ---
+  const ROLE_LABELS = { gebruiker: 'Gebruiker', beheerder: 'Beheerder', admin: 'Admin' };
+  const roleOptions = (sel) => Object.entries(ROLE_LABELS).map(([k, l]) => `<option value="${k}"${k === sel ? ' selected' : ''}>${l}</option>`).join('');
+  const can = (perm) => !!(me && me.permissions && me.permissions.includes(perm));
+  function applyRole() {
+    document.querySelectorAll('nav button[data-perm], nav button[data-local]').forEach((b) => {
+      b.hidden = b.dataset.perm ? !can(b.dataset.perm) : !(me && me.kind === 'local');
+    });
+    const active = document.querySelector('nav button.active');
+    if (active && active.hidden) document.querySelector('nav button[data-tab=uren]').click();
+    $('accountInfo').textContent = me ? `Ingelogd als ${me.email} (${ROLE_LABELS[me.role] || me.role}).` : '';
+  }
+  $('accRole').innerHTML = roleOptions('gebruiker');
+
   let accounts = [];
   function renderAccounts() {
     const card = $('accountsCard');
-    card.hidden = !(me && me.admin);
-    $('ownPwCard').hidden = !(me && me.kind === 'local');
+    card.hidden = !can('accounts:manage');
+    applyRole();
     renderMfa();
     if (card.hidden) return;
-    $('accountList').innerHTML = accounts.length ? accounts.map((a) => `<div class="entry"><div style="min-width:0;overflow-wrap:anywhere"><div class="who">${esc(a.email)}${a.mustChange ? '<span class="tag">tijdelijk wachtwoord</span>' : ''}${a.totp ? '<span class="tag">2FA</span>' : ''}</div>
+    $('accountList').innerHTML = accounts.length ? accounts.map((a) => `<div class="entry" style="flex-wrap:wrap"><div style="min-width:0;overflow-wrap:anywhere;flex:1 1 100%"><div class="who">${esc(a.email)}${a.mustChange ? '<span class="tag">tijdelijk wachtwoord</span>' : ''}${a.totp ? '<span class="tag">2FA</span>' : ''}</div>
         <div class="meta">${a.lastLogin ? 'laatst ingelogd ' + nlDate(a.lastLogin.slice(0, 10)) : 'nog niet ingelogd'}</div></div>
-        <div style="display:flex;gap:4px;align-items:center;flex-shrink:0"><button class="btn secondary small" data-resetacc="${esc(a.email)}">Nieuw ww</button>
+        <div style="display:flex;gap:4px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-start"><select data-roleacc="${esc(a.email)}" aria-label="Rol van ${esc(a.email)}" style="width:auto">${roleOptions(a.role)}</select>
+        <button class="btn secondary small" data-resetacc="${esc(a.email)}">Nieuw ww</button>
         <button class="link" data-rmacc="${esc(a.email)}" title="Verwijderen">✕</button></div></div>`).join('') : '<div class="empty">Nog geen lokale accounts.</div>';
   }
   async function loadAccounts() {
-    if (!(me && me.admin)) return;
+    if (!can('accounts:manage')) return;
     accounts = (await guard(() => api('GET', 'accounts'))) || [];
     renderAccounts();
   }
@@ -1092,11 +1123,17 @@
     ev.preventDefault();
     $('accountErr').textContent = '';
     try {
-      const r = await api('POST', 'accounts', { email: $('accEmail').value });
-      ev.target.reset();
+      const r = await api('POST', 'accounts', { email: $('accEmail').value, role: $('accRole').value });
+      ev.target.reset(); $('accRole').value = 'gebruiker';
       showTemp(r.account.email, r.tempPassword);
       await loadAccounts();
     } catch (e) { if (!e.noAccess) $('accountErr').textContent = e.message; }
+  });
+  $('accountList').addEventListener('change', async (ev) => {
+    const email = ev.target.dataset.roleacc;
+    if (!email) return;
+    if (confirm(`Rol van ${email} wijzigen naar ${ROLE_LABELS[ev.target.value]}? De gebruiker wordt overal uitgelogd.`)) await guard(() => api('PUT', `accounts/${encodeURIComponent(email)}/role`, { role: ev.target.value }));
+    await loadAccounts();
   });
   $('accountList').addEventListener('click', async (ev) => {
     const reset = ev.target.dataset.resetacc, rm = ev.target.dataset.rmacc;
@@ -1117,6 +1154,7 @@
     if (mustChange) { showPwChange(true); return; }
     showOnly('app');
     $('user').textContent = currentUser;
+    applyRole();
     const [children, settings] = await Promise.all([guard(() => api('GET', 'children')), guard(() => api('GET', 'settings'))]);
     if (children) state.children = children;
     if (settings) state.settings = settings;

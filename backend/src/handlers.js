@@ -2,6 +2,7 @@ const { HttpError } = require('./errors');
 const { fixedUsers, sessionToken, sessionCookie, expiredCookie, SESSION_DAYS } = require('./auth');
 const P = require('./passwords');
 const T = require('./totp');
+const perm = require('./permissions');
 const v = require('./validation');
 
 const newId = () => Math.random().toString(36).slice(2, 10).padEnd(8, '0');
@@ -9,17 +10,20 @@ const newId = () => Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 // Elke handler krijgt de gebruiker, een repository en de request-data, en geeft { status, jsonBody } terug.
 // Alle gegevens zijn gedeeld door de toegestane gebruikers van de omgeving.
 
-async function listChildren({ repo }) {
+async function listChildren({ user, repo }) {
+  perm.require(user, 'children:read');
   return { status: 200, jsonBody: await repo.listChildren() };
 }
 
-async function createChild({ repo, body }) {
+async function createChild({ user, repo, body }) {
+  perm.require(user, 'children:write');
   const child = { id: newId(), ...v.parseChild(body, newId) };
   await repo.saveChild(child);
   return { status: 201, jsonBody: child };
 }
 
-async function updateChild({ repo, params, body }) {
+async function updateChild({ user, repo, params, body }) {
+  perm.require(user, 'children:write');
   const id = v.parseId(params.id);
   const existing = await repo.getChild(id);
   if (!existing) throw new HttpError(404, 'Kind niet gevonden.');
@@ -34,7 +38,8 @@ async function updateChild({ repo, params, body }) {
   return { status: 200, jsonBody: child };
 }
 
-async function deleteChild({ repo, params }) {
+async function deleteChild({ user, repo, params }) {
+  perm.require(user, 'children:write');
   const id = v.parseId(params.id);
   const existing = await repo.getChild(id);
   if (existing) {
@@ -44,11 +49,13 @@ async function deleteChild({ repo, params }) {
   return { status: 204 };
 }
 
-async function listEntries({ repo, query }) {
+async function listEntries({ user, repo, query }) {
+  perm.require(user, 'entries:read');
   return { status: 200, jsonBody: await repo.listEntriesOfMonth(v.parseMonth(query.month)) };
 }
 
-async function createEntry({ repo, body }) {
+async function createEntry({ user, repo, body }) {
+  perm.require(user, 'entries:write');
   const data = v.parseEntry(body);
   const children = await repo.listChildren();
   if (!children.some((c) => c.contracts.some((k) => k.id === data.contractId))) throw new HttpError(400, 'Dat contract bestaat niet.');
@@ -57,7 +64,8 @@ async function createEntry({ repo, body }) {
   return { status: 201, jsonBody: entry };
 }
 
-async function deleteEntry({ repo, params }) {
+async function deleteEntry({ user, repo, params }) {
+  perm.require(user, 'entries:write');
   await repo.deleteEntry(v.parseEntryId(params.id));
   return { status: 204 };
 }
@@ -65,29 +73,35 @@ async function deleteEntry({ repo, params }) {
 // Instellingen: algemene tarieven en toegestane gebruikers.
 // "fixedUsers" komen uit de app-setting ALLOWED_USERS en kunnen niet in de app worden verwijderd.
 async function getSettings({ user, repo, env }) {
+  perm.require(user, 'settings:read');
   const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: await repo.getUsers(), fixedUsers: fixedUsers(env), me: user.email, opening, ownChildren: await repo.getOwnChildren(), runtime: process.version } };
+  const manage = perm.can(user, 'settings:write');   // wie mag toegang regelen, ziet de gebruikerslijsten en de technische info
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await repo.getUsers() : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), runtime: manage ? process.version : undefined } };
 }
 
-async function putRates({ repo, body }) {
+async function putRates({ user, repo, body }) {
+  perm.require(user, 'settings:write');
   const rates = v.parseRates(body && body.rates, newId);
   await repo.setRates(rates);
   return { status: 200, jsonBody: { rates } };
 }
 
-async function putOwnChildren({ repo, body }) {
+async function putOwnChildren({ user, repo, body }) {
+  perm.require(user, 'settings:write');
   const ownChildren = v.parseOwnChildren(body && body.ownChildren, newId);
   await repo.setOwnChildren(ownChildren);
   return { status: 200, jsonBody: { ownChildren } };
 }
 
-async function putOpening({ repo, body }) {
+async function putOpening({ user, repo, body }) {
+  perm.require(user, 'settings:write');
   const opening = v.parseOpening(body);
   await repo.setOpening(opening);
   return { status: 200, jsonBody: { opening } };
 }
 
 async function putUsers({ user, repo, env, body }) {
+  perm.require(user, 'settings:write');
   const fixed = fixedUsers(env);
   const users = v.parseUsers(body && body.users).filter((e) => !fixed.includes(e));
   if (!user.fixed && !users.includes(user.email)) throw new HttpError(400, 'Je kunt jezelf niet verwijderen.');
@@ -237,7 +251,7 @@ async function logout({ repo, headers }) {
 }
 
 async function me({ user }) {
-  return { status: 200, jsonBody: { kind: user.kind, email: user.email, name: user.name, admin: user.admin, role: user.role, mustChange: user.mustChange, totp: !!user.totp } };
+  return { status: 200, jsonBody: { kind: user.kind, email: user.email, name: user.name, role: user.role, permissions: perm.permissionsOf(user.role), mustChange: user.mustChange, totp: !!user.totp } };
 }
 
 async function changePassword({ user, repo, body, now = new Date() }) {
@@ -260,9 +274,7 @@ async function changePassword({ user, repo, body, now = new Date() }) {
   return { status: 200, jsonBody: { ok: true } };
 }
 
-function requireAdmin(user) {
-  if (!user.admin) throw new HttpError(403, 'Alleen beheerders mogen lokale accounts beheren.');
-}
+const requireAdmin = (user) => perm.require(user, 'accounts:manage');
 
 async function listAccounts({ user, repo }) {
   requireAdmin(user);
@@ -275,8 +287,9 @@ async function createAccount({ user, repo, body, now = new Date() }) {
   requireAdmin(user);
   const email = v.parseAccountEmail(body && body.email);
   if (await repo.getAccount(email)) throw new HttpError(409, 'Er bestaat al een account met dit e-mailadres.');
+  const role = body && body.role !== undefined ? v.parseRole(body.role) : 'gebruiker';   // standaard de minste rechten
   const tempPassword = P.generateTempPassword();
-  const account = { email, name: String((body && body.name) ?? '').trim().slice(0, 100), role: 'beheerder', instanceId: 'main', mustChange: true, createdAt: now.toISOString() };
+  const account = { email, name: String((body && body.name) ?? '').trim().slice(0, 100), role, instanceId: 'main', mustChange: true, createdAt: now.toISOString() };
   await repo.saveAccount({ ...account, passwordHash: await P.hashPassword(tempPassword) });
   return { status: 201, jsonBody: { account: publicAccount(account), tempPassword } };
 }
@@ -293,6 +306,17 @@ async function resetAccount({ user, repo, params }) {
   return { status: 200, jsonBody: { tempPassword } };
 }
 
+async function setAccountRole({ user, repo, params, body }) {
+  requireAdmin(user);
+  const email = v.parseAccountEmail(decodeURIComponent(params.email));
+  const role = v.parseRole(body && body.role);
+  const entity = await repo.getAccount(email);
+  if (!entity) throw new HttpError(404, 'Account niet gevonden.');
+  await repo.saveAccount({ ...toAccount(entity), role });
+  await repo.deleteSessionsOf(email);   // rechten veranderen: opnieuw inloggen
+  return { status: 200, jsonBody: publicAccount({ ...toAccount(entity), role }) };
+}
+
 async function deleteAccount({ user, repo, params }) {
   requireAdmin(user);
   const email = v.parseAccountEmail(decodeURIComponent(params.email));
@@ -302,4 +326,4 @@ async function deleteAccount({ user, repo, params }) {
   return { status: 204 };
 }
 
-module.exports = { login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putOpening, putOwnChildren, putUsers };
+module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putOpening, putOwnChildren, putUsers };
