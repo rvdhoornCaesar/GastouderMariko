@@ -218,6 +218,8 @@
       <div class="ok" id="openingOk"></div>
     </div>
 
+    <p class="hint" id="runtimeInfo"></p>
+
     <div class="card">
       <h2>Toegestane gebruikers</h2>
       <p class="hint">Iedereen in deze lijst kan inloggen en ziet dezelfde gegevens. Gebruik het adres waarmee ze bij Microsoft inloggen.</p>
@@ -825,6 +827,7 @@
 
   function renderSettings() {
     renderOwnChildren();
+    $('runtimeInfo').textContent = state.settings.runtime ? `Technische info: de API draait op Node ${state.settings.runtime.replace(/^v/, '')}.` : '';
     const { rates, users, fixedUsers, me } = state.settings;
     $('rateList').innerHTML = rates.length
       ? `<table><tr><th>Van</th><th>Tot en met</th><th class="num">€ / uur</th><th></th></tr>${rates.map((r) =>
