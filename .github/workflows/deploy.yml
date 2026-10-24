@@ -45,5 +45,5 @@ jobs:
     uses: ./.github/workflows/_deploy.yml
     with:
       environment: production
-      domain: gastouderuren.nl
+      domain: invullen.gastouderuren.nl
     secrets: inherit

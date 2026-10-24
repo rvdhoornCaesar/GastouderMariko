@@ -79,11 +79,18 @@ Bij elke deploy worden de resources uit `infra/main.bicep` aangemaakt of bijgewe
 Handmatig één omgeving aanmaken kan ook: `az deployment group create -g <rg> -f infra/main.bicep -p allowedUsers=mariko@voorbeeld.nl environmentName=test`.
 
 ### Eigen domein (gastouderuren.nl)
-**test** hoort bij `test.gastouderuren.nl` en **production** bij `gastouderuren.nl`; de namen staan in `.github/workflows/deploy.yml` (`domain:`). De DNS staat bij de registrar en beheer je zelf. Bij elke deploy koppelt de pipeline het domein aan de Static Web App (idempotent) en zet in de samenvatting van de run welke DNS-records nog nodig zijn. Die stap laat de deploy nooit falen; de status verschijnt als waarschuwing.
+**test** hoort bij `test.gastouderuren.nl` en **production** bij `invullen.gastouderuren.nl`; de namen staan in `.github/workflows/deploy.yml` (`domain:`). Het kale domein `gastouderuren.nl` blijft vrij voor een informatiesite. De DNS staat bij de registrar (Versio/PCextreme) en beheer je zelf. Bij elke deploy koppelt de pipeline het domein aan de Static Web App (idempotent) en zet in de samenvatting van de run welke DNS-records nog nodig zijn. Die stap laat de deploy nooit falen; de status verschijnt als waarschuwing.
 
-1. **test** (subdomein): maak een `CNAME`-record `test` → de standaard-hostnaam van de test-Static Web App (`happy-rock-0e5676603.5.azurestaticapps.net`). Zet het record **vóór** de deploy, anders kan Azure het domein nog niet koppelen; draai de workflow daarna opnieuw.
-2. **production** (kaal domein): Azure valideert het kale domein met een `TXT`-record op `@` (de waarde staat in de samenvatting van de run) en het verkeer gaat via een `ALIAS`/`ANAME`-record op `@` naar de standaard-hostnaam, of een `A`-record naar het IP dat de portal toont (Static Web App → Custom domains) als je registrar geen ALIAS kent. Na het eerste deploy van production staan de waarden in de samenvatting.
-3. Draai de workflow opnieuw tot de status *Ready* is. Het HTTPS-certificaat regelt Azure zelf (gratis). Inloggen met Microsoft werkt op het eigen domein zonder extra instellingen.
+Per omgeving is één `CNAME`-record nodig bij de registrar:
+
+| Naam | Type | Waarde |
+|---|---|---|
+| `test` | CNAME | de standaard-hostnaam van de test-Static Web App (`happy-rock-0e5676603.5.azurestaticapps.net`) |
+| `invullen` | CNAME | de standaard-hostnaam van de production-Static Web App (staat in de samenvatting van de eerste production-run) |
+
+1. Zet het record **vóór** de koppeling: Azure controleert bij het koppelen of het CNAME bestaat. Staat het er nog niet, dan faalt de koppeling zonder de deploy te breken; zet het record en draai de workflow opnieuw (*Actions → Deploy → Run workflow*; production alleen met `only_test` uitgevinkt).
+2. Draai de workflow opnieuw tot de status *Ready* is. Het HTTPS-certificaat regelt Azure zelf (gratis). Inloggen met Microsoft werkt op het eigen domein zonder extra instellingen.
+3. Sommige DNS-panelen willen de waarde met een punt aan het eind (`...azurestaticapps.net.`); gebruik wat het paneel vraagt.
 
 ### Instellingen in de app
 Op het tabblad **Instellingen** beheer je:
