@@ -24,7 +24,7 @@ function parsePrincipal(headers) {
 async function authorize(headers, repo, env = process.env) {
   const user = parsePrincipal(headers);
   const fixed = fixedUsers(env).includes(user.email);
-  if (!fixed && !(await repo.getUsers()).includes(user.email)) throw new HttpError(403, 'Geen toegang.');
+  if (!fixed && !(await repo.getUsers()).includes(user.email)) throw new HttpError(403, 'Geen toegang.', { user: user.email });
   return { ...user, fixed };
 }
 

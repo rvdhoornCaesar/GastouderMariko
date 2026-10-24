@@ -20,7 +20,7 @@ function route(name, methods, path, handler) {
         const res = await handler({ user, repo: db, env: process.env, params: request.params, query: Object.fromEntries(request.query), body });
         return res;
       } catch (e) {
-        if (e instanceof HttpError) return { status: e.status, jsonBody: { error: e.message } };
+        if (e instanceof HttpError) return { status: e.status, jsonBody: { error: e.message, ...e.extra } };
         context.error(e);
         return { status: 500, jsonBody: { error: 'Er ging iets mis.' } };
       }
