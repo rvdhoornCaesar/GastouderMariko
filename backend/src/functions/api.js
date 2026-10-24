@@ -20,7 +20,9 @@ function route(name, methods, path, handler) {
         const res = await handler({ user, repo: db, env: process.env, params: request.params, query: Object.fromEntries(request.query), body });
         return res;
       } catch (e) {
-        if (e instanceof HttpError) return { status: e.status, jsonBody: { error: e.message } };
+        // Geweigerde toegang loggen we (naar Application Insights) om problemen met inloggen te kunnen vinden.
+        if (e instanceof HttpError && (e.status === 401 || e.status === 403)) context.warn(`${e.status} ${request.method} ${new URL(request.url).pathname}: ${e.message} ${JSON.stringify(e.extra || {})}`);
+        if (e instanceof HttpError) return { status: e.status, jsonBody: { error: e.message, ...e.extra } };
         context.error(e);
         return { status: 500, jsonBody: { error: 'Er ging iets mis.' } };
       }

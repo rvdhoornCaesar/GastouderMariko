@@ -82,6 +82,7 @@
     <h2>Geen toegang</h2>
     <p>Je bent ingelogd als <strong id="noaccessUser"></strong>, maar dit account heeft geen toegang tot deze omgeving.</p>
     <p>Vraag de beheerder om dit e-mailadres toe te voegen, of log uit en kies een ander Microsoft-account.</p>
+    <p class="hint" id="noaccessInfo"></p>
     <a class="btn" href="/.auth/logout" style="display:inline-block;text-decoration:none">Uitloggen</a>
   </div>
 </main>
@@ -201,9 +202,19 @@
       body: body ? JSON.stringify(body) : undefined,
     });
     if (res.status === 401) { location.href = LOGIN; throw new Error('Niet ingelogd'); }
-    if (res.status === 403) { showNoAccess(); throw Object.assign(new Error('Geen toegang.'), { noAccess: true }); }
     if (res.status === 204) return null;
-    const data = await res.json().catch(() => ({}));
+    const text = await res.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch (e) { /* geen JSON */ }
+    // Alleen een 403 van onze eigen API betekent echt 'geen toegang'; een 403 van het platform tonen we als fout.
+    if (res.status === 403) {
+      const info = `${method} /api/${path} → 403 ${text.slice(0, 200)}`;
+      if (data.error === 'Geen toegang.') {
+        showNoAccess(`De server ziet je als: ${data.user || '(onbekend)'}. Verzoek: ${info}`);
+        throw Object.assign(new Error('Geen toegang.'), { noAccess: true });
+      }
+      throw new Error(`Geen toegang (403) bij ${method} /api/${path}`);
+    }
     if (!res.ok) throw new Error(data.error || `Fout ${res.status}`);
     return data;
   }
@@ -221,8 +232,9 @@
   }
 
   let currentUser = '';
-  function showNoAccess() {
+  function showNoAccess(info) {
     $('noaccessUser').textContent = currentUser;
+    $('noaccessInfo').textContent = info || '';
     $('app').hidden = true;
     document.querySelector('nav').hidden = true;
     $('noaccess').hidden = false;

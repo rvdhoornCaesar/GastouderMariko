@@ -10,8 +10,9 @@ test('geen header → 401', async () => {
   await assert.rejects(authorize(headers(null), repoWith([]), { ALLOWED_USERS: 'x@y.nl' }), { status: 401 });
 });
 
-test('niet-toegestane gebruiker → 403', async () => {
-  await assert.rejects(authorize(headers(mariko), repoWith(['iemand@anders.nl']), { ALLOWED_USERS: 'ander@voorbeeld.nl' }), { status: 403 });
+test('niet-toegestane gebruiker → 403, met het adres dat de server ziet', async () => {
+  await assert.rejects(authorize(headers(mariko), repoWith(['iemand@anders.nl']), { ALLOWED_USERS: 'ander@voorbeeld.nl' }),
+    (e) => e.status === 403 && e.extra.user === 'mariko@voorbeeld.nl');
 });
 
 test('niemand toegestaan als beide lijsten leeg zijn', async () => {

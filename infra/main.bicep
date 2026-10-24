@@ -33,6 +33,28 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
 
 var storageConnection = 'DefaultEndpointsProtocol=https;AccountName=${storage.name};AccountKey=${storage.listKeys().keys[0].value};EndpointSuffix=${environment().suffixes.storage}'
 
+// Monitoring: Application Insights (workspace-based). Dagelijks plafond op de opslag houdt de kosten rond nul.
+resource logs 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+  name: '${prefix}-logs-${suffix}'
+  location: location
+  properties: {
+    sku: { name: 'PerGB2018' }
+    retentionInDays: 30
+    workspaceCapping: { dailyQuotaGb: json('0.1') }
+  }
+}
+
+resource insights 'Microsoft.Insights/components@2020-02-02' = {
+  name: '${prefix}-ai-${suffix}'
+  location: location
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    WorkspaceResourceId: logs.id
+    IngestionMode: 'LogAnalytics'
+  }
+}
+
 // Free-tier met managed functions (de API uit backend/ draait binnen de Static Web App).
 // Upgraden naar een eigen Function App: SKU naar Standard, Function App + linkedBackends toevoegen (zie README).
 resource swa 'Microsoft.Web/staticSites@2023-12-01' = {
@@ -48,8 +70,10 @@ resource appSettings 'Microsoft.Web/staticSites/config@2023-12-01' = {
   properties: {
     TABLES_CONNECTION: storageConnection
     ALLOWED_USERS: allowedUsers
+    APPLICATIONINSIGHTS_CONNECTION_STRING: insights.properties.ConnectionString
   }
 }
 
 output frontendUrl string = 'https://${swa.properties.defaultHostname}'
 output staticWebAppName string = swa.name
+output appInsightsName string = insights.name
