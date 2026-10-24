@@ -51,11 +51,25 @@
   td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   .empty { color: var(--muted); text-align: center; padding: 14px 0; }
   .err { color: var(--danger); font-size: .9rem; min-height: 1.2em; }
-  .contract { display: grid; grid-template-columns: 1fr 100px auto; gap: 8px; margin-bottom: 8px; align-items: end; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end; }
+  .grid2 > * { min-width: 0; }
+  .wide { grid-column: 1 / -1; }
+  .contract-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .hint { color: var(--muted); font-size: .9rem; margin: 0 0 10px; }
-  .rate-row { display: grid; grid-template-columns: 1fr 1fr 90px auto; gap: 8px; align-items: end; margin-top: 10px; }
+  .rate-row { margin-top: 10px; }
   .user-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; margin-top: 10px; }
+  .user-row > * { min-width: 0; }
+  @media (min-width: 560px) { .rate-row { grid-template-columns: 1fr 1fr 110px auto; } }
+  .cur td { font-weight: 700; }
+  .day-row { display: grid; grid-template-columns: 7.5rem 1fr 1fr; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .day-row > * { min-width: 0; }
+  .day-row input[type=time] { padding: 8px 6px; }
+  input[type=month] { padding: 10px 6px; font-size: .9rem; }
+  .day-row label { display: flex; gap: 6px; align-items: center; margin: 0; font-size: 1rem; color: var(--ink); }
+  .day-row input[type=checkbox] { width: auto; }
+  .sub { color: var(--muted); font-size: .8rem; font-weight: 400; }
+  .ok { color: var(--ok); font-size: .9rem; min-height: 1.2em; }
   .tag { font-size: .75rem; color: var(--muted); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; margin-left: 6px; }
   .warn { color: var(--danger); font-size: .9rem; margin-top: 8px; }
   [hidden] { display: none !important; }
@@ -157,15 +171,27 @@
   <section id="tab-instellingen" hidden>
     <div class="card">
       <h2>Algemeen uurtarief</h2>
-      <p class="hint">Geldt voor contracten zonder eigen tarief, volgens de datum van de registratie. Laat “Tot” leeg als de periode doorloopt.</p>
+      <p class="hint">Geldt voor contracten zonder eigen tarief, volgens de datum van de registratie. “Tot en met” is de laatste dag dat het tarief geldt (bijv. 1-1 t/m 31-12); laat het leeg als de periode doorloopt. De periode van het huidige jaar staat vet.</p>
       <div id="rateList"></div>
-      <form class="rate-row" id="rateForm">
+      <form class="rate-row grid2" id="rateForm">
         <div><label for="rateFrom">Van</label><input type="date" id="rateFrom" required></div>
-        <div><label for="rateTo">Tot</label><input type="date" id="rateTo"></div>
+        <div><label for="rateTo">Tot en met</label><input type="date" id="rateTo"></div>
         <div><label for="rateValue">€ / uur</label><input type="number" id="rateValue" step="0.01" min="0" required></div>
         <button class="btn small">+</button>
       </form>
       <div class="err" id="rateErr"></div>
+    </div>
+
+    <div class="card">
+      <h2>Openingstijden en toeslag</h2>
+      <p class="hint">Binnen de openingstijden geldt het gewone uurtarief. Uren buiten de openingstijden krijgen een toeslag: het tarief wordt vermenigvuldigd met de factor (2 = dubbel tarief, 1 = geen toeslag). Op een gesloten dag valt alles buiten de openingstijden.</p>
+      <div id="openingList"></div>
+      <div class="grid2" style="margin-top: 10px">
+        <div><label for="openingFactor">Factor buiten openingstijden</label><input type="number" id="openingFactor" step="0.05" min="0" max="10"></div>
+        <div><button class="btn" type="button" id="openingSave">Opslaan</button></div>
+      </div>
+      <div class="err" id="openingErr"></div>
+      <div class="ok" id="openingOk"></div>
     </div>
 
     <div class="card">
@@ -190,7 +216,7 @@
   const euro = (n) => n.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  const state = { children: [], entries: [], settings: { rates: [], users: [], fixedUsers: [], me: '' } };
+  const state = { children: [], entries: [], settings: { rates: [], users: [], fixedUsers: [], me: '', opening: { days: [], factor: 1 } } };
   const loadedMonths = new Set();
 
   // --- API ---
@@ -258,6 +284,20 @@
   const generalRate = (date) => { const r = state.settings.rates.find((x) => x.from <= date && (!x.to || date <= x.to)); return r ? r.rate : null; };
   const rateFor = (x, date) => (!x ? null : x.contract.rate !== null && x.contract.rate !== undefined ? Number(x.contract.rate) : generalRate(date));
   const nlDate = (d) => d.split('-').reverse().join('-');
+  const WEEKDAYS = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
+  const monthNow = () => iso(new Date()).slice(0, 7);
+
+  // Verdeelt een registratie in minuten binnen en buiten de openingstijden van die weekdag.
+  function splitMinutes(e) {
+    const total = entryMin(e);
+    const d = state.settings.opening.days[(new Date(e.date + 'T12:00').getDay() + 6) % 7];
+    if (!d || !d.open) return { inside: 0, outside: total };
+    const inside = Math.max(0, Math.min(toMin(e.end), toMin(d.to)) - Math.max(toMin(e.start), toMin(d.from)));
+    return { inside, outside: total - inside };
+  }
+
+  // Contracten met vaste uren per maand die in maand m (JJJJ-MM) gelden.
+  const fixedContracts = (m) => contracts().filter((x) => Number(x.contract.monthlyHours) > 0 && x.contract.from <= m && (!x.contract.until || m <= x.contract.until));
 
   // --- tabs ---
   document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
@@ -344,25 +384,37 @@
     const [y, mo] = m.split('-').map(Number);
     $('monthTitle').textContent = new Date(y, mo - 1, 1).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
     const list = monthEntries();
+    const { factor } = state.settings.opening;
     const per = {};
     let missing = false;
+    const bucket = (x, cid) => (per[cid] ||= { x, min: 0, fixedMin: 0, outsideMin: 0, eur: 0, rates: new Set() });
     list.forEach((e) => {
-      const x = findContract(e.contractId), rate = rateFor(x, e.date), min = entryMin(e);
-      const p = (per[e.contractId] ||= { x, min: 0, eur: 0, rates: new Set() });
-      p.min += min;
-      p.eur += (min / 60) * (rate ?? 0);
+      const x = findContract(e.contractId), rate = rateFor(x, e.date), { inside, outside } = splitMinutes(e);
+      const p = bucket(x, e.contractId);
+      p.min += inside + outside;
+      p.outsideMin += outside;
+      p.eur += ((inside + outside * factor) / 60) * (rate ?? 0);
+      if (rate === null) missing = true; else p.rates.add(rate);
+    });
+    fixedContracts(m).forEach((x) => {
+      const hours = Number(x.contract.monthlyHours), rate = rateFor(x, m + '-01'), p = bucket(x, x.contract.id);
+      p.fixedMin += Math.round(hours * 60);
+      p.min += Math.round(hours * 60);
+      p.eur += hours * (rate ?? 0);
       if (rate === null) missing = true; else p.rates.add(rate);
     });
     let totMin = 0, totEur = 0;
     const rows = Object.values(per).map((p) => {
       totMin += p.min; totEur += p.eur;
       const tarief = p.rates.size === 1 ? euro([...p.rates][0]) : p.rates.size > 1 ? 'wisselend' : '–';
-      return `<tr><td>${esc(label(p.x))}</td><td class="num">${fmt(p.min)}</td><td class="num">${tarief}</td><td class="num">${euro(p.eur)}</td></tr>`;
+      const notes = [p.fixedMin ? `waarvan ${fmt(p.fixedMin)} vast per maand` : '',
+        factor !== 1 && p.outsideMin ? `waarvan ${fmt(p.outsideMin)} buiten openingstijden (× ${factor})` : ''].filter(Boolean);
+      return `<tr><td>${esc(label(p.x))}${notes.map((n) => `<div class="sub">${n}</div>`).join('')}</td><td class="num">${fmt(p.min)}</td><td class="num">${tarief}</td><td class="num">${euro(p.eur)}</td></tr>`;
     });
     $('summary').innerHTML = rows.length
       ? `<table><tr><th>Kind – contract</th><th class="num">Uren</th><th class="num">Tarief</th><th class="num">Bedrag</th></tr>${rows.join('')}
          <tr><th>Totaal</th><th class="num">${fmt(totMin)}</th><th></th><th class="num">${euro(totEur)}</th></tr></table>
-         ${missing ? '<div class="warn">Voor sommige registraties is geen tarief bekend (bedrag telt als € 0). Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.</div>' : ''}`
+         ${missing ? '<div class="warn">Voor sommige uren is geen tarief bekend (bedrag telt als € 0). Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.</div>' : ''}`
       : '<div class="empty">Geen uren in deze maand.</div>';
     $('monthEntries').innerHTML = list.length ? list.map((e) => entryRow(e, true)).join('') : '<div class="empty">Geen registraties.</div>';
   }
@@ -370,12 +422,17 @@
   $('print').onclick = () => window.print();
   $('csv').onclick = () => {
     const q = (v) => `"${String(v).replace(/"/g, '""')}"`;
-    const lines = [['Datum', 'Kind', 'Contract', 'Van', 'Tot', 'Uren', 'Tarief', 'Bedrag', 'Opmerking'].join(';')];
+    const lines = [['Datum', 'Kind', 'Contract', 'Van', 'Tot', 'Uren', 'Uren buiten openingstijden', 'Tarief', 'Bedrag', 'Opmerking'].join(';')];
+    const dec = (n) => n.toFixed(2).replace('.', ',');
+    const { factor } = state.settings.opening, m = $('month').value;
     monthEntries().forEach((e) => {
-      const x = findContract(e.contractId), h = entryMin(e) / 60, rate = rateFor(x, e.date);
-      const dec = (n) => n.toFixed(2).replace('.', ',');
-      lines.push([e.date, q(x ? x.child.name : ''), q(x ? x.contract.name : ''), e.start, e.end,
-        dec(h), rate === null ? '' : dec(rate), dec(h * (rate ?? 0)), q(e.note || '')].join(';'));
+      const x = findContract(e.contractId), rate = rateFor(x, e.date), { inside, outside } = splitMinutes(e);
+      lines.push([e.date, q(x ? x.child.name : ''), q(x ? x.contract.name : ''), e.start, e.end, dec((inside + outside) / 60), dec(outside / 60),
+        rate === null ? '' : dec(rate), dec(((inside + outside * factor) / 60) * (rate ?? 0)), q(e.note || '')].join(';'));
+    });
+    fixedContracts(m).forEach((x) => {
+      const hours = Number(x.contract.monthlyHours), rate = rateFor(x, m + '-01');
+      lines.push([m + '-01', q(x.child.name), q(x.contract.name), '', '', dec(hours), '', rate === null ? '' : dec(rate), dec(hours * (rate ?? 0)), q('Vaste uren per maand')].join(';'));
     });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob(['﻿' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }));
@@ -384,17 +441,27 @@
   };
 
   // --- kinderen ---
+  function contractCard(k) {
+    const field = (name, label, attrs, value) => `<div><label>${label}</label><input ${attrs} value="${esc(value ?? '')}" data-k="${k.id}" data-f="${name}"></div>`;
+    const fixed = Number(k.monthlyHours) > 0;
+    return `<div class="contract-card grid2">
+      <div class="wide"><label>Contract</label><input value="${esc(k.name)}" data-k="${k.id}" data-f="name"></div>
+      ${field('rate', '€ / uur', 'type="number" step="0.01" min="0" placeholder="algemeen"', k.rate)}
+      ${field('monthlyHours', 'Vaste uren / maand', 'type="number" step="0.25" min="0" placeholder="geen"', k.monthlyHours)}
+      ${fixed ? field('from', 'Vanaf maand', 'type="month"', k.from) + field('until', 'Tot en met maand', 'type="month"', k.until) : ''}
+      <div class="wide" style="text-align: right"><button class="link" data-rmk="${k.id}">Contract verwijderen</button></div>
+    </div>`;
+  }
+
   function renderChildren() {
     $('childList').innerHTML = state.children.map((c) => `
       <div class="card" data-child="${c.id}">
         <h2>${esc(c.name)} <button class="link" data-rmchild="${c.id}">verwijderen</button></h2>
-        ${c.contracts.map((k) => `<div class="contract"><div><label>Contract</label><input value="${esc(k.name)}" data-k="${k.id}" data-f="name"></div>
-          <div><label>€ / uur</label><input type="number" step="0.01" min="0" value="${k.rate ?? ''}" placeholder="algemeen" data-k="${k.id}" data-f="rate"></div>
-          <button class="link" data-rmk="${k.id}" title="Contract verwijderen">✕</button></div>`).join('')}
-        <form data-addk="${c.id}" class="contract">
-          <div><label>Nieuw contract (bijv. “Ma–Wo”); tarief leeg = algemeen</label><input name="n" required></div>
+        ${c.contracts.map(contractCard).join('')}
+        <form data-addk="${c.id}" class="grid2">
+          <div class="wide"><label>Nieuw contract (bijv. “Ma–Wo”)</label><input name="n" required></div>
           <div><label>€ / uur</label><input name="r" type="number" step="0.01" min="0" placeholder="algemeen"></div>
-          <button class="btn small">+</button>
+          <div><button class="btn">Toevoegen</button></div>
         </form>
       </div>`).join('') || '<div class="empty">Nog geen kinderen. Voeg hieronder een kind toe.</div>';
   }
@@ -428,8 +495,12 @@
     const t = ev.target, kid = t.dataset.k;
     if (!kid) return;
     const c = state.children.find((x) => x.contracts.some((k) => k.id === kid));
-    const v = t.dataset.f === 'rate' ? (t.value === '' ? null : Number(t.value)) : t.value.trim();
-    saveChild({ ...c, contracts: c.contracts.map((k) => (k.id === kid ? { ...k, [t.dataset.f]: v } : k)) });
+    const f = t.dataset.f;
+    const v = f === 'name' ? t.value.trim() : f === 'rate' || f === 'monthlyHours' ? (t.value === '' ? null : Number(t.value)) : t.value || null;
+    const patch = { [f]: v };
+    // Vaste uren hebben een startmaand nodig: standaard de huidige maand.
+    if (f === 'monthlyHours' && v > 0 && !c.contracts.find((k) => k.id === kid).from) patch.from = monthNow();
+    saveChild({ ...c, contracts: c.contracts.map((k) => (k.id === kid ? { ...k, ...patch } : k)) });
   });
 
   $('childList').addEventListener('click', async (ev) => {
@@ -454,11 +525,46 @@
   });
 
   // --- instellingen ---
+  // Een tarief valt in het huidige jaar als de periode dat jaar raakt.
+  const isCurrentYear = (r) => { const y = String(new Date().getFullYear()); return r.from.slice(0, 4) <= y && (!r.to || r.to.slice(0, 4) >= y); };
+
+  // Openingstijden: we bewerken een kopie ('draft') en slaan die op met de knop.
+  let draft = null;
+  function renderOpening() {
+    draft = JSON.parse(JSON.stringify(state.settings.opening));
+    if (draft.days.length !== 7) draft.days = Array.from({ length: 7 }, () => ({ open: false, from: null, to: null }));
+    $('openingList').innerHTML = WEEKDAYS.map((name, i) => {
+      const d = draft.days[i], off = d.open ? '' : 'disabled';
+      return `<div class="day-row"><label><input type="checkbox" data-day="${i}" ${d.open ? 'checked' : ''}> ${name}</label>
+        <input type="time" data-day="${i}" data-t="from" value="${d.from ?? ''}" ${off}>
+        <input type="time" data-day="${i}" data-t="to" value="${d.to ?? ''}" ${off}></div>`;
+    }).join('');
+    $('openingFactor').value = draft.factor;
+  }
+  $('openingList').addEventListener('change', (ev) => {
+    const t = ev.target, i = Number(t.dataset.day);
+    if (Number.isNaN(i)) return;
+    const d = draft.days[i];
+    if (t.type === 'checkbox') {
+      d.open = t.checked;
+      const [from, to] = t.closest('.day-row').querySelectorAll('input[type=time]');
+      if (d.open) { d.from ||= '07:00'; d.to ||= '18:00'; from.value = d.from; to.value = d.to; }
+      from.disabled = to.disabled = !d.open;
+    } else {
+      d[t.dataset.t] = t.value || null;
+    }
+  });
+  $('openingSave').onclick = async () => {
+    $('openingOk').textContent = '';
+    const ok = await saveSetting($('openingErr'), 'opening', { days: draft.days, factor: Number($('openingFactor').value) }, (res) => { state.settings.opening = res.opening; });
+    if (ok) { renderOpening(); $('openingOk').textContent = 'Opgeslagen.'; }
+  };
+
   function renderSettings() {
     const { rates, users, fixedUsers, me } = state.settings;
     $('rateList').innerHTML = rates.length
-      ? `<table><tr><th>Van</th><th>Tot</th><th class="num">€ / uur</th><th></th></tr>${rates.map((r) =>
-          `<tr><td>${nlDate(r.from)}</td><td>${r.to ? nlDate(r.to) : 'doorlopend'}</td><td class="num">${euro(r.rate)}</td>
+      ? `<table><tr><th>Van</th><th>Tot en met</th><th class="num">€ / uur</th><th></th></tr>${rates.map((r) =>
+          `<tr class="${isCurrentYear(r) ? 'cur' : ''}"><td>${nlDate(r.from)}</td><td>${r.to ? nlDate(r.to) : 'doorlopend'}</td><td class="num">${euro(r.rate)}</td>
            <td class="num"><button class="link" data-rmrate="${r.id}" title="Verwijderen">✕</button></td></tr>`).join('')}</table>`
       : '<div class="empty">Nog geen algemeen tarief.</div>';
     const row = (e, fixed) => `<div class="entry"><div class="who">${esc(e)}${fixed ? '<span class="tag">beheerder</span>' : ''}${e === me ? '<span class="tag">jij</span>' : ''}</div>
@@ -514,6 +620,7 @@
     if (children) state.children = children;
     if (settings) state.settings = settings;
     render();
+    renderOpening();
   }
   init();
 })();

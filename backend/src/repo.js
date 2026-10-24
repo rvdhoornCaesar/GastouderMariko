@@ -29,12 +29,12 @@ function createRepo(connectionString) {
   };
 
   // Instellingen: één rij per soort, de lijst staat als JSON in 'value'.
-  const getSetting = async (key) => {
+  const getSetting = async (key, fallback = []) => {
     const t = await table('settings');
     try {
       return JSON.parse((await t.getEntity(PK, key)).value);
     } catch (e) {
-      if (e.statusCode === 404) return [];
+      if (e.statusCode === 404) return fallback;
       throw e;
     }
   };
@@ -48,6 +48,8 @@ function createRepo(connectionString) {
     setUsers: (list) => setSetting('users', list),
     getRates: () => getSetting('rates'),
     setRates: (list) => setSetting('rates', list),
+    getOpening: () => getSetting('opening', null),
+    setOpening: (o) => setSetting('opening', o),
 
     async listChildren() {
       const t = await table('children');

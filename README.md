@@ -1,6 +1,6 @@
 # Gastouder Uren
 
-Online urenregistratie voor gastouder Mariko: meerdere kinderen, per kind meerdere contracten (eigen uurtarief), meerdere registraties per dag, maandoverzicht met bedragen, CSV-export en afdrukken.
+Online urenregistratie voor gastouder Mariko: meerdere kinderen, per kind meerdere contracten (eigen uurtarief of algemeen tarief, optioneel vaste uren per maand), meerdere registraties per dag, openingstijden met toeslag daarbuiten, maandoverzicht met bedragen, CSV-export en afdrukken.
 
 ```
 frontend/   Statische site (vanilla HTML/JS) + staticwebapp.config.json (Microsoft-login)
@@ -19,13 +19,14 @@ infra/      Bicep: Static Web App (Free) + Storage
 
 | Methode | Pad | Doel |
 |---|---|---|
-| GET / POST | `/api/children` | kinderen met contracten ophalen / kind toevoegen |
+| GET / POST | `/api/children` | kinderen met contracten (`name, rate, monthlyHours, from, until`) ophalen / kind toevoegen |
 | PUT / DELETE | `/api/children/{id}` | kind (met contracten) opslaan / verwijderen; verwijderde contracten nemen hun uren mee |
 | GET | `/api/entries?month=JJJJ-MM` | uren van een maand |
 | POST | `/api/entries` | uren toevoegen (`date, contractId, start, end, note`) |
 | DELETE | `/api/entries/{id}` | uren verwijderen |
-| GET | `/api/settings` | algemene tarieven, toegevoegde gebruikers, beheerders en het ingelogde adres |
-| PUT | `/api/settings/rates` | lijst algemene tarieven opslaan (`{ rates: [{ from, to, rate }] }`, periodes mogen niet overlappen) |
+| GET | `/api/settings` | algemene tarieven, openingstijden, toegevoegde gebruikers, beheerders en het ingelogde adres |
+| PUT | `/api/settings/rates` | lijst algemene tarieven opslaan (`{ rates: [{ from, to, rate }] }`; `to` is tot en met; periodes mogen niet overlappen) |
+| PUT | `/api/settings/opening` | openingstijden en toeslagfactor opslaan (`{ days: [7 × { open, from, to }], factor }`, maandag eerst) |
 | PUT | `/api/settings/users` | lijst toegevoegde gebruikers opslaan (`{ users: [email] }`) |
 
 ## Lokaal draaien
@@ -79,7 +80,8 @@ Handmatig één omgeving aanmaken kan ook: `az deployment group create -g <rg> -
 
 ### Instellingen in de app
 Op het tabblad **Instellingen** beheer je:
-- **Algemeen uurtarief:** een lijst met periodes (van, tot, € per uur). “Tot” leeg = doorlopend; periodes mogen niet overlappen. Een contract zonder eigen tarief gebruikt het algemene tarief dat geldt op de datum van elke registratie; een contract met eigen tarief houdt dat. Is er voor een datum geen tarief bekend, dan telt het bedrag als € 0 en toont het overzicht een waarschuwing.
+- **Algemeen uurtarief:** een lijst met periodes (van, tot en met, € per uur), bijvoorbeeld 1-1 t/m 31-12. “Tot en met” leeg = doorlopend; periodes mogen niet overlappen. De periode van het huidige jaar staat vet. Een contract zonder eigen tarief gebruikt het algemene tarief dat geldt op de datum van elke registratie; een contract met eigen tarief houdt dat. Is er voor een datum geen tarief bekend, dan telt het bedrag als € 0 en toont het overzicht een waarschuwing.
+- **Openingstijden en toeslag:** per weekdag open of gesloten, met een van- en tottijd, plus een *factor buiten openingstijden* (2 = dubbel tarief, 1 = geen toeslag). Een registratie wordt per minuut verdeeld: binnen de openingstijden geldt het tarief, daarbuiten tarief × factor; op een gesloten dag valt alles buiten de openingstijden. Het overzicht toont per contract hoeveel uur buiten de openingstijden viel. Dit geldt voor geregistreerde uren, niet voor vaste uren per maand.
 - **Toegestane gebruikers:** iedereen in deze lijst kan inloggen en ziet dezelfde gegevens. Wie niet in de lijst staat, krijgt na het inloggen het scherm *Geen toegang*. Een toegevoegde gebruiker kan zichzelf niet verwijderen.
 
 De *beheerders* uit de GitHub-variabele `ALLOWED_USERS` (Settings → Environments → *test* / *production* → Variables, komma-gescheiden, hoofdletters maken niet uit) staan ook in die lijst, gemarkeerd als beheerder, en kunnen niet in de app worden verwijderd. Zo kun je jezelf nooit buitensluiten. Wijzig je die variabele, dan pas je de beheerders aan na een nieuwe deploy (*Actions → Deploy → Run workflow*, of *Re-run*).
@@ -96,6 +98,9 @@ exceptions | order by timestamp desc
 ```
 
 Eenmalig nodig: de resource providers `Microsoft.OperationalInsights` en `Microsoft.Insights` moeten op de subscription geregistreerd zijn (`az provider register --namespace Microsoft.OperationalInsights`); de pipeline kan dat zelf niet, want zijn rol geldt alleen op de resource groups.
+
+### Vaste uren per maand
+Bij een contract (tab *Kinderen*) kun je *Vaste uren / maand* invullen, met een *Vanaf maand* en een optionele *Tot en met maand*. Het overzicht telt die uren dan elke maand in die periode mee, tegen het tarief van het contract (of het algemene tarief op de eerste dag van de maand), naast eventueel geregistreerde uren. Zo kun je een vast contract en een extra contract voor losse uren naast elkaar gebruiken.
 
 ### Kosten en aandachtspunten
 

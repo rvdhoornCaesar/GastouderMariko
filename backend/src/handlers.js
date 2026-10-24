@@ -63,13 +63,20 @@ async function deleteEntry({ repo, params }) {
 // Instellingen: algemene tarieven en toegestane gebruikers.
 // "fixedUsers" komen uit de app-setting ALLOWED_USERS en kunnen niet in de app worden verwijderd.
 async function getSettings({ user, repo, env }) {
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: await repo.getUsers(), fixedUsers: fixedUsers(env), me: user.email } };
+  const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: await repo.getUsers(), fixedUsers: fixedUsers(env), me: user.email, opening } };
 }
 
 async function putRates({ repo, body }) {
   const rates = v.parseRates(body && body.rates, newId);
   await repo.setRates(rates);
   return { status: 200, jsonBody: { rates } };
+}
+
+async function putOpening({ repo, body }) {
+  const opening = v.parseOpening(body);
+  await repo.setOpening(opening);
+  return { status: 200, jsonBody: { opening } };
 }
 
 async function putUsers({ user, repo, env, body }) {
@@ -80,4 +87,4 @@ async function putUsers({ user, repo, env, body }) {
   return { status: 200, jsonBody: { users } };
 }
 
-module.exports = { listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putUsers };
+module.exports = { listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putOpening, putUsers };
