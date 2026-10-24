@@ -127,3 +127,36 @@ test('gebruikers: een toegevoegde gebruiker kan zichzelf niet verwijderen', asyn
   // een vaste gebruiker mag de lijst leegmaken
   assert.deepEqual((await call(h.putUsers, { body: { users: [] } })).jsonBody.users, []);
 });
+
+test('vaste uren per maand: startmaand verplicht, periode gecontroleerd', async () => {
+  const mk = (k) => call(h.createChild, { body: { name: 'Vast', contracts: [{ name: 'Vast', rate: '', ...k }] } });
+  const ok = (await mk({ monthlyHours: '80', from: '2026-01', until: '2026-12' })).jsonBody.contracts[0];
+  assert.deepEqual([ok.monthlyHours, ok.from, ok.until], [80, '2026-01', '2026-12']);
+  const open = (await mk({ monthlyHours: 40.256, from: '2026-03' })).jsonBody.contracts[0];
+  assert.deepEqual([open.monthlyHours, open.until], [40.26, null]);
+  const none = (await mk({ monthlyHours: 0, from: '2026-03' })).jsonBody.contracts[0];
+  assert.deepEqual([none.monthlyHours, none.from, none.until], [null, null, null]);
+  await assert.rejects(mk({ monthlyHours: 80 }), { status: 400 });
+  await assert.rejects(mk({ monthlyHours: 80, from: '2026-05', until: '2026-04' }), { status: 400 });
+  await assert.rejects(mk({ monthlyHours: 800, from: '2026-05' }), { status: 400 });
+  await assert.rejects(mk({ monthlyHours: 80, from: '2026-13' }), { status: 400 });
+});
+
+test('openingstijden: standaard, opslaan en validatie', async () => {
+  let s = (await call(h.getSettings)).jsonBody.opening;
+  assert.equal(s.factor, 1);
+  assert.equal(s.days.length, 7);
+  const days = s.days.map((d, i) => (i === 5 ? { open: true, from: '08:00', to: '12:00' } : d));
+  const res = await call(h.putOpening, { body: { days, factor: '2' } });
+  assert.equal(res.jsonBody.opening.factor, 2);
+  s = (await call(h.getSettings)).jsonBody.opening;
+  assert.deepEqual(s.days[5], { open: true, from: '08:00', to: '12:00' });
+  assert.deepEqual(s.days[6], { open: false, from: null, to: null });
+  const bad = (b) => assert.rejects(call(h.putOpening, { body: b }), { status: 400 });
+  await bad({ days, factor: -1 });
+  await bad({ days, factor: 11 });
+  await bad({ days, factor: 'abc' });
+  await bad({ days: days.slice(0, 6), factor: 2 });
+  await bad({ days: days.map((d, i) => (i === 0 ? { open: true, from: '18:00', to: '07:00' } : d)), factor: 2 });
+  await bad({ days: days.map((d, i) => (i === 0 ? { open: true, from: '7:00', to: '18:00' } : d)), factor: 2 });
+});

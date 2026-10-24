@@ -36,6 +36,7 @@ jobs:
     uses: ./.github/workflows/_deploy.yml
     with:
       environment: test
+      domain: test.gastouderuren.nl
     secrets: inherit
 
   deploy-production:
@@ -44,4 +45,5 @@ jobs:
     uses: ./.github/workflows/_deploy.yml
     with:
       environment: production
+      domain: invullen.gastouderuren.nl
     secrets: inherit

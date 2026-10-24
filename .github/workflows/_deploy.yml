@@ -7,6 +7,11 @@ on:
         description: GitHub-environment en Azure-omgeving (test of production)
         required: true
         type: string
+      domain:
+        description: Eigen domein voor deze omgeving (leeg = geen)
+        required: false
+        type: string
+        default: ''
 
 permissions:
   id-token: write
@@ -78,6 +83,51 @@ jobs:
           app_location: frontend
           api_location: api
           skip_app_build: true
+
+      # DNS staat bij de registrar en wordt handmatig beheerd. Deze stap koppelt het domein aan de Static Web App
+      # (idempotent) en zet in de samenvatting welke records nog nodig zijn. Hij laat de deploy nooit falen.
+      - name: Eigen domein koppelen
+        if: inputs.domain != ''
+        env:
+          DOMAIN: ${{ inputs.domain }}
+          SWA: ${{ steps.infra.outputs.static_web_app }}
+        run: |
+          default_host=$(az staticwebapp show -n "$SWA" -g "$RESOURCE_GROUP" --query defaultHostname -o tsv)
+          ip=$(az staticwebapp show -n "$SWA" -g "$RESOURCE_GROUP" --query "stableInboundIP || stableInboundIp" -o tsv 2>/dev/null || true)
+          # Twee labels (gastouderuren.nl) is een kaal domein; meer (test.gastouderuren.nl) een subdomein.
+          if [ "$(awk -F. '{print NF}' <<<"$DOMAIN")" -le 2 ]; then apex=1; else apex=0; fi
+          status() { az staticwebapp hostname list -n "$SWA" -g "$RESOURCE_GROUP" --query "[?name=='$DOMAIN'] | [0].status" -o tsv 2>/dev/null; }
+
+          err=""
+          if [ -z "$(status)" ]; then
+            if [ "$apex" = 1 ]; then method="--validation-method dns-txt-token"; else method=""; fi
+            # shellcheck disable=SC2086
+            err=$(az staticwebapp hostname set -n "$SWA" -g "$RESOURCE_GROUP" --hostname "$DOMAIN" $method --no-wait 2>&1 >/dev/null) || true
+          fi
+          st=$(status)
+
+          {
+            echo ""
+            echo "### Eigen domein: $DOMAIN"
+            echo "Status: **${st:-nog niet gekoppeld}**"
+            if [ -n "$err" ] && [ -z "$st" ]; then echo ""; echo "Koppelen is nog niet gelukt: \`$err\`"; fi
+            if [ "$st" = "Ready" ]; then
+              echo ""; echo "Het domein is gekoppeld en werkt met HTTPS."
+            else
+            echo ""
+            echo "DNS-records bij je registrar:"
+            if [ "$apex" = 1 ]; then
+              token=$(az staticwebapp hostname show -n "$SWA" -g "$RESOURCE_GROUP" --hostname "$DOMAIN" --query validationToken -o tsv 2>/dev/null || true)
+              echo "1. \`TXT\` op \`@\` met waarde \`${token:-(nog niet beschikbaar: draai de workflow opnieuw)}\`"
+              echo "2. \`ALIAS\`/\`ANAME\` op \`@\` naar \`$default_host\`${ip:+, of een \`A\`-record op \`@\` naar \`$ip\`}"
+            else
+              echo "1. \`CNAME\` op \`${DOMAIN%%.*}\` naar \`$default_host\`"
+            fi
+            echo ""
+            echo "Draai de workflow opnieuw nadat de records staan; zodra de status *Ready* is, werkt het domein met HTTPS."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$st" != "Ready" ]; then echo "::warning::Domein $DOMAIN is nog niet klaar (status: ${st:-niet gekoppeld}); zie de samenvatting voor de DNS-records."; fi
 
       - name: Samenvatting
         run: |
