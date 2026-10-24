@@ -268,7 +268,7 @@
         <button class="btn small">+</button>
         <div style="grid-column:1/-1"><label for="accRole">Rol</label><select id="accRole"></select></div>
       </form>
-      <p class="hint" style="margin-top:8px"><strong>Gebruiker:</strong> uren invullen en het overzicht zien. <strong>Beheerder:</strong> ook kinderen, contracten en instellingen beheren. <strong>Admin:</strong> alles, plus het tabblad Admin.</p>
+      <p class="hint" style="margin-top:8px"><strong>Gebruiker:</strong> uren invullen en het overzicht zien. <strong>Beheerder:</strong> ook kinderen, contracten, instellingen en lokale accounts beheren. <strong>Admin:</strong> alles, plus het tabblad Admin. Je beheert alleen accounts met een rol tot en met die van jezelf.</p>
       <div class="err" id="accountErr"></div>
     </div>
 
@@ -1082,7 +1082,8 @@
 
   // --- Rollen: wat iemand ziet en mag, volgt uit me.permissions (de server controleert alles opnieuw) ---
   const ROLE_LABELS = { gebruiker: 'Gebruiker', beheerder: 'Beheerder', admin: 'Admin' };
-  const roleOptions = (sel) => Object.entries(ROLE_LABELS).map(([k, l]) => `<option value="${k}"${k === sel ? ' selected' : ''}>${l}</option>`).join('');
+  const roleOptions = (sel, allowed = Object.keys(ROLE_LABELS)) => Object.entries(ROLE_LABELS).filter(([k]) => allowed.includes(k) || k === sel).map(([k, l]) => `<option value="${k}"${k === sel ? ' selected' : ''}${allowed.includes(k) ? '' : ' disabled'}>${l}</option>`).join('');
+  const assignable = () => (me && me.assignableRoles) || [];
   const can = (perm) => !!(me && me.permissions && me.permissions.includes(perm));
   function applyRole() {
     document.querySelectorAll('nav button[data-perm], nav button[data-local]').forEach((b) => {
@@ -1090,9 +1091,9 @@
     });
     const active = document.querySelector('nav button.active');
     if (active && active.hidden) document.querySelector('nav button[data-tab=uren]').click();
+    $('accRole').innerHTML = roleOptions('gebruiker', assignable());
     $('accountInfo').textContent = me ? `Ingelogd als ${me.email} (${ROLE_LABELS[me.role] || me.role}).` : '';
   }
-  $('accRole').innerHTML = roleOptions('gebruiker');
 
   let accounts = [];
   function renderAccounts() {
@@ -1103,9 +1104,11 @@
     if (card.hidden) return;
     $('accountList').innerHTML = accounts.length ? accounts.map((a) => `<div class="entry" style="flex-wrap:wrap"><div style="min-width:0;overflow-wrap:anywhere;flex:1 1 100%"><div class="who">${esc(a.email)}${a.mustChange ? '<span class="tag">tijdelijk wachtwoord</span>' : ''}${a.totp ? '<span class="tag">2FA</span>' : ''}</div>
         <div class="meta">${a.lastLogin ? 'laatst ingelogd ' + nlDate(a.lastLogin.slice(0, 10)) : 'nog niet ingelogd'}</div></div>
-        <div style="display:flex;gap:4px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-start"><select data-roleacc="${esc(a.email)}" aria-label="Rol van ${esc(a.email)}" style="width:auto">${roleOptions(a.role)}</select>
+        <div style="display:flex;gap:4px;align-items:center;flex-shrink:0;flex-wrap:wrap;justify-content:flex-start">${a.manageable
+          ? `<select data-roleacc="${esc(a.email)}" aria-label="Rol van ${esc(a.email)}" style="width:auto">${roleOptions(a.role, assignable())}</select>
         <button class="btn secondary small" data-resetacc="${esc(a.email)}">Nieuw ww</button>
-        <button class="link" data-rmacc="${esc(a.email)}" title="Verwijderen">✕</button></div></div>`).join('') : '<div class="empty">Nog geen lokale accounts.</div>';
+        <button class="link" data-rmacc="${esc(a.email)}" title="Verwijderen">✕</button>`
+          : `<span class="tag">${ROLE_LABELS[a.role] || esc(a.role)}${a.email === me.email ? ' · jij' : ''}</span>`}</div></div>`).join('') : '<div class="empty">Nog geen lokale accounts.</div>';
   }
   async function loadAccounts() {
     if (!can('accounts:manage')) return;

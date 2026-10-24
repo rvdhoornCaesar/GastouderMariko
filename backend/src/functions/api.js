@@ -70,9 +70,9 @@ route('changePassword', ['POST'], 'auth/change-password', handlers.changePasswor
 route('totpStart', ['POST'], 'auth/totp/start', handlers.totpStart, { auth: 'session' });
 route('totpEnable', ['POST'], 'auth/totp/enable', handlers.totpEnable, { auth: 'session' });
 route('totpDisable', ['POST'], 'auth/totp/disable', handlers.totpDisable, { auth: 'session' });
-// Accountbeheer: alleen voor beheerders met een Microsoft-login
-route('listAccounts', ['GET'], 'accounts', handlers.listAccounts, { auth: 'ms' });
-route('createAccount', ['POST'], 'accounts', handlers.createAccount, { auth: 'ms' });
-route('setAccountRole', ['PUT'], 'accounts/{email}/role', handlers.setAccountRole, { auth: 'ms' });
-route('resetAccount', ['POST'], 'accounts/{email}/reset', handlers.resetAccount, { auth: 'ms' });
-route('deleteAccount', ['DELETE'], 'accounts/{email}', handlers.deleteAccount, { auth: 'ms' });
+// Accountbeheer (recht accounts:manage: beheerder en admin, binnen hun eigen rol; zie handlers.js)
+route('listAccounts', ['GET'], 'accounts', handlers.listAccounts);
+route('createAccount', ['POST'], 'accounts', handlers.createAccount);
+route('setAccountRole', ['PUT'], 'accounts/{email}/role', handlers.setAccountRole);
+route('resetAccount', ['POST'], 'accounts/{email}/reset', handlers.resetAccount);
+route('deleteAccount', ['DELETE'], 'accounts/{email}', handlers.deleteAccount);

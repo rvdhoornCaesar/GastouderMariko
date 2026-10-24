@@ -251,7 +251,7 @@ async function logout({ repo, headers }) {
 }
 
 async function me({ user }) {
-  return { status: 200, jsonBody: { kind: user.kind, email: user.email, name: user.name, role: user.role, permissions: perm.permissionsOf(user.role), mustChange: user.mustChange, totp: !!user.totp } };
+  return { status: 200, jsonBody: { kind: user.kind, email: user.email, name: user.name, role: user.role, permissions: perm.permissionsOf(user.role), assignableRoles: perm.assignableRoles(user.role), mustChange: user.mustChange, totp: !!user.totp } };
 }
 
 async function changePassword({ user, repo, body, now = new Date() }) {
@@ -276,9 +276,22 @@ async function changePassword({ user, repo, body, now = new Date() }) {
 
 const requireAdmin = (user) => perm.require(user, 'accounts:manage');
 
+// Een account mag alleen beheerd worden binnen de eigen instantie, met een rol tot en met die van jezelf, en nooit je eigen account
+// (je eigen wachtwoord wijzig je bij Account; zo kun je jezelf ook niet buitensluiten of een hogere rol geven).
+const manageable = (user, a) => perm.canManageRole(user, a.role) && a.instanceId === user.instanceId && a.email !== user.email;
+async function manageTarget(user, repo, rawEmail) {
+  requireAdmin(user);
+  const email = v.parseAccountEmail(decodeURIComponent(rawEmail));
+  const entity = await repo.getAccount(email);
+  if (!entity) throw new HttpError(404, 'Account niet gevonden.');
+  if (!manageable(user, toAccount(entity))) throw new HttpError(403, 'Je kunt dit account niet beheren.');
+  return entity;
+}
+
 async function listAccounts({ user, repo }) {
   requireAdmin(user);
-  const list = (await repo.listAccounts()).map(toAccount).map(publicAccount).sort((a, b) => a.email.localeCompare(b.email));
+  const list = (await repo.listAccounts()).map(toAccount).filter((a) => a.instanceId === user.instanceId)
+    .map((a) => ({ ...publicAccount(a), manageable: manageable(user, a) })).sort((a, b) => a.email.localeCompare(b.email));
   return { status: 200, jsonBody: list };
 }
 
@@ -286,19 +299,18 @@ async function listAccounts({ user, repo }) {
 async function createAccount({ user, repo, body, now = new Date() }) {
   requireAdmin(user);
   const email = v.parseAccountEmail(body && body.email);
-  if (await repo.getAccount(email)) throw new HttpError(409, 'Er bestaat al een account met dit e-mailadres.');
   const role = body && body.role !== undefined ? v.parseRole(body.role) : 'gebruiker';   // standaard de minste rechten
+  if (!perm.canManageRole(user, role)) throw new HttpError(403, 'Je kunt geen account met deze rol aanmaken.');
+  if (await repo.getAccount(email)) throw new HttpError(409, 'Er bestaat al een account met dit e-mailadres.');
   const tempPassword = P.generateTempPassword();
-  const account = { email, name: String((body && body.name) ?? '').trim().slice(0, 100), role, instanceId: 'main', mustChange: true, createdAt: now.toISOString() };
+  const account = { email, name: String((body && body.name) ?? '').trim().slice(0, 100), role, instanceId: user.instanceId, mustChange: true, createdAt: now.toISOString() };
   await repo.saveAccount({ ...account, passwordHash: await P.hashPassword(tempPassword) });
   return { status: 201, jsonBody: { account: publicAccount(account), tempPassword } };
 }
 
 async function resetAccount({ user, repo, params }) {
-  requireAdmin(user);
-  const email = v.parseAccountEmail(decodeURIComponent(params.email));
-  const entity = await repo.getAccount(email);
-  if (!entity) throw new HttpError(404, 'Account niet gevonden.');
+  const entity = await manageTarget(user, repo, params.email);
+  const email = entity.rowKey;
   const tempPassword = P.generateTempPassword();
   await repo.saveAccount({ ...toAccount(entity), passwordHash: await P.hashPassword(tempPassword), mustChange: true, totpSecret: '', totpPending: '', totpLastStep: 0, recoveryCodes: '[]' }); // ook 2FA terugzetten: telefoon kwijt is een gewone reden voor een reset
   await repo.deleteSessionsOf(email);
@@ -307,22 +319,19 @@ async function resetAccount({ user, repo, params }) {
 }
 
 async function setAccountRole({ user, repo, params, body }) {
-  requireAdmin(user);
-  const email = v.parseAccountEmail(decodeURIComponent(params.email));
+  const entity = await manageTarget(user, repo, params.email);
   const role = v.parseRole(body && body.role);
-  const entity = await repo.getAccount(email);
-  if (!entity) throw new HttpError(404, 'Account niet gevonden.');
+  if (!perm.canManageRole(user, role)) throw new HttpError(403, 'Je kunt deze rol niet toekennen.');
   await repo.saveAccount({ ...toAccount(entity), role });
-  await repo.deleteSessionsOf(email);   // rechten veranderen: opnieuw inloggen
+  await repo.deleteSessionsOf(entity.rowKey);   // rechten veranderen: opnieuw inloggen
   return { status: 200, jsonBody: publicAccount({ ...toAccount(entity), role }) };
 }
 
 async function deleteAccount({ user, repo, params }) {
-  requireAdmin(user);
-  const email = v.parseAccountEmail(decodeURIComponent(params.email));
-  await repo.deleteSessionsOf(email);
-  await repo.deleteAccount(email);
-  await repo.clearThrottle(throttleKey(email));
+  const entity = await manageTarget(user, repo, params.email);
+  await repo.deleteSessionsOf(entity.rowKey);
+  await repo.deleteAccount(entity.rowKey);
+  await repo.clearThrottle(throttleKey(entity.rowKey));
   return { status: 204 };
 }
 
