@@ -169,4 +169,17 @@ function parseOpening(b) {
   return { days, factor: Math.round(factor * 100) / 100 };
 }
 
-module.exports = { DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
+// Eigen kinderen van de gastouder (voornaam en geboortedatum); ze tellen mee voor het maximum aantal kinderen.
+function parseOwnChildren(list, newId) {
+  if (!Array.isArray(list) || list.length > 20) throw bad('Ongeldige lijst met eigen kinderen.');
+  const today = new Date().toISOString().slice(0, 10);
+  return list.map((c) => {
+    const firstName = text(c && c.firstName, 100);
+    if (!firstName) throw bad('Een eigen kind heeft een voornaam nodig.');
+    const birthDate = requiredDate(c.birthDate, `${firstName}: vul een geldige geboortedatum in.`);
+    if (birthDate > today) throw bad(`${firstName}: de geboortedatum ligt in de toekomst.`);
+    return { id: c.id && ID.test(c.id) ? c.id : newId(), firstName, birthDate };
+  }).sort((a, b) => a.birthDate.localeCompare(b.birthDate));
+}
+
+module.exports = { parseOwnChildren, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };

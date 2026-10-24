@@ -190,6 +190,19 @@
     </div>
 
     <div class="card">
+      <h2>Eigen kinderen</h2>
+      <p class="hint"><strong>Maximaal aantal kinderen.</strong> Een gastouder mag maximaal 6 kinderen tegelijk opvangen. Voor jonge kinderen gelden lagere maxima: maximaal 5 kinderen jonger dan 4 jaar, maximaal 4 jonger dan 2 jaar en maximaal 2 jonger dan 1 jaar. Eigen kinderen tot 8 jaar tellen mee (tot 1 juli 2026 gold: tot 10 jaar). Bron: Ondernemersplein/RVO. De regels kunnen wijzigen; controleer ze bij je GGD of gastouderbureau.</p>
+      <div id="ownList"></div>
+      <div class="hint" id="ownSummary" style="margin-top: 8px"></div>
+      <form class="grid2" id="ownForm" style="margin-top: 10px">
+        <div><label for="ownName">Voornaam</label><input id="ownName" required></div>
+        <div><label for="ownBirth">Geboortedatum</label><input type="date" id="ownBirth" required></div>
+        <div class="wide"><button class="btn secondary">Eigen kind toevoegen</button></div>
+      </form>
+      <div class="err" id="ownErr"></div>
+    </div>
+
+    <div class="card">
       <h2>Openingstijden en toeslag</h2>
       <p class="hint">Binnen de openingstijden geldt het gewone uurtarief. Uren buiten de openingstijden krijgen een toeslag: het tarief wordt vermenigvuldigd met de factor (2 = dubbel tarief, 1 = geen toeslag). Op een gesloten dag valt alles buiten de openingstijden.</p>
       <div id="openingList"></div>
@@ -223,7 +236,7 @@
   const euro = (n) => n.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  const state = { children: [], entries: [], settings: { rates: [], users: [], fixedUsers: [], me: '', opening: { days: [], factor: 1 } } };
+  const state = { children: [], entries: [], settings: { rates: [], users: [], fixedUsers: [], me: '', opening: { days: [], factor: 1 }, ownChildren: [] } };
   const loadedMonths = new Set();
 
   // --- API ---
@@ -728,7 +741,36 @@
     if (ok) { renderOpening(); $('openingOk').textContent = 'Opgeslagen.'; }
   };
 
+  // Leeftijd in hele maanden: eigen kinderen tellen mee tot hun 8e verjaardag.
+  const ageMonths = (birth) => {
+    const b = new Date(birth + 'T12:00'), n = new Date();
+    return (n.getFullYear() - b.getFullYear()) * 12 + n.getMonth() - b.getMonth() - (n.getDate() < b.getDate() ? 1 : 0);
+  };
+  const ageText = (birth) => { const m = ageMonths(birth); return m < 24 ? `${m} maanden` : `${Math.floor(m / 12)} jaar`; };
+  const countsOwn = (c) => ageMonths(c.birthDate) < 8 * 12;
+
+  function renderOwnChildren() {
+    const list = state.settings.ownChildren;
+    $('ownList').innerHTML = list.length ? list.map((c) => `<div class="entry"><div><div class="who">${esc(c.firstName)}
+        ${countsOwn(c) ? '<span class="tag">telt mee</span>' : '<span class="tag">telt niet meer mee</span>'}</div>
+        <div class="meta">geboren ${nlDate(c.birthDate)} · ${ageText(c.birthDate)}</div></div>
+        <button class="link" data-rmown="${c.id}" title="Verwijderen">✕</button></div>`).join('') : '<div class="empty">Nog geen eigen kinderen.</div>';
+    const n = list.filter(countsOwn).length;
+    $('ownSummary').textContent = list.length
+      ? `Eigen kinderen die meetellen: ${n}. Indicatie: er is dan plek voor maximaal ${Math.max(0, 6 - n)} gastkinderen tegelijk (6 min ${n}); de maxima voor jonge kinderen gelden daarnaast.` : '';
+  }
+  $('ownForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const c = { firstName: $('ownName').value.trim(), birthDate: $('ownBirth').value };
+    if (await saveSetting($('ownErr'), 'own-children', { ownChildren: [...state.settings.ownChildren, c] }, (res) => { state.settings.ownChildren = res.ownChildren; })) ev.target.reset();
+  });
+  $('ownList').addEventListener('click', (ev) => {
+    const id = ev.target.dataset.rmown;
+    if (id && confirm('Dit eigen kind verwijderen?')) saveSetting($('ownErr'), 'own-children', { ownChildren: state.settings.ownChildren.filter((c) => c.id !== id) }, (res) => { state.settings.ownChildren = res.ownChildren; });
+  });
+
   function renderSettings() {
+    renderOwnChildren();
     const { rates, users, fixedUsers, me } = state.settings;
     $('rateList').innerHTML = rates.length
       ? `<table><tr><th>Van</th><th>Tot en met</th><th class="num">€ / uur</th><th></th></tr>${rates.map((r) =>

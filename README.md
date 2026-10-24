@@ -24,9 +24,10 @@ infra/      Bicep: Static Web App (Free) + Storage
 | GET | `/api/entries?month=JJJJ-MM` | uren van een maand |
 | POST | `/api/entries` | uren toevoegen (`date, contractId, start, end, note`) |
 | DELETE | `/api/entries/{id}` | uren verwijderen |
-| GET | `/api/settings` | algemene tarieven, openingstijden, toegevoegde gebruikers, beheerders en het ingelogde adres |
+| GET | `/api/settings` | algemene tarieven, openingstijden, eigen kinderen, toegevoegde gebruikers, beheerders en het ingelogde adres |
 | PUT | `/api/settings/rates` | lijst algemene tarieven opslaan (`{ rates: [{ from, to, rate }] }`; `to` is tot en met; periodes mogen niet overlappen) |
 | PUT | `/api/settings/opening` | openingstijden en toeslagfactor opslaan (`{ days: [7 × { open, from, to }], factor }`, maandag eerst) |
+| PUT | `/api/settings/own-children` | eigen kinderen opslaan (`{ ownChildren: [{ firstName, birthDate }] }`) |
 | PUT | `/api/settings/users` | lijst toegevoegde gebruikers opslaan (`{ users: [email] }`) |
 
 ## Lokaal draaien
@@ -95,6 +96,7 @@ Per omgeving is één `CNAME`-record nodig bij de registrar:
 ### Instellingen in de app
 Op het tabblad **Instellingen** beheer je:
 - **Algemeen uurtarief:** een lijst met periodes (van, tot en met, € per uur), bijvoorbeeld 1-1 t/m 31-12. “Tot en met” leeg = doorlopend; periodes mogen niet overlappen. De periode van het huidige jaar staat vet. Een contract zonder eigen tarief gebruikt het algemene tarief dat geldt op de datum van elke registratie; een contract met eigen tarief houdt dat. Is er voor een datum geen tarief bekend, dan telt het bedrag als € 0 en toont het overzicht een waarschuwing.
+- **Eigen kinderen:** voornaam en geboortedatum van je eigen kinderen. Ze tellen mee voor het maximum aantal kinderen dat je tegelijk mag opvangen; de app toont daarbij de regels als infotekst en een indicatie van het aantal plekken voor gastkinderen (6 min de eigen kinderen onder 8 jaar). De infotekst is een samenvatting van [Ondernemersplein/RVO](https://ondernemersplein.overheid.nl/wetten-en-regels/eisen-aan-gastouders/) (maximaal 6 kinderen tegelijk; maximaal 5 jonger dan 4 jaar, 4 jonger dan 2 jaar en 2 jonger dan 1 jaar; eigen kinderen tot 8 jaar tellen mee, voorheen tot 10 jaar) en is geen wettekst: controleer de actuele regels bij je GGD of gastouderbureau. De tekst staat in `frontend/index.html` en is daar aan te passen.
 - **Openingstijden en toeslag:** per weekdag open of gesloten, met een van- en tottijd, plus een *factor buiten openingstijden* (2 = dubbel tarief, 1 = geen toeslag). Een registratie wordt per minuut verdeeld: binnen de openingstijden geldt het tarief, daarbuiten tarief × factor; op een gesloten dag valt alles buiten de openingstijden. Het overzicht toont per contract hoeveel uur buiten de openingstijden viel. Dit geldt voor geregistreerde uren, niet voor vaste uren per maand.
 - **Toegestane gebruikers:** iedereen in deze lijst kan inloggen en ziet dezelfde gegevens. Wie niet in de lijst staat, krijgt na het inloggen het scherm *Geen toegang*. Een toegevoegde gebruiker kan zichzelf niet verwijderen.
 
