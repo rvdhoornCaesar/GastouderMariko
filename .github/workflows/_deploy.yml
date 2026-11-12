@@ -105,7 +105,7 @@ jobs:
           ip=$(az staticwebapp show -n "$SWA" -g "$RESOURCE_GROUP" --query "stableInboundIP || stableInboundIp" -o tsv 2>/dev/null || true)
           # Twee labels (gastouderuren.nl) is een kaal domein; meer (test.gastouderuren.nl) een subdomein.
           if [ "$(awk -F. '{print NF}' <<<"$DOMAIN")" -le 2 ]; then apex=1; else apex=0; fi
-          status() { az staticwebapp hostname list -n "$SWA" -g "$RESOURCE_GROUP" --query "[?name=='$DOMAIN'] | [0].status" -o tsv 2>/dev/null; }
+          status() { az staticwebapp hostname list -n "$SWA" -g "$RESOURCE_GROUP" --query "[?name=='$DOMAIN' || domainName=='$DOMAIN'] | [0].status" -o tsv 2>/dev/null; }
 
           err=""
           if [ -z "$(status)" ]; then
@@ -113,7 +113,18 @@ jobs:
             # shellcheck disable=SC2086
             err=$(az staticwebapp hostname set -n "$SWA" -g "$RESOURCE_GROUP" --hostname "$DOMAIN" $method --no-wait 2>&1 >/dev/null) || true
           fi
+          # Azure controleert het domein op de achtergrond (bij een CNAME: of het naar de Static Web App wijst); even wachten op de uitkomst.
           st=$(status)
+          for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
+            case "$st" in Ready|Failed|Deleting) break ;; esac
+            sleep 15
+            st=$(status)
+          done
+          # De uitkomst staat ook in deze log, niet alleen in de samenvatting.
+          echo "Status van $DOMAIN: ${st:-nog niet gekoppeld}"
+          if [ -n "$err" ]; then echo "Melding van Azure bij het koppelen: $err"; fi
+          echo "Hostnamen van $SWA volgens Azure:"
+          az staticwebapp hostname list -n "$SWA" -g "$RESOURCE_GROUP" -o json 2>&1 | jq -c '.[] | {name, domainName, status, errorMessage}' || true
 
           {
             echo ""
