@@ -136,6 +136,7 @@
     <button data-tab="uren" class="active">Uren invullen</button>
     <button data-tab="overzicht">Overzicht</button>
     <button data-tab="kalender">Kalender</button>
+    <button data-tab="past">Past het?</button>
     <button data-tab="kinderen" data-perm="children:write" hidden>Kinderen</button>
     <button data-tab="instellingen" data-perm="settings:write" hidden>Instellingen</button>
     <button data-tab="account" data-local="1" hidden>Account</button>
@@ -273,6 +274,35 @@
     <div class="legend" id="calLegend"></div>
     <div id="calBody"></div>
     <div class="actions noprint" style="margin-top:14px"><button class="btn secondary" id="calPrint">Afdrukken</button></div>
+  </section>
+
+  <!-- PAST HET? -->
+  <section id="tab-past" hidden>
+    <div class="card">
+      <h2>Past het?</h2>
+      <p class="hint">Probeer een kind virtueel toe te voegen, of een bestaand kind virtueel aan te passen. Er wordt niets opgeslagen.</p>
+      <div class="seg">
+        <button type="button" data-pm="nieuw" class="active">Nieuw kind</button>
+        <button type="button" data-pm="bestaand">Bestaand kind aanpassen</button>
+      </div>
+      <div id="pNew" class="grid2">
+        <div><label for="pName">Naam (optioneel)</label><input id="pName" placeholder="Nieuw kind"></div>
+        <div><label for="pBirth">Geboortedatum</label><input type="date" id="pBirth"></div>
+      </div>
+      <div id="pOld" hidden>
+        <label for="pChild">Kind</label><select id="pChild"></select>
+        <p class="hint" style="margin-top:6px">Het rooster hieronder vervangt de geplande uren van dit kind in de gekozen periode (vakanties van het kind blijven vrij). Al ingevulde uren blijven staan.</p>
+      </div>
+      <h3 class="subhead">Gewenste dagen en tijden</h3>
+      <div id="pDays"></div>
+      <div class="grid2" style="margin-top:10px">
+        <div><label for="pStart">Startdatum</label><input type="date" id="pStart"></div>
+        <div><label for="pEnd">Einddatum (optioneel)</label><input type="date" id="pEnd"></div>
+      </div>
+      <div class="err" id="pErr"></div>
+      <button class="btn" type="button" id="pRun">Controleer</button>
+    </div>
+    <div id="pResult"></div>
   </section>
 
   <!-- KINDEREN -->
@@ -578,7 +608,7 @@
   // --- tabs ---
   document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('active', x === b));
-    ['uren', 'overzicht', 'kalender', 'kinderen', 'instellingen', 'account', 'admin'].forEach((t) => $('tab-' + t).hidden = t !== b.dataset.tab);
+    ['uren', 'overzicht', 'kalender', 'past', 'kinderen', 'instellingen', 'account', 'admin'].forEach((t) => $('tab-' + t).hidden = t !== b.dataset.tab);
     render();
   }));
 
@@ -1046,6 +1076,137 @@
         : '<div class="card"><div class="empty">Nog geen kinderen.</div></div>';
     }
   }
+
+  // --- past het? ---
+  // Simuleert een extra (virtueel) kind, of een aangepast rooster voor een bestaand kind, tegen de geschreven en geplande uren van de
+  // andere kinderen. Er wordt niets opgeslagen. Gecontroleerd wordt per dag vanaf vandaag, met dezelfde regels als de waarschuwing in de kalender.
+  let pastMode = 'nieuw';
+  const pastRows = () => WEEKDAYS.map((_, i) => ({ open: $('pdo' + i).checked, from: $('pdf' + i).value, to: $('pdt' + i).value }));
+  function fillPastRows(sched) {
+    WEEKDAYS.forEach((_, i) => {
+      const d = sched && sched[i];
+      $('pdo' + i).checked = !!(d && d.open);
+      $('pdf' + i).value = d && d.open ? d.from : '08:00'; $('pdt' + i).value = d && d.open ? d.to : '17:00';
+      $('pdf' + i).disabled = $('pdt' + i).disabled = !$('pdo' + i).checked;
+    });
+  }
+  $('pDays').innerHTML = WEEKDAYS.map((n, i) => `<div class="day-row" style="grid-template-columns:7.6rem 1fr 1fr"><label><input type="checkbox" id="pdo${i}"> ${n}</label>
+    <input type="time" id="pdf${i}"><input type="time" id="pdt${i}"></div>`).join('');
+  fillPastRows(null);
+  WEEKDAYS.forEach((_, i) => { $('pdo' + i).onchange = () => { $('pdf' + i).disabled = $('pdt' + i).disabled = !$('pdo' + i).checked; }; });
+  $('pStart').value = iso(new Date());
+
+  // Huidige rooster van een kind: het contract van vandaag, anders het laatste contract met vaste tijden.
+  function currentSchedule(c) {
+    const today = iso(new Date()), withSched = c.contracts.filter((k) => Array.isArray(k.schedule) && k.schedule.some((d) => d.open));
+    const k = withSched.find((x) => x.start <= today && today <= x.end) || withSched.sort((a, b) => (a.end || '').localeCompare(b.end || '')).pop();
+    return k ? k.schedule : null;
+  }
+  function setPastMode(m) {
+    pastMode = m;
+    document.querySelectorAll('[data-pm]').forEach((b) => b.classList.toggle('active', b.dataset.pm === m));
+    $('pNew').hidden = m !== 'nieuw'; $('pOld').hidden = m !== 'bestaand';
+    if (m === 'bestaand') { const c = state.children.find((x) => x.id === $('pChild').value); if (c) fillPastRows(currentSchedule(c)); }
+    $('pResult').innerHTML = '';
+  }
+  document.querySelectorAll('[data-pm]').forEach((b) => b.addEventListener('click', () => setPastMode(b.dataset.pm)));
+  $('pChild').onchange = () => { const c = state.children.find((x) => x.id === $('pChild').value); if (c) fillPastRows(currentSchedule(c)); };
+  let pastKids = '';
+  function renderPast() {
+    const key = state.children.map((c) => c.id).join();
+    if (key === pastKids) return;
+    pastKids = key;
+    const prev = $('pChild').value;
+    $('pChild').innerHTML = state.children.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+    if (prev) $('pChild').value = prev;
+  }
+
+  const mergeWin = (w) => { const out = []; [...w].sort((a, b) => a[0] - b[0]).forEach(([a, b]) => { const l = out[out.length - 1]; if (l && a <= l[1]) l[1] = Math.max(l[1], b); else out.push([a, b]); }); return out; };
+  const subWin = (a, b, w) => { let cur = a; const out = []; mergeWin(w).forEach(([x, y]) => { if (x > cur) out.push([cur, Math.min(x, b)]); cur = Math.max(cur, y); }); if (cur < b) out.push([cur, b]); return out.filter(([x, y]) => y > x); };
+  const winText = (w) => w.map(([a, b]) => `${fmt2(a)}–${fmt2(b)}`).join(', ');
+
+  async function runPast() {
+    const err = $('pErr'); err.textContent = '';
+    const rows = pastRows(), today = iso(new Date()), start = $('pStart').value, end = $('pEnd').value || null;
+    const existing = pastMode === 'bestaand' ? state.children.find((x) => x.id === $('pChild').value) : null;
+    if (pastMode === 'bestaand' && !existing) return err.textContent = 'Kies een kind.';
+    if (pastMode === 'nieuw' && !$('pBirth').value) return err.textContent = 'Vul de geboortedatum in; die bepaalt de regels voor jonge kinderen.';
+    if (!rows.some((r) => r.open)) return err.textContent = 'Kies minstens één dag.';
+    const bad = rows.findIndex((r) => r.open && (!r.from || !r.to || toMin(r.to) <= toMin(r.from)));
+    if (bad >= 0) return err.textContent = `Controleer de tijden van ${WEEKDAYS[bad].toLowerCase()}: de eindtijd moet na de begintijd liggen.`;
+    if (!start) return err.textContent = 'Vul een startdatum in.';
+    if (end && end < start) return err.textContent = 'De einddatum ligt voor de startdatum.';
+    if (end && end < today) return err.textContent = 'De einddatum ligt in het verleden; er is niets meer te plannen.';
+    const from = start < today ? today : start;
+    // Zonder einddatum: tot de laatste einddatum van een bestaand contract (minimaal 8 weken, maximaal 2 jaar).
+    const plus = (d, n) => iso(noon(new Date(d + 'T12:00'), n));
+    const maxEnd = contracts().map((x) => x.contract.end || '').sort().pop() || '';
+    const horizon = end || (maxEnd ? [plus(from, 56), [plus(from, 730), maxEnd].sort()[0]].sort().pop() : plus(from, 56));
+    const child = existing || { id: '__virtueel', firstName: $('pName').value.trim() || 'Nieuw kind', name: $('pName').value.trim() || 'Nieuw kind', birthDate: $('pBirth').value, holidays: [] };
+    const months = []; for (let m = new Date(from.slice(0, 7) + '-01T12:00'); iso(m).slice(0, 7) <= horizon.slice(0, 7); m.setMonth(m.getMonth() + 1)) months.push(iso(m).slice(0, 7));
+    $('pRun').disabled = true; $('pResult').innerHTML = '<div class="card"><div class="empty">Bezig met controleren…</div></div>';
+    await Promise.all(months.map((m) => guard(() => ensureMonth(m))));
+    $('pRun').disabled = false;
+    const plans = new Map(months.map((m) => [m, monthPlan(m)]));
+
+    // Per gevraagde weekdag: de dagen die zijn gecontroleerd en de dagen waarop het niet past.
+    const per = rows.map(() => ({ days: [], conflicts: [] }));
+    let skipped = 0;
+    for (let dt = new Date(from + 'T12:00'); iso(dt) <= horizon; dt.setDate(dt.getDate() + 1)) {
+      const date = iso(dt), wd = (dt.getDay() + 6) % 7, r = rows[wd];
+      if (!r.open || date < start) continue;
+      if ((child.holidays || []).some((h) => h.from <= date && date <= h.to)) { skipped++; continue; }
+      const base = (plans.get(date.slice(0, 7)).days.get(date) || []).filter((i) => !(existing && i.child.id === child.id && i.kind === 'planned'));
+      const a = toMin(r.from), b = toMin(r.to);
+      const withV = [...base, { child, kind: 'virtual', start: r.from, end: r.to, min: b - a, holiday: false }];
+      const over = (sg) => isOver({ free: sg.free, closed: false });
+      const bad = segmentsFor(date, withV).filter((sg) => sg.from < b && sg.to > a && over(sg));
+      const idx = per[wd].days.push(date) - 1;
+      if (!bad.length) continue;
+      const baseBad = segmentsFor(date, base).filter(over);
+      per[wd].conflicts.push({ date, idx, windows: mergeWin(bad.map((sg) => [Math.max(sg.from, a), Math.min(sg.to, b)])),
+        reasons: [...new Set(bad.map((sg) => overText({ free: sg.free })))],
+        already: bad.some((sg) => baseBad.some((x) => x.from < sg.to && x.to > sg.from)) });
+    }
+
+    const groupsOf = (list) => { const g = []; list.forEach((c) => { const l = g[g.length - 1]; if (l && l[l.length - 1].idx === c.idx - 1) l.push(c); else g.push([c]); }); return g; };
+    const cards = rows.map((r, wd) => {
+      if (!r.open) return '';
+      const { days, conflicts } = per[wd], n = days.length, k = conflicts.length, name = WEEKDAYS[wd], plural = name.toLowerCase() + 'en';
+      const head = (badge, cls) => `<h2 style="display:flex;justify-content:space-between;align-items:center"><span>${name} <span class="sub">${r.from}–${r.to}</span></span><span class="badge ${cls}">${badge}</span></h2>`;
+      const od = (state.settings.opening.days || [])[wd];
+      const closedNote = od && !od.open ? `<p class="hint">Let op: ${plural} ben je gesloten volgens de openingstijden.</p>` : '';
+      if (!n) return `<div class="card">${head('geen dagen', 'av-closed')}<p class="hint">Geen ${plural} in de periode (of het kind is dan op vakantie).</p>${closedNote}</div>`;
+      if (!k) return `<div class="card">${head('past', 'av-ok')}<p style="margin:0">Past op alle ${n} ${plural} (${nlDate(days[0])} t/m ${nlDate(days[n - 1])}).</p>${closedNote}</div>`;
+      const dateText = (g) => { const a = days[g[0].idx], b = days[g[g.length - 1].idx]; return g.length === 1 ? nlDate(a) : `${nlDate(a)} t/m ${nlDate(b)} (${g.length} ${plural})`; };
+      const detail = (g) => `${winText(mergeWin(g.flatMap((c) => c.windows)))}: ${[...new Set(g.flatMap((c) => c.reasons))].join('; ')}`;
+      const lines = [];
+      if (k === n) lines.push(`Past op geen enkele ${name.toLowerCase()} in de gecontroleerde periode (${nlDate(days[0])} t/m ${nlDate(days[n - 1])}).`);
+      else {
+        const groups = groupsOf(conflicts), first = groups[0], last = groups[groups.length - 1];
+        const lead = first[0].idx === 0 ? first : null, trail = last[last.length - 1].idx === n - 1 && last !== lead ? last : null;
+        const loose = groups.filter((g) => g !== lead && g !== trail);
+        if (lead) lines.push(`Past niet van ${nlDate(days[0])} t/m ${nlDate(days[lead[lead.length - 1].idx])}; <strong>vanaf ${nlDate(days[lead[lead.length - 1].idx + 1])} past het wel</strong>${loose.length || trail ? ' (op de uitzonderingen hieronder na)' : ''}.`);
+        if (trail) lines.push(`Past niet meer vanaf ${nlDate(days[trail[0].idx])} t/m ${nlDate(days[n - 1])}.`);
+        if (!lead && !trail) lines.push(`Past op ${n - k} van de ${n} ${plural}.`);
+        if (loose.length) lines.push(`${loose.every((g) => g.length === 1) ? 'Losse dagen' : 'Losse dagen en perioden'} waarop het niet past: ${loose.slice(0, 8).map((g) => `${dateText(g)} (${detail(g)})`).join('; ')}${loose.length > 8 ? ` en ${loose.length - 8} andere` : ''}.`);
+        if (lead || trail) lines.push(`Reden${lead && trail ? 'en' : ''}: ${[...new Set([lead, trail].filter(Boolean).flatMap((g) => g.flatMap((c) => c.reasons)))].join('; ')}.`);
+      }
+      const free = subWin(toMin(r.from), toMin(r.to), conflicts.flatMap((c) => c.windows));
+      lines.push(free.length ? `Wel passend op alle ${plural} tussen ${winText(free)}.` : `Er zijn geen tijden binnen ${r.from}–${r.to} die op alle ${plural} passen.`);
+      if (conflicts.some((c) => c.already)) lines.push('Let op: op een deel van deze dagen is het ook zonder dit kind al te vol.');
+      return `<div class="card">${head(k === n ? 'past niet' : 'past niet altijd', k === n ? 'av-full' : 'av-low')}${lines.map((l) => `<p style="margin:0 0 6px">${l}</p>`).join('')}${closedNote}</div>`;
+    }).join('');
+
+    const failing = per.map((x, i) => (x.conflicts.length ? WEEKDAYS[i].toLowerCase() : '')).filter(Boolean);
+    const total = per.reduce((s, x) => s + x.days.length, 0), checkedAny = total > 0;
+    const verdict = !checkedAny ? '<span class="badge av-closed">niets te controleren</span> Geen dagen in de gekozen periode.'
+      : failing.length ? `<span class="badge av-full">past niet overal</span> Past niet (altijd) op: ${failing.join(', ')}.` : '<span class="badge av-ok">past</span> Past op alle gevraagde dagen en tijden.';
+    $('pResult').innerHTML = `<div class="card"><h2>Uitkomst voor ${esc(child.firstName || child.name)}${existing ? ' (aangepast rooster)' : ''}</h2><p style="margin:0 0 8px">${verdict}</p>
+      <p class="hint" style="margin:0">Gecontroleerd: ${nlDate(from)} t/m ${nlDate(horizon)}${end ? '' : ` (geen einddatum opgegeven; tot de laatste einddatum van een bestaand contract, minimaal 8 weken)`}${start < today ? ' (vanaf vandaag; eerdere dagen zijn al geweest)' : ''}${skipped ? `, ${skipped} dag${skipped === 1 ? '' : 'en'} overgeslagen wegens vakantie` : ''}.
+      Meegeteld: geschreven en geplande uren van de andere kinderen, en je eigen kinderen onder 8 jaar. Vaste uren per maand hebben geen tijden en tellen niet mee.</p></div>${cards}`;
+  }
+  $('pRun').onclick = runPast;
 
   // --- kinderen: lijst en details ---
   let draft = null;              // het kind dat je bewerkt (een kopie, pas bij Opslaan bewaard)
@@ -1515,7 +1676,7 @@
     }
   });
 
-  function render() { renderDay(); renderMonth(); renderCal(); renderChildren(); renderSettings(); }
+  function render() { renderDay(); renderMonth(); renderCal(); renderPast(); renderChildren(); renderSettings(); }
 
   // Laadt de gegevens en toont de app (of eerst het scherm om het tijdelijke wachtwoord te vervangen).
   async function start(mustChange) {

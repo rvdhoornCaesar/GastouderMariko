@@ -146,6 +146,14 @@ Het tabblad **Kalender** toont de uren per kind in drie weergaven, met `‹ ›`
 
 **Waarschuwing te veel kinderen:** op een dag met te veel kinderen tegelijk (geschreven of gepland: meer dan 6, meer dan 5 jonger dan 4 jaar, meer dan 4 jonger dan 2 jaar of meer dan 2 jonger dan 1 jaar) staat een ⚠️ in alle weergaven en overzichten, met de reden bij het icoon. In de maand staat onder het totaal welke dagen het zijn; in het jaar staat het aantal dagen bij de maand (Kinderen) of een ⚠️ in het dagvakje (Beschikbaarheid).
 
+### Past het?
+Het tabblad **Past het?** (voor elke rol; er wordt niets opgeslagen) test of een extra kind of een ander rooster past:
+
+- **Nieuw kind:** optionele naam, geboortedatum (nodig voor de regels voor jonge kinderen), gewenste dagen en tijden, startdatum en optionele einddatum.
+- **Bestaand kind aanpassen:** kies een kind; het huidige rooster wordt ingevuld en vervangt de *geplande* uren van dat kind in de periode (vakanties van het kind blijven vrij, ingevulde uren blijven staan).
+
+De uitkomst staat per gevraagde weekdag: *past*, *past niet altijd* of *past niet*. Past het niet, dan staat erbij vanaf wanneer het wel past, welke losse dagen of perioden niet passen (met tijden en reden: meer dan 6 kinderen, of een staffel voor jonge kinderen) en welke tijden op alle dagen wel passen. Gecontroleerd wordt vanaf vandaag met dezelfde regels als de waarschuwing in de kalender, op basis van geschreven en geplande uren van de andere kinderen en de eigen kinderen onder 8 jaar. Zonder einddatum loopt de controle tot de laatste einddatum van een bestaand contract (minimaal 8 weken, maximaal 2 jaar). Vaste uren per maand hebben geen tijden en tellen niet mee.
+
 ### Inloggen met een lokaal account
 
 Naast Microsoft kan een gebruiker inloggen met een account dat alleen in deze app bestaat (e-mailadres + wachtwoord).
