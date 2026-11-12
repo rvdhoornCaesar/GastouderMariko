@@ -108,6 +108,7 @@
   table.heat th:first-child { text-align: left; padding-right: 8px; font-size: .8rem; color: var(--ink); }
   table.heat td.void { background: transparent; cursor: default; }
   th.agehead { border-bottom: 3px solid var(--c); }
+  .warnico { cursor: help; font-size: .85em; }
   .scrollx { overflow-x: auto; }
   .month { display: grid; grid-template-columns: repeat(7, minmax(84px, 1fr)) 64px; min-width: 700px; gap: 4px; }
   .month .hd { font-size: .75rem; color: var(--muted); font-weight: 600; text-align: center; }
@@ -896,9 +897,14 @@
       one: Math.min(m.one, s.free.one), baby: Math.min(m.baby, s.free.baby) }), segs[0].free) : freeOf(ownAges(date));
     return { segs, free, closed };
   }
-  const availClass = (d) => (d.closed ? 'av-closed' : d.free.older <= 0 ? 'av-full' : d.free.older === 1 ? 'av-low' : 'av-ok');
+  // Te veel kinderen tegelijk (geschreven of gepland): boven het totaal of boven een staffel voor jonge kinderen.
+  const isOver = (d) => !d.closed && (d.free.older < 0 || d.free.toddler < 0 || d.free.one < 0 || d.free.baby < 0);
+  const overText = (d) => (d.free.older < 0 ? `meer dan ${CAP.total} kinderen tegelijk` : d.free.toddler < 0 ? `meer dan ${CAP.u4} kinderen jonger dan 4 jaar tegelijk`
+    : d.free.one < 0 ? `meer dan ${CAP.u2} kinderen jonger dan 2 jaar tegelijk` : `meer dan ${CAP.u1} kinderen jonger dan 1 jaar tegelijk`);
+  const warnIco = (d) => (isOver(d) ? `<span class="warnico" role="img" aria-label="Te veel kinderen" title="Te veel kinderen: ${overText(d)}">⚠️</span>` : '');
+  const availClass = (d) => (d.closed ? 'av-closed' : d.free.older <= 0 || isOver(d) ? 'av-full' : d.free.older === 1 ? 'av-low' : 'av-ok');
   const freeNum = (n) => (n < 0 ? `${n}` : String(n));
-  const availText = (d) => (d.closed ? 'gesloten' : d.free.older < 0 ? `${-d.free.older} te veel` : d.free.older === 0 ? 'vol' : `${d.free.older} vrij`);
+  const availText = (d) => (d.closed ? 'gesloten' : d.free.older < 0 ? `${-d.free.older} te veel` : isOver(d) ? 'te veel jonge' : d.free.older === 0 ? 'vol' : `${d.free.older} vrij`);
   // Extra regel voor jonge kinderen als daar minder plek voor is dan voor oudere kinderen.
   const youngNote = (f) => [f.toddler < f.older && `2–3 jr: ${Math.max(0, f.toddler)}`, f.one < f.toddler && `1 jr: ${Math.max(0, f.one)}`, f.baby < f.one && `baby: ${Math.max(0, f.baby)}`]
     .filter(Boolean).join(' · ');
@@ -940,11 +946,11 @@
     if (view === 'week') {
       const all = [];
       let html = dates.map((dt) => {
-        const date = iso(dt), items = dayMap.get(date), groups = groupDay(items), tot = groups.reduce((s, g) => s + g.min, 0), border = date === today ? 'border-color:var(--accent);border-width:2px' : '';
+        const date = iso(dt), items = dayMap.get(date), groups = groupDay(items), tot = groups.reduce((s, g) => s + g.min, 0), border = date === today ? 'border-color:var(--accent);border-width:2px' : '', fd = dayFree(date, items);
         all.push(...groups);
         if (vrij) {
           const f = dayFree(date, items);
-          return `<div class="card" style="${border}"><h2 style="display:flex;justify-content:space-between;align-items:center"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))}</span>
+          return `<div class="card" style="${border}"><h2 style="display:flex;justify-content:space-between;align-items:center"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))} ${warnIco(fd)}</span>
             <span class="badge ${availClass(f)}">${availText(f)}</span></h2>
             ${f.segs.length ? f.segs.map((sg) => `<div class="entry"><div><div class="who">${sg.from === sg.to ? '' : `${fmt2(sg.from)}–${fmt2(sg.to)}`}</div>
               <div class="meta">${sg.kids.map((c) => `${dot(c, date)}${esc(firstName(c))}${ageSuffix(c, date)}`).join(', ')}</div>
@@ -953,7 +959,7 @@
             : `<div class="meta">${f.closed ? 'Gesloten' : 'Geen kinderen'}${f.closed ? '' : youngNote(f.free) ? ` · ${youngNote(f.free)}` : ''}</div>`}</div>`;
         }
         return `<div class="card" style="${border}">
-          <h2 style="display:flex;justify-content:space-between"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))}</span><span class="hours">${hrs(tot)}</span></h2>
+          <h2 style="display:flex;justify-content:space-between"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))} ${warnIco(fd)}</span><span class="hours">${hrs(tot)}</span></h2>
           ${groups.length ? groups.map((g) => `<div class="entry${g.kind === 'planned' ? ' planned' : ''}"><div><div class="who">${dot(g.child, date)}${esc(firstName(g.child))} ${kindTag(g)}</div>
             <div class="meta">${spanText(g)}${ageSuffix(g.child, date)}</div></div><span class="hours">${fmt(g.min)}</span></div>`).join('') : '<div class="meta">Geen kinderen</div>'}</div>`;
       }).join('');
@@ -964,39 +970,41 @@
       }
       body.innerHTML = html;
     } else if (view === 'maand') {
-      const mainM = iso(new Date(d.getFullYear(), d.getMonth(), 1, 12)).slice(0, 7), weeks = dates.length / 7, inMonth = [], tally = { ok: 0, low: 0, full: 0, closed: 0 };
+      const mainM = iso(new Date(d.getFullYear(), d.getMonth(), 1, 12)).slice(0, 7), weeks = dates.length / 7, inMonth = [], overDays = [], tally = { ok: 0, low: 0, full: 0, closed: 0 };
       let html = `<div class="scrollx"><div class="month">${['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map((x) => `<div class="hd">${x}</div>`).join('')}<div class="hd">${vrij ? '' : 'week'}</div>`;
       for (let w = 0; w < weeks; w++) {
         let wkMin = 0;
         for (let i = 0; i < 7; i++) {
           const dt = dates[w * 7 + i], date = iso(dt), items = dayMap.get(date), groups = groupDay(items), mine = date.startsWith(mainM);
-          const cls = `day${mine ? '' : ' other'}${date === today ? ' today' : ''}`;
+          const cls = `day${mine ? '' : ' other'}${date === today ? ' today' : ''}`, fd = dayFree(date, items);
+          if (mine && isOver(fd)) overDays.push(date);
           if (vrij) {
-            const f = dayFree(date, items);
+            const f = fd;
             if (mine) tally[availClass(f).slice(3)]++;
-            html += `<div class="${cls}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()}</div><span class="badge ${availClass(f)}">${availText(f)}</span>
+            html += `<div class="${cls}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()} ${warnIco(f)}</div><span class="badge ${availClass(f)}">${availText(f)}</span>
               ${youngNote(f.free) && !f.closed ? `<small>${youngNote(f.free)}</small>` : ''}${items ? `<small>${names(items, date)}</small>` : ''}</div>`;
             continue;
           }
           wkMin += groups.reduce((s, g) => s + g.min, 0);
           if (mine) inMonth.push(...groups);
-          html += `<div class="${cls}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()}</div>
+          html += `<div class="${cls}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()} ${warnIco(fd)}</div>
             ${groups.map((g) => `<span class="chip ${g.kind}"${cStyle(g.child, date)} title="${esc(firstName(g.child))} ${spanText(g)}${g.holiday ? ' (doorbetaalde vakantie)' : ''}"><strong>${esc(firstName(g.child))}</strong> ${fmt(g.min)}<small>${cal.age && g.child.birthDate ? ageShort(g.child, date) + ' · ' : ''}${spanText(g)}</small></span>`).join('')}</div>`;
         }
         html += `<div class="wk">${vrij ? '' : `${hrs(wkMin)}<small>wk ${isoWeek(dates[w * 7])}</small>`}</div>`;
       }
       html += '</div></div>';
+      const overWarn = overDays.length ? `<div class="warn">⚠️ Te veel kinderen op ${overDays.length} dag${overDays.length === 1 ? '' : 'en'}: ${overDays.map(nlDate).join(', ')}.</div>` : '';
       if (vrij) {
         html += `<div class="card" style="margin-top:14px"><h2>Beschikbaarheid ${esc(nlLong(d, { month: 'long' }))}</h2><table>
           <tr><td><span class="badge av-ok">2+ vrij</span></td><td class="num">${tally.ok} dagen</td></tr>
           <tr><td><span class="badge av-low">1 vrij</span></td><td class="num">${tally.low} dagen</td></tr>
           <tr><td><span class="badge av-full">vol</span></td><td class="num">${tally.full} dagen</td></tr>
           <tr><td><span class="badge av-closed">gesloten</span></td><td class="num">${tally.closed} dagen</td></tr></table>
-          <p class="hint" style="margin:10px 0 0">Tik op een dag om de week te openen.</p></div>`;
+          ${overWarn}<p class="hint" style="margin:10px 0 0">Tik op een dag om de week te openen.</p></div>`;
       } else {
         const rows = withVast(sumChildren(inMonth), vast.get(mainM) || new Map());
         html += `<div class="card" style="margin-top:14px"><h2>Totaal ${esc(nlLong(d, { month: 'long' }))}</h2>${rows.length ? totalsTable(rows, true) : '<div class="empty">Geen uren in deze maand.</div>'}
-          <p class="hint" style="margin:10px 0 0">Tik op een dag om de week te openen. De weektotalen tellen ook dagen van een aangrenzende maand mee.</p></div>`;
+          ${overWarn}<p class="hint" style="margin:10px 0 0">Tik op een dag om de week te openen. De weektotalen tellen ook dagen van een aangrenzende maand mee.</p></div>`;
       }
       body.innerHTML = html;
     } else if (vrij) {
@@ -1007,7 +1015,7 @@
         for (let day = 1; day <= 31; day++) {
           if (day > n) { cells += '<td class="void"></td>'; continue; }
           const date = `${m}-${pad(day)}`, f = dayFree(date, dayMap.get(date));
-          cells += `<td class="${availClass(f)}" data-goto="${date}" title="${esc(nlDate(date))}: ${availText(f)}"${date === today ? ' style="outline:2px solid var(--accent)"' : ''}>${f.closed ? '' : Math.max(0, f.free.older)}</td>`;
+          cells += `<td class="${availClass(f)}" data-goto="${date}" title="${esc(nlDate(date))}: ${availText(f)}${isOver(f) ? ` (${overText(f)})` : ''}"${date === today ? ' style="outline:2px solid var(--accent)"' : ''}>${f.closed ? '' : isOver(f) ? '⚠️' : Math.max(0, f.free.older)}</td>`;
         }
         return `<tr><th>${esc(nlLong(new Date(y, mo - 1, 1, 12), { month: 'short' }))}</th>${cells}</tr>`;
       }).join('');
@@ -1027,7 +1035,8 @@
           const parts = [r.written && `geschreven ${fmt(r.written)}`, r.planned && `gepland ${fmt(r.planned)}`, v && `vast ${fmt(v)}`].filter(Boolean);
           return `<td class="num yearcell${tot && !r.written && m > nowM ? ' future' : ''}">${hrs(tot)}${parts.length > 1 || (parts.length === 1 && !r.written) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
         }).join('');
-        return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(nlLong(new Date(d.getFullYear(), i, 1, 12), { month: 'long' }))}</th>${cells}<td class="num"><strong>${hrs(rowTot)}</strong></td></tr>`;
+        const overN = [...plans[i].days.entries()].filter(([dt, it]) => isOver(dayFree(dt, it))).length;
+        return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(nlLong(new Date(d.getFullYear(), i, 1, 12), { month: 'long' }))}${overN ? ` <span class="warnico" title="${overN} dag${overN === 1 ? '' : 'en'} met te veel kinderen">⚠️${overN}</span>` : ''}</th>${cells}<td class="num"><strong>${hrs(rowTot)}</strong></td></tr>`;
       }).join('');
       const grand = [...colTot.values()].reduce((s, x) => s + x, 0);
       body.innerHTML = kids.length ? `<div class="card"><h2>Uren per kind per maand, ${d.getFullYear()}</h2><div class="scrollx"><table>
