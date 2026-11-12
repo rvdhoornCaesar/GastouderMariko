@@ -79,6 +79,33 @@
   label.chk { display: flex; gap: 8px; align-items: center; color: var(--ink); font-size: 1rem; margin: 0; }
   label.chk input { width: auto; }
   .past .who { color: var(--muted); font-weight: 400; }
+  .seg { display: flex; gap: 0; margin-bottom: 12px; }
+  .seg button { flex: 1; padding: 8px 6px; border: 1px solid var(--line); background: transparent; color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+  .seg button:first-child { border-radius: 8px 0 0 8px; } .seg button:last-child { border-radius: 0 8px 8px 0; }
+  .seg button + button { border-left: 0; }
+  .seg button.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .caltitle { flex: 1; text-align: center; font-weight: 700; }
+  .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: .8rem; color: var(--muted); margin-bottom: 10px; align-items: center; }
+  .chip { display: block; border-radius: 6px; padding: 2px 5px; margin-top: 3px; font-size: .75rem; line-height: 1.25; border: 1px solid var(--accent); }
+  .chip.written { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .chip.planned { border-style: dashed; background: transparent; font-style: italic; }
+  .chip small { display: block; color: var(--muted); font-size: .68rem; }
+  .legend .chip { display: inline-block; margin: 0; }
+  .tag.w { color: var(--ok); border-color: var(--ok); }
+  .tag.p { border-style: dashed; }
+  .entry.planned .who, .entry.planned .hours { font-style: italic; }
+  .scrollx { overflow-x: auto; }
+  .month { display: grid; grid-template-columns: repeat(7, minmax(84px, 1fr)) 64px; min-width: 700px; gap: 4px; }
+  .month .hd { font-size: .75rem; color: var(--muted); font-weight: 600; text-align: center; }
+  .month .day { border: 1px solid var(--line); border-radius: 8px; padding: 4px; min-height: 76px; background: var(--card); cursor: pointer; }
+  .month .day.other { opacity: .5; }
+  .month .day.today { border-color: var(--accent); border-width: 2px; }
+  .month .day .n { font-size: .75rem; color: var(--muted); }
+  .month .wk { font-size: .8rem; font-weight: 700; text-align: right; padding: 4px 2px; font-variant-numeric: tabular-nums; }
+  .month .wk small { display: block; font-weight: 400; color: var(--muted); font-size: .68rem; }
+  .yearcell small { display: block; color: var(--muted); font-size: .68rem; font-weight: 400; white-space: nowrap; }
+  .yearcell.future { color: var(--muted); font-style: italic; }
+  tr.cur-row td, tr.cur-row th { background: color-mix(in srgb, var(--accent) 12%, transparent); }
   [hidden] { display: none !important; }
   @media print {
     header, .noprint { display: none !important; }
@@ -93,6 +120,7 @@
   <nav>
     <button data-tab="uren" class="active">Uren invullen</button>
     <button data-tab="overzicht">Overzicht</button>
+    <button data-tab="kalender">Kalender</button>
     <button data-tab="kinderen" data-perm="children:write" hidden>Kinderen</button>
     <button data-tab="instellingen" data-perm="settings:write" hidden>Instellingen</button>
     <button data-tab="account" data-local="1" hidden>Account</button>
@@ -205,6 +233,24 @@
       <button class="btn" id="csv">Download CSV</button>
       <button class="btn secondary" id="print">Afdrukken</button>
     </div>
+  </section>
+
+  <!-- KALENDER -->
+  <section id="tab-kalender" hidden>
+    <div class="seg noprint">
+      <button data-cal="week" class="active">Week</button>
+      <button data-cal="maand">Maand</button>
+      <button data-cal="jaar">Jaar</button>
+    </div>
+    <div class="datebar noprint">
+      <button class="btn secondary" id="calPrev" aria-label="Vorige">‹</button>
+      <div class="caltitle" id="calTitle"></div>
+      <button class="btn secondary" id="calNext" aria-label="Volgende">›</button>
+      <button class="btn secondary" id="calToday">Vandaag</button>
+    </div>
+    <div class="legend" id="calLegend"></div>
+    <div id="calBody"></div>
+    <div class="actions noprint" style="margin-top:14px"><button class="btn secondary" id="calPrint">Afdrukken</button></div>
   </section>
 
   <!-- KINDEREN -->
@@ -510,7 +556,7 @@
   // --- tabs ---
   document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('active', x === b));
-    ['uren', 'overzicht', 'kinderen', 'instellingen', 'account', 'admin'].forEach((t) => $('tab-' + t).hidden = t !== b.dataset.tab);
+    ['uren', 'overzicht', 'kalender', 'kinderen', 'instellingen', 'account', 'admin'].forEach((t) => $('tab-' + t).hidden = t !== b.dataset.tab);
     render();
   }));
 
@@ -680,6 +726,177 @@
     a.download = `uren-${$('month').value}.csv`; a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   };
+
+  // --- kalender: week, maand en jaar ---
+  // 'Geschreven' = uren die zijn ingevuld. 'Gepland' = de vaste tijden van een contract voor dagen vanaf vandaag waarvoor nog niets is
+  // ingevuld, plus doorbetaalde vakanties. Vaste uren per maand hebben geen tijden en worden apart als 'vast' getoond.
+  const cal = { view: 'week', date: new Date() };
+  const noon = (d, n = 0) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n, 12);
+  const mondayOf = (d) => noon(d, -((d.getDay() + 6) % 7));
+  const isoWeek = (d) => {
+    const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
+    return Math.ceil(((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / 864e5 + 1) / 7);
+  };
+  const hrs = (min) => (min ? fmt(min) : '–');
+  const firstName = (c) => c.firstName || c.name;
+  const nlLong = (d, o) => d.toLocaleDateString('nl-NL', o);
+
+  // Alle uren van maand m (JJJJ-MM), per datum: { days: Map datum -> [{ child, kind, start, end, min, holiday }], vast: Map kind -> minuten }.
+  function monthPlan(m) {
+    const days = new Map(), vast = new Map();
+    const add = (date, x, kind, start, end, holiday) => {
+      if (!days.has(date)) days.set(date, []);
+      days.get(date).push({ child: x.child, kind, start, end, min: toMin(end) - toMin(start), holiday: !!holiday });
+    };
+    const registered = state.entries.filter((e) => e.date.startsWith(m));
+    registered.forEach((e) => { const x = findContract(e.contractId); if (x) add(e.date, x, 'written', e.start, e.end); });
+    const holidays = paidHolidayEntries(m, registered);
+    holidays.forEach((e) => { const x = findContract(e.contractId); if (x) add(e.date, x, 'planned', e.start, e.end, true); });
+    const [y, mo] = m.split('-').map(Number), today = iso(new Date());
+    for (let i = 1; i <= new Date(y, mo, 0).getDate(); i++) {
+      const date = `${m}-${pad(i)}`;
+      if (date < today) continue;
+      contracts().forEach((x) => {
+        const k = x.contract, sched = scheduleFor(k, date);
+        if (!sched || !k.start || !k.end || date < k.start || date > k.end || Number(k.monthlyHours) > 0) return;
+        if ((x.child.holidays || []).some((h) => h.from <= date && date <= h.to)) return;   // vakantie: alleen als doorbetaald (hierboven)
+        if (registered.some((e) => e.contractId === k.id && e.date === date)) return;
+        add(date, x, 'planned', sched.from, sched.to);
+      });
+    }
+    fixedContracts(m).forEach((x) => vast.set(x.child.id, (vast.get(x.child.id) || 0) + Math.round(Number(x.contract.monthlyHours) * 60)));
+    return { days, vast };
+  }
+  // Per kind en soort (geschreven/gepland) samenvoegen: één regel met alle tijden van die dag.
+  function groupDay(items) {
+    const g = new Map();
+    (items || []).forEach((i) => {
+      const key = i.child.id + i.kind, o = g.get(key) || { child: i.child, kind: i.kind, min: 0, spans: [], holiday: false };
+      o.min += i.min; o.spans.push([i.start, i.end]); o.holiday = o.holiday || i.holiday; g.set(key, o);
+    });
+    g.forEach((o) => o.spans.sort((a, b) => a[0].localeCompare(b[0])));
+    return [...g.values()].sort((a, b) => a.spans[0][0].localeCompare(b.spans[0][0]) || firstName(a.child).localeCompare(firstName(b.child)));
+  }
+  const spanText = (g) => g.spans.map(([a, b]) => `${a}–${b}`).join(', ');
+  const kindTag = (g) => (g.kind === 'written' ? '<span class="tag w">geschreven</span>' : `<span class="tag p">${g.holiday ? 'gepland · vakantie' : 'gepland'}</span>`);
+  // Totaal per kind over een lijst groepen: Map kindId -> { child, written, planned }.
+  function sumChildren(groups) {
+    const t = new Map();
+    groups.forEach((g) => {
+      const o = t.get(g.child.id) || { child: g.child, written: 0, planned: 0 };
+      o[g.kind] += g.min; t.set(g.child.id, o);
+    });
+    return [...t.values()].sort((a, b) => firstName(a.child).localeCompare(firstName(b.child)));
+  }
+  const totalsTable = (rows, withVast) => {
+    const sum = (k) => rows.reduce((s, r) => s + (r[k] || 0), 0);
+    return `<table><tr><th>Kind</th><th class="num">Geschreven</th><th class="num">Gepland</th>${withVast ? '<th class="num">Vast</th>' : ''}<th class="num">Totaal</th></tr>
+      ${rows.map((r) => `<tr><td>${esc(firstName(r.child))}</td><td class="num">${hrs(r.written)}</td><td class="num">${hrs(r.planned)}</td>${withVast ? `<td class="num">${hrs(r.vast)}</td>` : ''}<td class="num"><strong>${hrs(r.written + r.planned + (r.vast || 0))}</strong></td></tr>`).join('')}
+      <tr><th>Totaal</th><th class="num">${hrs(sum('written'))}</th><th class="num">${hrs(sum('planned'))}</th>${withVast ? `<th class="num">${hrs(sum('vast'))}</th>` : ''}<th class="num">${hrs(sum('written') + sum('planned') + sum('vast'))}</th></tr></table>`;
+  };
+  const withVast = (rows, vast) => {
+    const map = new Map(rows.map((r) => [r.child.id, { ...r, vast: 0 }]));
+    vast.forEach((min, id) => { const c = state.children.find((x) => x.id === id); if (!c) return; const r = map.get(id) || { child: c, written: 0, planned: 0, vast: 0 }; r.vast += min; map.set(id, r); });
+    return [...map.values()].sort((a, b) => firstName(a.child).localeCompare(firstName(b.child)));
+  };
+
+  document.querySelectorAll('[data-cal]').forEach((b) => b.addEventListener('click', () => {
+    cal.view = b.dataset.cal;
+    document.querySelectorAll('[data-cal]').forEach((x) => x.classList.toggle('active', x === b));
+    renderCal();
+  }));
+  const shiftCal = (n) => {
+    const d = cal.date;
+    cal.date = cal.view === 'week' ? noon(d, 7 * n) : cal.view === 'maand' ? new Date(d.getFullYear(), d.getMonth() + n, 1, 12) : new Date(d.getFullYear() + n, d.getMonth(), 1, 12);
+    renderCal();
+  };
+  $('calPrev').onclick = () => shiftCal(-1);
+  $('calNext').onclick = () => shiftCal(1);
+  $('calToday').onclick = () => { cal.date = new Date(); renderCal(); };
+  $('calPrint').onclick = () => window.print();
+  $('calBody').addEventListener('click', (ev) => {
+    const cell = ev.target.closest('[data-goto]');
+    if (cell) { cal.view = 'week'; cal.date = new Date(cell.dataset.goto + 'T12:00'); document.querySelectorAll('[data-cal]').forEach((x) => x.classList.toggle('active', x.dataset.cal === 'week')); renderCal(); }
+  });
+
+  let calSeq = 0;
+  async function renderCal() {
+    if ($('tab-kalender').hidden) return;
+    const seq = ++calSeq, view = cal.view, d = cal.date, today = iso(new Date());
+    let dates = [];
+    if (view === 'week') dates = Array.from({ length: 7 }, (_, i) => noon(mondayOf(d), i));
+    else if (view === 'maand') {
+      const first = mondayOf(new Date(d.getFullYear(), d.getMonth(), 1, 12)), end = new Date(d.getFullYear(), d.getMonth() + 1, 0, 12);
+      const n = Math.ceil((((noon(end, 6 - ((end.getDay() + 6) % 7))) - first) / 864e5 + 1) / 7) * 7;
+      dates = Array.from({ length: n }, (_, i) => noon(first, i));
+    }
+    const months = view === 'jaar' ? Array.from({ length: 12 }, (_, i) => `${d.getFullYear()}-${pad(i + 1)}`) : [...new Set(dates.map((x) => iso(x).slice(0, 7)))];
+    $('calTitle').textContent = view === 'week' ? `Week ${isoWeek(dates[0])} · ${nlLong(dates[0], { day: 'numeric', month: 'short' })} t/m ${nlLong(dates[6], { day: 'numeric', month: 'short', year: 'numeric' })}`
+      : view === 'maand' ? nlLong(d, { month: 'long', year: 'numeric' }) : String(d.getFullYear());
+    $('calLegend').innerHTML = '<span><span class="chip written">Noor 9:00</span> geschreven (ingevuld)</span><span><span class="chip planned">Noor 9:00</span> gepland (vaste tijden)</span>';
+    await Promise.all(months.map((m) => guard(() => ensureMonth(m))));
+    if (seq !== calSeq) return;
+    const plans = months.map(monthPlan), dayMap = new Map(), vast = new Map();
+    plans.forEach((p) => p.days.forEach((v, k) => dayMap.set(k, v)));
+    plans.forEach((p, i) => vast.set(months[i], p.vast));
+    const body = $('calBody');
+
+    if (view === 'week') {
+      const all = [];
+      let html = dates.map((dt) => {
+        const date = iso(dt), groups = groupDay(dayMap.get(date)), tot = groups.reduce((s, g) => s + g.min, 0);
+        all.push(...groups);
+        return `<div class="card" style="${date === today ? 'border-color:var(--accent);border-width:2px' : ''}">
+          <h2 style="display:flex;justify-content:space-between"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))}</span><span class="hours">${hrs(tot)}</span></h2>
+          ${groups.length ? groups.map((g) => `<div class="entry${g.kind === 'planned' ? ' planned' : ''}"><div><div class="who">${esc(firstName(g.child))} ${kindTag(g)}</div>
+            <div class="meta">${spanText(g)}</div></div><span class="hours">${fmt(g.min)}</span></div>`).join('') : '<div class="meta">Geen kinderen</div>'}</div>`;
+      }).join('');
+      const rows = sumChildren(all);
+      html += `<div class="card"><h2>Totaal deze week</h2>${rows.length ? totalsTable(rows, false) : '<div class="empty">Geen uren in deze week.</div>'}
+        ${months.some((m) => vast.get(m).size) ? '<p class="hint" style="margin:10px 0 0">Kinderen met vaste uren per maand staan hier alleen met geschreven uren; hun vaste uren zitten in het maand- en jaaroverzicht.</p>' : ''}</div>`;
+      body.innerHTML = html;
+    } else if (view === 'maand') {
+      const mainM = iso(new Date(d.getFullYear(), d.getMonth(), 1, 12)).slice(0, 7), weeks = dates.length / 7, inMonth = [];
+      let html = `<div class="scrollx"><div class="month">${['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map((x) => `<div class="hd">${x}</div>`).join('')}<div class="hd">week</div>`;
+      for (let w = 0; w < weeks; w++) {
+        let wkMin = 0;
+        for (let i = 0; i < 7; i++) {
+          const dt = dates[w * 7 + i], date = iso(dt), groups = groupDay(dayMap.get(date)), mine = date.startsWith(mainM);
+          wkMin += groups.reduce((s, g) => s + g.min, 0);
+          if (mine) inMonth.push(...groups);
+          html += `<div class="day${mine ? '' : ' other'}${date === today ? ' today' : ''}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()}</div>
+            ${groups.map((g) => `<span class="chip ${g.kind}" title="${esc(firstName(g.child))} ${spanText(g)}${g.holiday ? ' (doorbetaalde vakantie)' : ''}"><strong>${esc(firstName(g.child))}</strong> ${fmt(g.min)}<small>${spanText(g)}</small></span>`).join('')}</div>`;
+        }
+        html += `<div class="wk">${hrs(wkMin)}<small>wk ${isoWeek(dates[w * 7])}</small></div>`;
+      }
+      html += '</div></div>';
+      const rows = withVast(sumChildren(inMonth), vast.get(mainM) || new Map());
+      html += `<div class="card" style="margin-top:14px"><h2>Totaal ${esc(nlLong(d, { month: 'long' }))}</h2>${rows.length ? totalsTable(rows, true) : '<div class="empty">Geen uren in deze maand.</div>'}
+        <p class="hint" style="margin:10px 0 0">Tik op een dag om de week te openen. De weektotalen tellen ook dagen van een aangrenzende maand mee.</p></div>`;
+      body.innerHTML = html;
+    } else {
+      const kids = [...state.children].sort((a, b) => firstName(a).localeCompare(firstName(b)));
+      const nowM = today.slice(0, 7);
+      const colTot = new Map(kids.map((c) => [c.id, 0]));
+      const rowsHtml = months.map((m, i) => {
+        const rows = new Map(sumChildren([].concat(...[...plans[i].days.values()].map(groupDay))).map((r) => [r.child.id, r]));
+        let rowTot = 0;
+        const cells = kids.map((c) => {
+          const r = rows.get(c.id) || { written: 0, planned: 0 }, v = plans[i].vast.get(c.id) || 0, tot = r.written + r.planned + v;
+          colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot;
+          const parts = [r.written && `geschreven ${fmt(r.written)}`, r.planned && `gepland ${fmt(r.planned)}`, v && `vast ${fmt(v)}`].filter(Boolean);
+          return `<td class="num yearcell${tot && !r.written && m > nowM ? ' future' : ''}">${hrs(tot)}${parts.length > 1 || (parts.length === 1 && !r.written) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
+        }).join('');
+        return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(nlLong(new Date(d.getFullYear(), i, 1, 12), { month: 'long' }))}</th>${cells}<td class="num"><strong>${hrs(rowTot)}</strong></td></tr>`;
+      }).join('');
+      const grand = [...colTot.values()].reduce((s, x) => s + x, 0);
+      body.innerHTML = kids.length ? `<div class="card"><h2>Uren per kind per maand, ${d.getFullYear()}</h2><div class="scrollx"><table>
+        <tr><th>Maand</th>${kids.map((c) => `<th class="num">${esc(firstName(c))}</th>`).join('')}<th class="num">Totaal</th></tr>${rowsHtml}
+        <tr><th>Totaal ${d.getFullYear()}</th>${kids.map((c) => `<th class="num">${hrs(colTot.get(c.id))}</th>`).join('')}<th class="num">${hrs(grand)}</th></tr></table></div>
+        <p class="hint" style="margin:10px 0 0">Geschreven = ingevuld; gepland = vaste tijden vanaf vandaag en doorbetaalde vakanties; vast = vaste uren per maand van het contract. Alleen geschreven uren staan zonder toelichting.</p></div>`
+        : '<div class="card"><div class="empty">Nog geen kinderen.</div></div>';
+    }
+  }
 
   // --- kinderen: lijst en details ---
   let draft = null;              // het kind dat je bewerkt (een kopie, pas bij Opslaan bewaard)
@@ -1149,7 +1366,7 @@
     }
   });
 
-  function render() { renderDay(); renderMonth(); renderChildren(); renderSettings(); }
+  function render() { renderDay(); renderMonth(); renderCal(); renderChildren(); renderSettings(); }
 
   // Laadt de gegevens en toont de app (of eerst het scherm om het tijdelijke wachtwoord te vervangen).
   async function start(mustChange) {

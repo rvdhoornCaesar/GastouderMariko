@@ -131,6 +131,15 @@ Het tabblad **Kinderen** toont eerst een lijst; met *Bewerken* (of *Kind toevoeg
 
 Kinderen en contracten uit een eerdere versie hebben nog geen startdatum, t/m datum of achternaam; bij het eerstvolgende opslaan vraagt de app daarom om die in te vullen.
 
+### Kalender (week, maand, jaar)
+Het tabblad **Kalender** toont de uren per kind in drie weergaven, met `‹ ›` om te bladeren en *Vandaag*:
+
+- **Week:** per dag welke kinderen er zijn, met begin- en eindtijd en het aantal uren, plus een weektotaal per kind.
+- **Maand:** een kalender met een week per regel, met per dag de kinderen, tijden en uren en een weektotaal aan het eind van de regel. Tik op een dag om die week te openen. Onder de kalender staat het maandtotaal per kind.
+- **Jaar:** een regel per maand en een kolom per kind, met totalen (standaard het huidige jaar).
+
+**Geschreven of gepland:** *geschreven* uren zijn ingevuld (volle kleur, label *geschreven*). *Gepland* uren (stippellijn, cursief, label *gepland*) komen uit de vaste tijden van het contract, voor dagen vanaf vandaag waarvoor nog niets is ingevuld, en uit doorbetaalde vakanties. Contracten met een vast aantal uren per maand hebben geen tijden; die uren staan als *vast* in het maand- en jaaroverzicht. Staat er voor een contract op een dag wel iets ingevuld, dan telt alleen dat.
+
 ### Inloggen met een lokaal account
 
 Naast Microsoft kan een gebruiker inloggen met een account dat alleen in deze app bestaat (e-mailadres + wachtwoord).
