@@ -131,6 +131,21 @@ Het tabblad **Kinderen** toont eerst een lijst; met *Bewerken* (of *Kind toevoeg
 
 Kinderen en contracten uit een eerdere versie hebben nog geen startdatum, t/m datum of achternaam; bij het eerstvolgende opslaan vraagt de app daarom om die in te vullen.
 
+### Kalender (week, maand, jaar)
+Het tabblad **Kalender** toont de uren per kind in drie weergaven, met `‹ ›` om te bladeren en *Vandaag*:
+
+- **Week:** per dag welke kinderen er zijn, met begin- en eindtijd en het aantal uren, plus een weektotaal per kind.
+- **Maand:** een kalender met een week per regel, met per dag de kinderen, tijden en uren en een weektotaal aan het eind van de regel. Tik op een dag om die week te openen. Onder de kalender staat het maandtotaal per kind.
+- **Jaar:** een regel per maand en een kolom per kind, met totalen (standaard het huidige jaar).
+
+**Geschreven of gepland:** *geschreven* uren zijn ingevuld (volle kleur, label *geschreven*). *Gepland* uren (stippellijn, cursief, label *gepland*) komen uit de vaste tijden van het contract, voor dagen vanaf vandaag waarvoor nog niets is ingevuld, en uit doorbetaalde vakanties. Contracten met een vast aantal uren per maand hebben geen tijden; die uren staan als *vast* in het maand- en jaaroverzicht. Staat er voor een contract op een dag wel iets ingevuld, dan telt alleen dat.
+
+**Leeftijd (kleur):** met het vinkje *Leeftijd tonen (kleur)* krijgt elk kind een kleur naar leeftijd op de dag zelf (jonger dan 1 jaar, 1 jaar, 2–3 jaar, 4–7 jaar, 8 jaar en ouder), met de leeftijd erbij als tekst. De keuze wordt in de browser onthouden.
+
+**Beschikbaarheid:** met de knop *Beschikbaarheid* draait elk overzicht om en toont het per dag hoeveel plekken er nog vrij zijn: het maximum van 6 kinderen tegelijk, min de aanwezige kinderen en de eigen kinderen onder 8 jaar, op het drukste moment van de dag (geschreven en geplande uren). Daaronder staan regels voor de plekken voor jonge kinderen (2–3 jaar, 1 jaar, baby) als die lager zijn. Groen = 2 of meer vrij, oranje = 1 vrij, rood = vol, grijs = gesloten volgens de openingstijden. Week: per dag de blokken met dezelfde aanwezigen; maand: een vak per dag; jaar: een rij per maand met een vakje per dag. Vaste uren per maand hebben geen tijden en tellen hier niet mee.
+
+**Waarschuwing te veel kinderen:** op een dag met te veel kinderen tegelijk (geschreven of gepland: meer dan 6, meer dan 5 jonger dan 4 jaar, meer dan 4 jonger dan 2 jaar of meer dan 2 jonger dan 1 jaar) staat een ⚠️ in alle weergaven en overzichten, met de reden bij het icoon. In de maand staat onder het totaal welke dagen het zijn; in het jaar staat het aantal dagen bij de maand (Kinderen) of een ⚠️ in het dagvakje (Beschikbaarheid).
+
 ### Inloggen met een lokaal account
 
 Naast Microsoft kan een gebruiker inloggen met een account dat alleen in deze app bestaat (e-mailadres + wachtwoord).
