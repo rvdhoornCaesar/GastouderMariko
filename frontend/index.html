@@ -86,14 +86,28 @@
   .seg button.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   .caltitle { flex: 1; text-align: center; font-weight: 700; }
   .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: .8rem; color: var(--muted); margin-bottom: 10px; align-items: center; }
-  .chip { display: block; border-radius: 6px; padding: 2px 5px; margin-top: 3px; font-size: .75rem; line-height: 1.25; border: 1px solid var(--accent); }
-  .chip.written { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+  .chip { display: block; border-radius: 6px; padding: 2px 5px; margin-top: 3px; font-size: .75rem; line-height: 1.25; border: 1px solid var(--c, var(--accent)); }
+  .chip.written { background: color-mix(in srgb, var(--c, var(--accent)) 24%, transparent); }
   .chip.planned { border-style: dashed; background: transparent; font-style: italic; }
   .chip small { display: block; color: var(--muted); font-size: .68rem; }
   .legend .chip { display: inline-block; margin: 0; }
   .tag.w { color: var(--ok); border-color: var(--ok); }
   .tag.p { border-style: dashed; }
   .entry.planned .who, .entry.planned .hours { font-style: italic; }
+  .dot { display: inline-block; width: .7em; height: .7em; border-radius: 50%; background: var(--c); margin-right: 5px; }
+  .calopts { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; }
+  .calopts .seg { margin: 0; flex: 1; min-width: 220px; }
+  .badge { display: inline-block; border-radius: 6px; padding: 1px 7px; font-size: .8rem; font-weight: 700; white-space: nowrap; }
+  .av-ok { background: color-mix(in srgb, #2f9e44 30%, transparent); } .av-low { background: color-mix(in srgb, #f08c00 38%, transparent); }
+  .av-full { background: color-mix(in srgb, #e03131 38%, transparent); } .av-closed { background: color-mix(in srgb, #868e96 22%, transparent); color: var(--muted); font-weight: 400; }
+  .month .day .badge { display: block; text-align: center; margin-top: 6px; font-size: .85rem; }
+  .month .day small { display: block; color: var(--muted); font-size: .68rem; text-align: center; margin-top: 2px; }
+  table.heat { border-collapse: separate; border-spacing: 2px; width: auto; }
+  table.heat th, table.heat td { padding: 0; border: 0; text-align: center; font-size: .7rem; }
+  table.heat td { min-width: 22px; height: 24px; border-radius: 4px; cursor: pointer; font-variant-numeric: tabular-nums; }
+  table.heat th:first-child { text-align: left; padding-right: 8px; font-size: .8rem; color: var(--ink); }
+  table.heat td.void { background: transparent; cursor: default; }
+  th.agehead { border-bottom: 3px solid var(--c); }
   .scrollx { overflow-x: auto; }
   .month { display: grid; grid-template-columns: repeat(7, minmax(84px, 1fr)) 64px; min-width: 700px; gap: 4px; }
   .month .hd { font-size: .75rem; color: var(--muted); font-weight: 600; text-align: center; }
@@ -241,6 +255,13 @@
       <button data-cal="week" class="active">Week</button>
       <button data-cal="maand">Maand</button>
       <button data-cal="jaar">Jaar</button>
+    </div>
+    <div class="calopts noprint">
+      <div class="seg" id="calMode">
+        <button data-mode="kinderen" class="active">Kinderen</button>
+        <button data-mode="vrij">Beschikbaarheid</button>
+      </div>
+      <label class="chk"><input type="checkbox" id="calAge"> Leeftijd tonen (kleur)</label>
     </div>
     <div class="datebar noprint">
       <button class="btn secondary" id="calPrev" aria-label="Vorige">‹</button>
@@ -730,13 +751,16 @@
   // --- kalender: week, maand en jaar ---
   // 'Geschreven' = uren die zijn ingevuld. 'Gepland' = de vaste tijden van een contract voor dagen vanaf vandaag waarvoor nog niets is
   // ingevuld, plus doorbetaalde vakanties. Vaste uren per maand hebben geen tijden en worden apart als 'vast' getoond.
-  const cal = { view: 'week', date: new Date() };
+  const cal = { view: 'week', date: new Date(), mode: 'kinderen', age: true };
+  try { cal.age = localStorage.getItem('cal.age') !== '0'; cal.mode = localStorage.getItem('cal.mode') === 'vrij' ? 'vrij' : 'kinderen'; } catch (e) { /* geen opslag: standaardwaarden */ }
+  const remember = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* niet erg */ } };
   const noon = (d, n = 0) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n, 12);
   const mondayOf = (d) => noon(d, -((d.getDay() + 6) % 7));
   const isoWeek = (d) => {
     const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); t.setUTCDate(t.getUTCDate() + 4 - (t.getUTCDay() || 7));
     return Math.ceil(((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / 864e5 + 1) / 7);
   };
+  const fmt2 = (min) => `${pad(Math.floor(min / 60))}:${pad(min % 60)}`;
   const hrs = (min) => (min ? fmt(min) : '–');
   const firstName = (c) => c.firstName || c.name;
   const nlLong = (d, o) => d.toLocaleDateString('nl-NL', o);
@@ -819,10 +843,77 @@
     if (cell) { cal.view = 'week'; cal.date = new Date(cell.dataset.goto + 'T12:00'); document.querySelectorAll('[data-cal]').forEach((x) => x.classList.toggle('active', x.dataset.cal === 'week')); renderCal(); }
   });
 
+  // Leeftijdsgroepen (kleur + tekst, zodat kleur nooit de enige aanwijzing is).
+  const BANDS = [
+    { max: 12, label: 'jonger dan 1 jaar', color: '#c2255c' }, { max: 24, label: '1 jaar', color: '#e8590c' },
+    { max: 48, label: '2–3 jaar', color: '#f08c00' }, { max: 96, label: '4–7 jaar', color: '#2f9e44' },
+    { max: Infinity, label: '8 jaar en ouder', color: '#1c7ed6' },
+  ];
+  const UNKNOWN_BAND = { label: 'leeftijd onbekend', color: '#868e96' };
+  const bandOf = (c, date) => (c.birthDate ? BANDS.find((b) => ageMonths(c.birthDate, date) < b.max) : UNKNOWN_BAND);
+  const ageShort = (c, date) => {
+    if (!c.birthDate) return '';
+    const m = Math.max(0, ageMonths(c.birthDate, date)), y = Math.floor(m / 12);
+    return m < 12 ? `${m} mnd` : m < 48 ? `${y} jr${m % 12 ? ` ${m % 12} mnd` : ''}` : `${y} jr`;
+  };
+  const cStyle = (c, date) => (cal.age ? ` style="--c:${bandOf(c, date).color}"` : '');
+  const dot = (c, date) => (cal.age ? `<span class="dot" style="--c:${bandOf(c, date).color}"></span>` : '');
+  const ageSuffix = (c, date) => (cal.age && c.birthDate ? ` · ${ageShort(c, date)}` : '');
+
+  // Beschikbaarheid: maximaal 6 kinderen tegelijk (eigen kinderen < 8 jaar tellen mee), met staffels voor jonge kinderen.
+  // 'Vrij' geldt voor een extra kind van 4+ (older); de andere getallen zijn de plekken voor een extra kind van 2–3 jaar, 1 jaar en een baby.
+  const freeOf = (ages) => {
+    const n = (f) => ages.filter((m) => m !== null && f(m)).length;
+    const any = CAP.total - ages.length, u4 = CAP.u4 - n((m) => m < 48), u2 = CAP.u2 - n((m) => m < 24), u1 = CAP.u1 - n((m) => m < 12);
+    return { older: any, toddler: Math.min(any, u4), one: Math.min(any, u4, u2), baby: Math.min(any, u4, u2, u1) };
+  };
+  const ownAges = (date) => (state.settings.ownChildren || []).map((c) => ageMonths(c.birthDate, date)).filter((m) => m < 8 * 12);
+  // Blokken van de dag met steeds dezelfde aanwezigen: { from, to, kids, free }.
+  function segmentsFor(date, items) {
+    const spans = new Map(), own = ownAges(date), segs = [];
+    (items || []).forEach((i) => {
+      if (toMin(i.end) <= toMin(i.start)) return;
+      const c = spans.get(i.child.id) || { child: i.child, list: [] };
+      c.list.push([toMin(i.start), toMin(i.end)]); spans.set(i.child.id, c);
+    });
+    const points = [...new Set([...spans.values()].flatMap((c) => c.list.flat()))].sort((a, b) => a - b);
+    for (let i = 0; i < points.length - 1; i++) {
+      const t = points[i], present = [...spans.values()].filter((c) => c.list.some(([a, b]) => a <= t && t < b));
+      if (!present.length) continue;
+      const free = freeOf([...present.map((c) => (c.child.birthDate ? ageMonths(c.child.birthDate, date) : null)), ...own]);
+      const last = segs[segs.length - 1], kids = present.map((c) => c.child);
+      if (last && last.to === t && last.kids.length === kids.length && last.kids.every((k) => kids.includes(k)) && JSON.stringify(last.free) === JSON.stringify(free)) last.to = points[i + 1];
+      else segs.push({ from: t, to: points[i + 1], kids, free });
+    }
+    return segs;
+  }
+  // Samenvatting van de dag: de minste ruimte op het drukste moment.
+  function dayFree(date, items) {
+    const segs = segmentsFor(date, items);
+    const dow = (new Date(date + 'T12:00').getDay() + 6) % 7, od = (state.settings.opening.days || [])[dow];
+    const closed = !segs.length && od && !od.open;
+    const free = segs.length ? segs.reduce((m, s) => ({ older: Math.min(m.older, s.free.older), toddler: Math.min(m.toddler, s.free.toddler),
+      one: Math.min(m.one, s.free.one), baby: Math.min(m.baby, s.free.baby) }), segs[0].free) : freeOf(ownAges(date));
+    return { segs, free, closed };
+  }
+  const availClass = (d) => (d.closed ? 'av-closed' : d.free.older <= 0 ? 'av-full' : d.free.older === 1 ? 'av-low' : 'av-ok');
+  const freeNum = (n) => (n < 0 ? `${n}` : String(n));
+  const availText = (d) => (d.closed ? 'gesloten' : d.free.older < 0 ? `${-d.free.older} te veel` : d.free.older === 0 ? 'vol' : `${d.free.older} vrij`);
+  // Extra regel voor jonge kinderen als daar minder plek voor is dan voor oudere kinderen.
+  const youngNote = (f) => [f.toddler < f.older && `2–3 jr: ${Math.max(0, f.toddler)}`, f.one < f.toddler && `1 jr: ${Math.max(0, f.one)}`, f.baby < f.one && `baby: ${Math.max(0, f.baby)}`]
+    .filter(Boolean).join(' · ');
+
+  document.querySelectorAll('#calMode [data-mode]').forEach((b) => b.addEventListener('click', () => {
+    cal.mode = b.dataset.mode; remember('cal.mode', cal.mode); renderCal();
+  }));
+  $('calAge').checked = cal.age;
+  $('calAge').onchange = () => { cal.age = $('calAge').checked; remember('cal.age', cal.age ? '1' : '0'); renderCal(); };
+
   let calSeq = 0;
   async function renderCal() {
     if ($('tab-kalender').hidden) return;
-    const seq = ++calSeq, view = cal.view, d = cal.date, today = iso(new Date());
+    const seq = ++calSeq, view = cal.view, d = cal.date, today = iso(new Date()), vrij = cal.mode === 'vrij';
+    document.querySelectorAll('#calMode [data-mode]').forEach((x) => x.classList.toggle('active', x.dataset.mode === cal.mode));
     let dates = [];
     if (view === 'week') dates = Array.from({ length: 7 }, (_, i) => noon(mondayOf(d), i));
     else if (view === 'maand') {
@@ -833,47 +924,96 @@
     const months = view === 'jaar' ? Array.from({ length: 12 }, (_, i) => `${d.getFullYear()}-${pad(i + 1)}`) : [...new Set(dates.map((x) => iso(x).slice(0, 7)))];
     $('calTitle').textContent = view === 'week' ? `Week ${isoWeek(dates[0])} · ${nlLong(dates[0], { day: 'numeric', month: 'short' })} t/m ${nlLong(dates[6], { day: 'numeric', month: 'short', year: 'numeric' })}`
       : view === 'maand' ? nlLong(d, { month: 'long', year: 'numeric' }) : String(d.getFullYear());
-    $('calLegend').innerHTML = '<span><span class="chip written">Noor 9:00</span> geschreven (ingevuld)</span><span><span class="chip planned">Noor 9:00</span> gepland (vaste tijden)</span>';
+    $('calLegend').innerHTML = vrij
+      ? `<span><span class="badge av-ok">2+ vrij</span></span><span><span class="badge av-low">1 vrij</span></span><span><span class="badge av-full">vol</span></span><span><span class="badge av-closed">gesloten</span></span>
+         <span style="flex-basis:100%">Vrij = plekken over op het drukste moment van de dag (maximaal ${CAP.total} kinderen tegelijk, eigen kinderen onder 8 jaar meegeteld), op basis van geschreven en geplande uren. Vaste uren per maand hebben geen tijden en tellen niet mee.</span>`
+      : `<span><span class="chip written">Noor 9:00</span> geschreven (ingevuld)</span><span><span class="chip planned">Noor 9:00</span> gepland (vaste tijden)</span>`
+        + (cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '');
     await Promise.all(months.map((m) => guard(() => ensureMonth(m))));
     if (seq !== calSeq) return;
     const plans = months.map(monthPlan), dayMap = new Map(), vast = new Map();
     plans.forEach((p) => p.days.forEach((v, k) => dayMap.set(k, v)));
     plans.forEach((p, i) => vast.set(months[i], p.vast));
     const body = $('calBody');
+    const names = (items, date) => [...new Map((items || []).map((i) => [i.child.id, i.child])).values()].map((c) => `${dot(c, date)}${esc(firstName(c))}`).join(', ');
 
     if (view === 'week') {
       const all = [];
       let html = dates.map((dt) => {
-        const date = iso(dt), groups = groupDay(dayMap.get(date)), tot = groups.reduce((s, g) => s + g.min, 0);
+        const date = iso(dt), items = dayMap.get(date), groups = groupDay(items), tot = groups.reduce((s, g) => s + g.min, 0), border = date === today ? 'border-color:var(--accent);border-width:2px' : '';
         all.push(...groups);
-        return `<div class="card" style="${date === today ? 'border-color:var(--accent);border-width:2px' : ''}">
+        if (vrij) {
+          const f = dayFree(date, items);
+          return `<div class="card" style="${border}"><h2 style="display:flex;justify-content:space-between;align-items:center"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))}</span>
+            <span class="badge ${availClass(f)}">${availText(f)}</span></h2>
+            ${f.segs.length ? f.segs.map((sg) => `<div class="entry"><div><div class="who">${sg.from === sg.to ? '' : `${fmt2(sg.from)}–${fmt2(sg.to)}`}</div>
+              <div class="meta">${sg.kids.map((c) => `${dot(c, date)}${esc(firstName(c))}${ageSuffix(c, date)}`).join(', ')}</div>
+              ${youngNote(sg.free) ? `<div class="meta">Plek voor jonge kinderen: ${youngNote(sg.free)}</div>` : ''}</div>
+              <span class="badge ${sg.free.older <= 0 ? 'av-full' : sg.free.older === 1 ? 'av-low' : 'av-ok'}">${sg.free.older <= 0 ? (sg.free.older < 0 ? `${-sg.free.older} te veel` : 'vol') : `${sg.free.older} vrij`}</span></div>`).join('')
+            : `<div class="meta">${f.closed ? 'Gesloten' : 'Geen kinderen'}${f.closed ? '' : youngNote(f.free) ? ` · ${youngNote(f.free)}` : ''}</div>`}</div>`;
+        }
+        return `<div class="card" style="${border}">
           <h2 style="display:flex;justify-content:space-between"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))}</span><span class="hours">${hrs(tot)}</span></h2>
-          ${groups.length ? groups.map((g) => `<div class="entry${g.kind === 'planned' ? ' planned' : ''}"><div><div class="who">${esc(firstName(g.child))} ${kindTag(g)}</div>
-            <div class="meta">${spanText(g)}</div></div><span class="hours">${fmt(g.min)}</span></div>`).join('') : '<div class="meta">Geen kinderen</div>'}</div>`;
+          ${groups.length ? groups.map((g) => `<div class="entry${g.kind === 'planned' ? ' planned' : ''}"><div><div class="who">${dot(g.child, date)}${esc(firstName(g.child))} ${kindTag(g)}</div>
+            <div class="meta">${spanText(g)}${ageSuffix(g.child, date)}</div></div><span class="hours">${fmt(g.min)}</span></div>`).join('') : '<div class="meta">Geen kinderen</div>'}</div>`;
       }).join('');
-      const rows = sumChildren(all);
-      html += `<div class="card"><h2>Totaal deze week</h2>${rows.length ? totalsTable(rows, false) : '<div class="empty">Geen uren in deze week.</div>'}
-        ${months.some((m) => vast.get(m).size) ? '<p class="hint" style="margin:10px 0 0">Kinderen met vaste uren per maand staan hier alleen met geschreven uren; hun vaste uren zitten in het maand- en jaaroverzicht.</p>' : ''}</div>`;
+      if (!vrij) {
+        const rows = sumChildren(all);
+        html += `<div class="card"><h2>Totaal deze week</h2>${rows.length ? totalsTable(rows, false) : '<div class="empty">Geen uren in deze week.</div>'}
+          ${months.some((m) => vast.get(m).size) ? '<p class="hint" style="margin:10px 0 0">Kinderen met vaste uren per maand staan hier alleen met geschreven uren; hun vaste uren zitten in het maand- en jaaroverzicht.</p>' : ''}</div>`;
+      }
       body.innerHTML = html;
     } else if (view === 'maand') {
-      const mainM = iso(new Date(d.getFullYear(), d.getMonth(), 1, 12)).slice(0, 7), weeks = dates.length / 7, inMonth = [];
-      let html = `<div class="scrollx"><div class="month">${['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map((x) => `<div class="hd">${x}</div>`).join('')}<div class="hd">week</div>`;
+      const mainM = iso(new Date(d.getFullYear(), d.getMonth(), 1, 12)).slice(0, 7), weeks = dates.length / 7, inMonth = [], tally = { ok: 0, low: 0, full: 0, closed: 0 };
+      let html = `<div class="scrollx"><div class="month">${['ma', 'di', 'wo', 'do', 'vr', 'za', 'zo'].map((x) => `<div class="hd">${x}</div>`).join('')}<div class="hd">${vrij ? '' : 'week'}</div>`;
       for (let w = 0; w < weeks; w++) {
         let wkMin = 0;
         for (let i = 0; i < 7; i++) {
-          const dt = dates[w * 7 + i], date = iso(dt), groups = groupDay(dayMap.get(date)), mine = date.startsWith(mainM);
+          const dt = dates[w * 7 + i], date = iso(dt), items = dayMap.get(date), groups = groupDay(items), mine = date.startsWith(mainM);
+          const cls = `day${mine ? '' : ' other'}${date === today ? ' today' : ''}`;
+          if (vrij) {
+            const f = dayFree(date, items);
+            if (mine) tally[availClass(f).slice(3)]++;
+            html += `<div class="${cls}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()}</div><span class="badge ${availClass(f)}">${availText(f)}</span>
+              ${youngNote(f.free) && !f.closed ? `<small>${youngNote(f.free)}</small>` : ''}${items ? `<small>${names(items, date)}</small>` : ''}</div>`;
+            continue;
+          }
           wkMin += groups.reduce((s, g) => s + g.min, 0);
           if (mine) inMonth.push(...groups);
-          html += `<div class="day${mine ? '' : ' other'}${date === today ? ' today' : ''}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()}</div>
-            ${groups.map((g) => `<span class="chip ${g.kind}" title="${esc(firstName(g.child))} ${spanText(g)}${g.holiday ? ' (doorbetaalde vakantie)' : ''}"><strong>${esc(firstName(g.child))}</strong> ${fmt(g.min)}<small>${spanText(g)}</small></span>`).join('')}</div>`;
+          html += `<div class="${cls}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()}</div>
+            ${groups.map((g) => `<span class="chip ${g.kind}"${cStyle(g.child, date)} title="${esc(firstName(g.child))} ${spanText(g)}${g.holiday ? ' (doorbetaalde vakantie)' : ''}"><strong>${esc(firstName(g.child))}</strong> ${fmt(g.min)}<small>${cal.age && g.child.birthDate ? ageShort(g.child, date) + ' · ' : ''}${spanText(g)}</small></span>`).join('')}</div>`;
         }
-        html += `<div class="wk">${hrs(wkMin)}<small>wk ${isoWeek(dates[w * 7])}</small></div>`;
+        html += `<div class="wk">${vrij ? '' : `${hrs(wkMin)}<small>wk ${isoWeek(dates[w * 7])}</small>`}</div>`;
       }
       html += '</div></div>';
-      const rows = withVast(sumChildren(inMonth), vast.get(mainM) || new Map());
-      html += `<div class="card" style="margin-top:14px"><h2>Totaal ${esc(nlLong(d, { month: 'long' }))}</h2>${rows.length ? totalsTable(rows, true) : '<div class="empty">Geen uren in deze maand.</div>'}
-        <p class="hint" style="margin:10px 0 0">Tik op een dag om de week te openen. De weektotalen tellen ook dagen van een aangrenzende maand mee.</p></div>`;
+      if (vrij) {
+        html += `<div class="card" style="margin-top:14px"><h2>Beschikbaarheid ${esc(nlLong(d, { month: 'long' }))}</h2><table>
+          <tr><td><span class="badge av-ok">2+ vrij</span></td><td class="num">${tally.ok} dagen</td></tr>
+          <tr><td><span class="badge av-low">1 vrij</span></td><td class="num">${tally.low} dagen</td></tr>
+          <tr><td><span class="badge av-full">vol</span></td><td class="num">${tally.full} dagen</td></tr>
+          <tr><td><span class="badge av-closed">gesloten</span></td><td class="num">${tally.closed} dagen</td></tr></table>
+          <p class="hint" style="margin:10px 0 0">Tik op een dag om de week te openen.</p></div>`;
+      } else {
+        const rows = withVast(sumChildren(inMonth), vast.get(mainM) || new Map());
+        html += `<div class="card" style="margin-top:14px"><h2>Totaal ${esc(nlLong(d, { month: 'long' }))}</h2>${rows.length ? totalsTable(rows, true) : '<div class="empty">Geen uren in deze maand.</div>'}
+          <p class="hint" style="margin:10px 0 0">Tik op een dag om de week te openen. De weektotalen tellen ook dagen van een aangrenzende maand mee.</p></div>`;
+      }
       body.innerHTML = html;
+    } else if (vrij) {
+      // Jaar: een regel per maand, een vakje per dag.
+      const rowsHtml = months.map((m, i) => {
+        const [y, mo] = m.split('-').map(Number), n = new Date(y, mo, 0).getDate();
+        let cells = '';
+        for (let day = 1; day <= 31; day++) {
+          if (day > n) { cells += '<td class="void"></td>'; continue; }
+          const date = `${m}-${pad(day)}`, f = dayFree(date, dayMap.get(date));
+          cells += `<td class="${availClass(f)}" data-goto="${date}" title="${esc(nlDate(date))}: ${availText(f)}"${date === today ? ' style="outline:2px solid var(--accent)"' : ''}>${f.closed ? '' : Math.max(0, f.free.older)}</td>`;
+        }
+        return `<tr><th>${esc(nlLong(new Date(y, mo - 1, 1, 12), { month: 'short' }))}</th>${cells}</tr>`;
+      }).join('');
+      body.innerHTML = `<div class="card"><h2>Vrije plekken per dag, ${d.getFullYear()}</h2><div class="scrollx"><table class="heat">
+        <tr><th></th>${Array.from({ length: 31 }, (_, i) => `<th>${i + 1}</th>`).join('')}</tr>${rowsHtml}</table></div>
+        <p class="hint" style="margin:10px 0 0">Elk vakje is een dag met het aantal vrije plekken; tik erop om de week te openen. Grijs = gesloten.</p></div>`;
     } else {
       const kids = [...state.children].sort((a, b) => firstName(a).localeCompare(firstName(b)));
       const nowM = today.slice(0, 7);
@@ -891,9 +1031,9 @@
       }).join('');
       const grand = [...colTot.values()].reduce((s, x) => s + x, 0);
       body.innerHTML = kids.length ? `<div class="card"><h2>Uren per kind per maand, ${d.getFullYear()}</h2><div class="scrollx"><table>
-        <tr><th>Maand</th>${kids.map((c) => `<th class="num">${esc(firstName(c))}</th>`).join('')}<th class="num">Totaal</th></tr>${rowsHtml}
+        <tr><th>Maand</th>${kids.map((c) => `<th class="num${cal.age ? ' agehead' : ''}"${cStyle(c, today)}>${esc(firstName(c))}${cal.age && c.birthDate ? `<small class="sub" style="display:block">${ageShort(c, today)}</small>` : ''}</th>`).join('')}<th class="num">Totaal</th></tr>${rowsHtml}
         <tr><th>Totaal ${d.getFullYear()}</th>${kids.map((c) => `<th class="num">${hrs(colTot.get(c.id))}</th>`).join('')}<th class="num">${hrs(grand)}</th></tr></table></div>
-        <p class="hint" style="margin:10px 0 0">Geschreven = ingevuld; gepland = vaste tijden vanaf vandaag en doorbetaalde vakanties; vast = vaste uren per maand van het contract. Alleen geschreven uren staan zonder toelichting.</p></div>`
+        <p class="hint" style="margin:10px 0 0">Geschreven = ingevuld; gepland = vaste tijden vanaf vandaag en doorbetaalde vakanties; vast = vaste uren per maand van het contract. Alleen geschreven uren staan zonder toelichting.${cal.age ? ' De leeftijd is van vandaag.' : ''}</p></div>`
         : '<div class="card"><div class="empty">Nog geen kinderen.</div></div>';
     }
   }
