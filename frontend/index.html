@@ -114,6 +114,7 @@
   .month .hd { font-size: .75rem; color: var(--muted); font-weight: 600; text-align: center; }
   .month .day { border: 1px solid var(--line); border-radius: 8px; padding: 4px; min-height: 76px; background: var(--card); cursor: pointer; }
   .month .day.other { opacity: .5; }
+  .month .day.vac { background: repeating-linear-gradient(45deg, var(--card) 0 7px, color-mix(in srgb, var(--muted) 16%, var(--card)) 7px 14px); }
   .month .day.today { border-color: var(--accent); border-width: 2px; }
   .month .day .n { font-size: .75rem; color: var(--muted); }
   .month .wk { font-size: .8rem; font-weight: 700; text-align: right; padding: 4px 2px; font-variant-numeric: tabular-nums; }
@@ -196,9 +197,11 @@
   <!-- UREN -->
   <section id="tab-uren">
     <div class="datebar">
-      <button class="btn secondary" id="prevDay" aria-label="Vorige dag">‹</button>
+      <button class="btn secondary" id="prevOpen" aria-label="Vorige openingsdag" title="Vorige openingsdag">«</button>
+      <button class="btn secondary" id="prevDay" aria-label="Vorige dag" title="Vorige dag">‹</button>
       <input type="date" id="day">
-      <button class="btn secondary" id="nextDay" aria-label="Volgende dag">›</button>
+      <button class="btn secondary" id="nextDay" aria-label="Volgende dag" title="Volgende dag">›</button>
+      <button class="btn secondary" id="nextOpen" aria-label="Volgende openingsdag" title="Volgende openingsdag">»</button>
     </div>
 
     <div class="card">
@@ -345,6 +348,19 @@
     </div>
 
     <div class="card">
+      <h2>Vakantie gastouder</h2>
+      <p class="hint">Periodes waarin je zelf geen opvang geeft. In de kalender staan die dagen als vakantie, er worden dan geen uren gepland en bij <em>Past het?</em> worden ze overgeslagen. Al ingevulde uren blijven staan; bij Uren invullen krijg je een waarschuwing.</p>
+      <div id="vacList"></div>
+      <form class="grid2" id="vacForm" style="margin-top: 10px">
+        <div><label for="vacFrom">Van</label><input type="date" id="vacFrom" required></div>
+        <div><label for="vacTo">Tot en met</label><input type="date" id="vacTo" required></div>
+        <div class="wide"><label for="vacNote">Omschrijving (optioneel)</label><input id="vacNote" maxlength="100" placeholder="Zomervakantie"></div>
+        <div class="wide"><button class="btn secondary">Vakantie toevoegen</button></div>
+      </form>
+      <div class="err" id="vacErr"></div>
+    </div>
+
+    <div class="card">
       <h2>Openingstijden en toeslag</h2>
       <p class="hint">Binnen de openingstijden geldt het gewone uurtarief. Uren buiten de openingstijden krijgen een toeslag: het tarief wordt vermenigvuldigd met de factor (2 = dubbel tarief, 1 = geen toeslag). Op een gesloten dag valt alles buiten de openingstijden.</p>
       <div id="openingList"></div>
@@ -437,7 +453,7 @@
   const euro = (n) => n.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  const state = { children: [], entries: [], settings: { rates: [], users: [], fixedUsers: [], me: '', opening: { days: [], factor: 1 }, ownChildren: [] } };
+  const state = { children: [], entries: [], settings: { rates: [], users: [], fixedUsers: [], me: '', opening: { days: [], factor: 1 }, ownChildren: [], vacations: [] } };
   const loadedMonths = new Set();
 
   // --- API ---
@@ -545,6 +561,9 @@
   // Melding als een datum buiten de periode van het contract valt (invullen blijft mogelijk).
   const contractWarning = (k, date) => (k.start && k.end && (date < k.start || date > k.end)
     ? `Let op: ${nlDate(date)} valt buiten het contract (${nlDate(k.start)} t/m ${nlDate(k.end)}).` : '');
+  // Vakantie van de gastouder zelf (Instellingen): dan is er geen opvang.
+  const vacationOf = (date) => (state.settings.vacations || []).find((h) => h.from <= date && date <= h.to) || null;
+  const vacTag = (date) => { const h = vacationOf(date); return h ? `<span class="tag">vakantie${h.note ? ': ' + esc(h.note) : ''}</span>` : ''; };
   // Te veel kinderen tegelijk: totaal maximaal 6, waarvan maximaal 5 jonger dan 4 jaar, 4 jonger dan 2 jaar en 2 jonger dan 1 jaar.
   // Eigen kinderen tot 8 jaar tellen mee en zijn de hele dag aanwezig; één kind telt één keer, ook met meerdere registraties.
   // Een registratie die je nog aan het invullen bent kun je als 'extra' meegeven.
@@ -616,14 +635,38 @@
   const shiftDay = (n) => { const d = new Date($('day').value + 'T12:00'); d.setDate(d.getDate() + n); $('day').value = iso(d); renderDay(true); };
   $('prevDay').onclick = () => shiftDay(-1);
   $('nextDay').onclick = () => shiftDay(1);
+  // Naar de vorige of volgende openingsdag: een dag waarop de gastouder volgens de openingstijden open is en geen vakantie heeft.
+  const isOpenDay = (date) => { const o = (state.settings.opening.days || [])[(new Date(date + 'T12:00').getDay() + 6) % 7]; return !!(o && o.open) && !vacationOf(date); };
+  function jumpOpen(dir) {
+    const d = new Date($('day').value + 'T12:00');
+    for (let i = 0; i < 800; i++) {
+      d.setDate(d.getDate() + dir);
+      if (isOpenDay(iso(d))) { $('day').value = iso(d); renderDay(true); return; }
+    }
+    toast('Geen openingsdag gevonden. Controleer de openingstijden en de vakantie bij Instellingen.');
+  }
+  $('prevOpen').onclick = () => jumpOpen(-1);
+  $('nextOpen').onclick = () => jumpOpen(1);
   $('day').onchange = () => renderDay(true);
-  $('contract').addEventListener('change', () => updateEntryHints(true));
+  // Standaard staat het eerste kind geselecteerd waarvoor die dag nog geen uren zijn ingevuld (met een contract dat op die dag loopt).
+  // Kies je zelf een kind, dan blijft dat staan tot je van dag wisselt of uren toevoegt.
+  let contractTouched = false;
+  function defaultContract(day) {
+    const done = new Set(state.entries.filter((e) => e.date === day).map((e) => findContract(e.contractId)).filter(Boolean).map((x) => x.child.id));
+    const open = contracts().filter((x) => !done.has(x.child.id));
+    const active = (x) => (x.contract.start && x.contract.end ? x.contract.start <= day && day <= x.contract.end : true);
+    const pick = open.find(active);
+    if (pick) return pick.contract.id;
+    // Iedereen met een lopend contract heeft al uren: de keuze laten staan. Heeft niemand een lopend contract, dan het eerste kind.
+    return !contracts().some(active) && open[0] ? open[0].contract.id : null;
+  }
+  $('contract').addEventListener('change', () => { contractTouched = true; updateEntryHints(true); });
 
   let daySeq = 0;
   // Waarschuwing bij een datum buiten het contract; bij wisselen van dag of contract ook de vaste tijden invullen.
   function updateEntryHints(prefill) {
     const x = findContract($('contract').value), date = $('day').value;
-    $('entryWarn').textContent = x ? contractWarning(x.contract, date) : '';
+    $('entryWarn').textContent = [x ? contractWarning(x.contract, date) : '', vacationOf(date) ? `Let op: de gastouder heeft vakantie op ${nlDate(date)}.` : ''].filter(Boolean).join(' ');
     const d = prefill && x && scheduleFor(x.contract, date);
     if (d) { $('start').value = d.from; $('end').value = d.to; }
     updateEntryCap();
@@ -656,15 +699,17 @@
     sel.innerHTML = contracts().length
       ? contracts().map((x) => `<option value="${x.contract.id}">${esc(label(x))}</option>`).join('')
       : `<option value="">${can('children:write') ? 'Voeg eerst een kind + contract toe (tab Kinderen)' : 'Er is nog geen kind of contract. Vraag een beheerder dit toe te voegen.'}</option>`;
-    if (prev) sel.value = prev;
+    if (prefill === true) contractTouched = false;
+    const pick = contractTouched ? null : defaultContract(day);
+    if (pick) sel.value = pick; else if (prev) sel.value = prev;
     $('dayCap').innerHTML = capacityIssues(day).map(capacityLine).join('');
-    updateEntryHints(prefill === true);
+    updateEntryHints(prefill === true || (!!pick && pick !== prev));
   }
 
   function entryRow(e, withDate) {
     const x = findContract(e.contractId);
     return `<div class="entry"><div><div class="who">${withDate ? esc(e.date.split('-').reverse().join('-')) + ' · ' : ''}${esc(label(x))}</div>
-      <div class="meta">${e.start}–${e.end}${e.note ? ' · ' + esc(e.note) : ''}</div>${x && contractWarning(x.contract, e.date) ? '<div class="flag">⚠ buiten de contractperiode</div>' : ''}</div>
+      <div class="meta">${e.start}–${e.end}${e.note ? ' · ' + esc(e.note) : ''}</div>${x && contractWarning(x.contract, e.date) ? '<div class="flag">⚠ buiten de contractperiode</div>' : ''}${vacationOf(e.date) ? '<div class="flag">⚠ vakantie gastouder</div>' : ''}</div>
       <div><span class="hours">${fmt(entryMin(e))}</span> <button class="link noprint" data-del="${e.id}" title="Verwijderen">✕</button></div></div>`;
   }
 
@@ -682,6 +727,7 @@
     if (!saved) return;
     state.entries.push(saved);
     $('note').value = '';
+    contractTouched = false;
     renderDay();
   });
 
@@ -806,11 +852,11 @@
     const registered = state.entries.filter((e) => e.date.startsWith(m));
     registered.forEach((e) => { const x = findContract(e.contractId); if (x) add(e.date, x, 'written', e.start, e.end); });
     const holidays = paidHolidayEntries(m, registered);
-    holidays.forEach((e) => { const x = findContract(e.contractId); if (x) add(e.date, x, 'planned', e.start, e.end, true); });
+    holidays.forEach((e) => { const x = findContract(e.contractId); if (x && !vacationOf(e.date)) add(e.date, x, 'planned', e.start, e.end, true); });
     const [y, mo] = m.split('-').map(Number), today = iso(new Date());
     for (let i = 1; i <= new Date(y, mo, 0).getDate(); i++) {
       const date = `${m}-${pad(i)}`;
-      if (date < today) continue;
+      if (date < today || vacationOf(date)) continue;   // geen geplande uren op dagen in het verleden of tijdens vakantie van de gastouder
       contracts().forEach((x) => {
         const k = x.contract, sched = scheduleFor(k, date);
         if (!sched || !k.start || !k.end || date < k.start || date > k.end || Number(k.monthlyHours) > 0) return;
@@ -922,10 +968,10 @@
   function dayFree(date, items) {
     const segs = segmentsFor(date, items);
     const dow = (new Date(date + 'T12:00').getDay() + 6) % 7, od = (state.settings.opening.days || [])[dow];
-    const closed = !segs.length && od && !od.open;
+    const vac = vacationOf(date), closed = !segs.length && !!(vac || (od && !od.open));
     const free = segs.length ? segs.reduce((m, s) => ({ older: Math.min(m.older, s.free.older), toddler: Math.min(m.toddler, s.free.toddler),
       one: Math.min(m.one, s.free.one), baby: Math.min(m.baby, s.free.baby) }), segs[0].free) : freeOf(ownAges(date));
-    return { segs, free, closed };
+    return { segs, free, closed, vac };
   }
   // Te veel kinderen tegelijk (geschreven of gepland): boven het totaal of boven een staffel voor jonge kinderen.
   const isOver = (d) => !d.closed && (d.free.older < 0 || d.free.toddler < 0 || d.free.one < 0 || d.free.baby < 0);
@@ -934,7 +980,7 @@
   const warnIco = (d) => (isOver(d) ? `<span class="warnico" role="img" aria-label="Te veel kinderen" title="Te veel kinderen: ${overText(d)}">⚠️</span>` : '');
   const availClass = (d) => (d.closed ? 'av-closed' : d.free.older <= 0 || isOver(d) ? 'av-full' : d.free.older === 1 ? 'av-low' : 'av-ok');
   const freeNum = (n) => (n < 0 ? `${n}` : String(n));
-  const availText = (d) => (d.closed ? 'gesloten' : d.free.older < 0 ? `${-d.free.older} te veel` : isOver(d) ? 'te veel jonge' : d.free.older === 0 ? 'vol' : `${d.free.older} vrij`);
+  const availText = (d) => (d.closed ? (d.vac ? 'vakantie' : 'gesloten') : d.free.older < 0 ? `${-d.free.older} te veel` : isOver(d) ? 'te veel jonge' : d.free.older === 0 ? 'vol' : `${d.free.older} vrij`);
   // Extra regel voor jonge kinderen als daar minder plek voor is dan voor oudere kinderen.
   const youngNote = (f) => [f.toddler < f.older && `2–3 jr: ${Math.max(0, f.toddler)}`, f.one < f.toddler && `1 jr: ${Math.max(0, f.one)}`, f.baby < f.one && `baby: ${Math.max(0, f.baby)}`]
     .filter(Boolean).join(' · ');
@@ -961,7 +1007,7 @@
     $('calTitle').textContent = view === 'week' ? `Week ${isoWeek(dates[0])} · ${nlLong(dates[0], { day: 'numeric', month: 'short' })} t/m ${nlLong(dates[6], { day: 'numeric', month: 'short', year: 'numeric' })}`
       : view === 'maand' ? nlLong(d, { month: 'long', year: 'numeric' }) : String(d.getFullYear());
     $('calLegend').innerHTML = vrij
-      ? `<span><span class="badge av-ok">2+ vrij</span></span><span><span class="badge av-low">1 vrij</span></span><span><span class="badge av-full">vol</span></span><span><span class="badge av-closed">gesloten</span></span>
+      ? `<span><span class="badge av-ok">2+ vrij</span></span><span><span class="badge av-low">1 vrij</span></span><span><span class="badge av-full">vol</span></span><span><span class="badge av-closed">gesloten / vakantie</span></span>
          <span style="flex-basis:100%">Vrij = plekken over op het drukste moment van de dag (maximaal ${CAP.total} kinderen tegelijk, eigen kinderen onder 8 jaar meegeteld), op basis van geschreven en geplande uren. Vaste uren per maand hebben geen tijden en tellen niet mee.</span>`
       : `<span><span class="chip written">Noor 9:00</span> geschreven (ingevuld)</span><span><span class="chip planned">Noor 9:00</span> gepland (vaste tijden)</span>`
         + (cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '');
@@ -980,16 +1026,16 @@
         all.push(...groups);
         if (vrij) {
           const f = dayFree(date, items);
-          return `<div class="card" style="${border}"><h2 style="display:flex;justify-content:space-between;align-items:center"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))} ${warnIco(fd)}</span>
+          return `<div class="card" style="${border}"><h2 style="display:flex;justify-content:space-between;align-items:center"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))} ${warnIco(fd)} ${vacTag(date)}</span>
             <span class="badge ${availClass(f)}">${availText(f)}</span></h2>
             ${f.segs.length ? f.segs.map((sg) => `<div class="entry"><div><div class="who">${sg.from === sg.to ? '' : `${fmt2(sg.from)}–${fmt2(sg.to)}`}</div>
               <div class="meta">${sg.kids.map((c) => `${dot(c, date)}${esc(firstName(c))}${ageSuffix(c, date)}`).join(', ')}</div>
               ${youngNote(sg.free) ? `<div class="meta">Plek voor jonge kinderen: ${youngNote(sg.free)}</div>` : ''}</div>
               <span class="badge ${sg.free.older <= 0 ? 'av-full' : sg.free.older === 1 ? 'av-low' : 'av-ok'}">${sg.free.older <= 0 ? (sg.free.older < 0 ? `${-sg.free.older} te veel` : 'vol') : `${sg.free.older} vrij`}</span></div>`).join('')
-            : `<div class="meta">${f.closed ? 'Gesloten' : 'Geen kinderen'}${f.closed ? '' : youngNote(f.free) ? ` · ${youngNote(f.free)}` : ''}</div>`}</div>`;
+            : `<div class="meta">${f.closed ? (f.vac ? `Vakantie gastouder${f.vac.note ? `: ${esc(f.vac.note)}` : ''}` : 'Gesloten') : 'Geen kinderen'}${f.closed ? '' : youngNote(f.free) ? ` · ${youngNote(f.free)}` : ''}</div>`}</div>`;
         }
         return `<div class="card" style="${border}">
-          <h2 style="display:flex;justify-content:space-between"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))} ${warnIco(fd)}</span><span class="hours">${hrs(tot)}</span></h2>
+          <h2 style="display:flex;justify-content:space-between"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))} ${warnIco(fd)} ${vacTag(date)}</span><span class="hours">${hrs(tot)}</span></h2>
           ${groups.length ? groups.map((g) => `<div class="entry${g.kind === 'planned' ? ' planned' : ''}"><div><div class="who">${dot(g.child, date)}${esc(firstName(g.child))} ${kindTag(g)}</div>
             <div class="meta">${spanText(g)}${ageSuffix(g.child, date)}</div></div><span class="hours">${fmt(g.min)}</span></div>`).join('') : '<div class="meta">Geen kinderen</div>'}</div>`;
       }).join('');
@@ -1006,7 +1052,7 @@
         let wkMin = 0;
         for (let i = 0; i < 7; i++) {
           const dt = dates[w * 7 + i], date = iso(dt), items = dayMap.get(date), groups = groupDay(items), mine = date.startsWith(mainM);
-          const cls = `day${mine ? '' : ' other'}${date === today ? ' today' : ''}`, fd = dayFree(date, items);
+          const cls = `day${mine ? '' : ' other'}${date === today ? ' today' : ''}${vacationOf(date) ? ' vac' : ''}`, fd = dayFree(date, items);
           if (mine && isOver(fd)) overDays.push(date);
           if (vrij) {
             const f = fd;
@@ -1017,7 +1063,7 @@
           }
           wkMin += groups.reduce((s, g) => s + g.min, 0);
           if (mine) inMonth.push(...groups);
-          html += `<div class="${cls}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()} ${warnIco(fd)}</div>
+          html += `<div class="${cls}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()} ${warnIco(fd)}</div>${vacationOf(date) ? '<small>vakantie</small>' : ''}
             ${groups.map((g) => `<span class="chip ${g.kind}"${cStyle(g.child, date)} title="${esc(firstName(g.child))} ${spanText(g)}${g.holiday ? ' (doorbetaalde vakantie)' : ''}"><strong>${esc(firstName(g.child))}</strong> ${fmt(g.min)}<small>${cal.age && g.child.birthDate ? ageShort(g.child, date) + ' · ' : ''}${spanText(g)}</small></span>`).join('')}</div>`;
         }
         html += `<div class="wk">${vrij ? '' : `${hrs(wkMin)}<small>wk ${isoWeek(dates[w * 7])}</small>`}</div>`;
@@ -1029,7 +1075,7 @@
           <tr><td><span class="badge av-ok">2+ vrij</span></td><td class="num">${tally.ok} dagen</td></tr>
           <tr><td><span class="badge av-low">1 vrij</span></td><td class="num">${tally.low} dagen</td></tr>
           <tr><td><span class="badge av-full">vol</span></td><td class="num">${tally.full} dagen</td></tr>
-          <tr><td><span class="badge av-closed">gesloten</span></td><td class="num">${tally.closed} dagen</td></tr></table>
+          <tr><td><span class="badge av-closed">gesloten / vakantie</span></td><td class="num">${tally.closed} dagen</td></tr></table>
           ${overWarn}<p class="hint" style="margin:10px 0 0">Tik op een dag om de week te openen.</p></div>`;
       } else {
         const rows = withVast(sumChildren(inMonth), vast.get(mainM) || new Map());
@@ -1053,7 +1099,13 @@
         <tr><th></th>${Array.from({ length: 31 }, (_, i) => `<th>${i + 1}</th>`).join('')}</tr>${rowsHtml}</table></div>
         <p class="hint" style="margin:10px 0 0">Elk vakje is een dag met het aantal vrije plekken; tik erop om de week te openen. Grijs = gesloten.</p></div>`;
     } else {
-      const kids = [...state.children].sort((a, b) => firstName(a).localeCompare(firstName(b)));
+      // Alleen kinderen die in dit jaar uren hebben (geschreven, gepland of vast); de rest krijgt geen kolom.
+      const hasHours = new Set();
+      months.forEach((m, i) => {
+        sumChildren([].concat(...[...plans[i].days.values()].map(groupDay))).forEach((r) => { if (r.written + r.planned > 0) hasHours.add(r.child.id); });
+        plans[i].vast.forEach((min, id) => { if (min > 0) hasHours.add(id); });
+      });
+      const kids = state.children.filter((c) => hasHours.has(c.id)).sort((a, b) => firstName(a).localeCompare(firstName(b)));
       const nowM = today.slice(0, 7);
       const colTot = new Map(kids.map((c) => [c.id, 0]));
       const rowsHtml = months.map((m, i) => {
@@ -1073,7 +1125,7 @@
         <tr><th>Maand</th>${kids.map((c) => `<th class="num${cal.age ? ' agehead' : ''}"${cStyle(c, today)}>${esc(firstName(c))}${cal.age && c.birthDate ? `<small class="sub" style="display:block">${ageShort(c, today)}</small>` : ''}</th>`).join('')}<th class="num">Totaal</th></tr>${rowsHtml}
         <tr><th>Totaal ${d.getFullYear()}</th>${kids.map((c) => `<th class="num">${hrs(colTot.get(c.id))}</th>`).join('')}<th class="num">${hrs(grand)}</th></tr></table></div>
         <p class="hint" style="margin:10px 0 0">Geschreven = ingevuld; gepland = vaste tijden vanaf vandaag en doorbetaalde vakanties; vast = vaste uren per maand van het contract. Alleen geschreven uren staan zonder toelichting.${cal.age ? ' De leeftijd is van vandaag.' : ''}</p></div>`
-        : '<div class="card"><div class="empty">Nog geen kinderen.</div></div>';
+        : `<div class="card"><div class="empty">Geen uren in ${d.getFullYear()}.</div></div>`;
     }
   }
 
@@ -1151,10 +1203,11 @@
 
     // Per gevraagde weekdag: de dagen die zijn gecontroleerd en de dagen waarop het niet past.
     const per = rows.map(() => ({ days: [], conflicts: [] }));
-    let skipped = 0;
+    let skipped = 0, skippedVac = 0;
     for (let dt = new Date(from + 'T12:00'); iso(dt) <= horizon; dt.setDate(dt.getDate() + 1)) {
       const date = iso(dt), wd = (dt.getDay() + 6) % 7, r = rows[wd];
       if (!r.open || date < start) continue;
+      if (vacationOf(date)) { skippedVac++; continue; }
       if ((child.holidays || []).some((h) => h.from <= date && date <= h.to)) { skipped++; continue; }
       const base = (plans.get(date.slice(0, 7)).days.get(date) || []).filter((i) => !(existing && i.child.id === child.id && i.kind === 'planned'));
       const a = toMin(r.from), b = toMin(r.to);
@@ -1203,7 +1256,7 @@
     const verdict = !checkedAny ? '<span class="badge av-closed">niets te controleren</span> Geen dagen in de gekozen periode.'
       : failing.length ? `<span class="badge av-full">past niet overal</span> Past niet (altijd) op: ${failing.join(', ')}.` : '<span class="badge av-ok">past</span> Past op alle gevraagde dagen en tijden.';
     $('pResult').innerHTML = `<div class="card"><h2>Uitkomst voor ${esc(child.firstName || child.name)}${existing ? ' (aangepast rooster)' : ''}</h2><p style="margin:0 0 8px">${verdict}</p>
-      <p class="hint" style="margin:0">Gecontroleerd: ${nlDate(from)} t/m ${nlDate(horizon)}${end ? '' : ` (geen einddatum opgegeven; tot de laatste einddatum van een bestaand contract, minimaal 8 weken)`}${start < today ? ' (vanaf vandaag; eerdere dagen zijn al geweest)' : ''}${skipped ? `, ${skipped} dag${skipped === 1 ? '' : 'en'} overgeslagen wegens vakantie` : ''}.
+      <p class="hint" style="margin:0">Gecontroleerd: ${nlDate(from)} t/m ${nlDate(horizon)}${end ? '' : ` (geen einddatum opgegeven; tot de laatste einddatum van een bestaand contract, minimaal 8 weken)`}${start < today ? ' (vanaf vandaag; eerdere dagen zijn al geweest)' : ''}${skipped ? `, ${skipped} dag${skipped === 1 ? '' : 'en'} overgeslagen wegens vakantie van het kind` : ''}${skippedVac ? `, ${skippedVac} dag${skippedVac === 1 ? '' : 'en'} overgeslagen wegens vakantie van de gastouder` : ''}.
       Meegeteld: geschreven en geplande uren van de andere kinderen, en je eigen kinderen onder 8 jaar. Vaste uren per maand hebben geen tijden en tellen niet mee.</p></div>${cards}`;
   }
   $('pRun').onclick = runPast;
@@ -1469,8 +1522,26 @@
     if (id && confirm('Dit eigen kind verwijderen?')) saveSetting($('ownErr'), 'own-children', { ownChildren: state.settings.ownChildren.filter((c) => c.id !== id) }, (res) => { state.settings.ownChildren = res.ownChildren; });
   });
 
+  function renderVacations() {
+    const today = iso(new Date()), list = [...(state.settings.vacations || [])];
+    const upcoming = list.filter((h) => h.to >= today), past = list.filter((h) => h.to < today).reverse();
+    const row = (h) => `<div class="entry${h.to < today ? ' past' : ''}"><div><div class="who">${nlDate(h.from)} t/m ${nlDate(h.to)}${h.from <= today && today <= h.to ? '<span class="tag">nu</span>' : h.to < today ? '<span class="tag">voorbij</span>' : ''}</div>
+      ${h.note ? `<div class="meta">${esc(h.note)}</div>` : ''}</div><button class="link" data-rmvac="${h.id}" title="Verwijderen">✕</button></div>`;
+    $('vacList').innerHTML = list.length ? upcoming.map(row).join('') + past.map(row).join('') : '<div class="empty">Nog geen vakantie ingevuld.</div>';
+  }
+  $('vacForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const h = { from: $('vacFrom').value, to: $('vacTo').value, note: $('vacNote').value.trim() };
+    if (await saveSetting($('vacErr'), 'vacations', { vacations: [...(state.settings.vacations || []), h] }, (res) => { state.settings.vacations = res.vacations; })) ev.target.reset();
+  });
+  $('vacList').addEventListener('click', (ev) => {
+    const id = ev.target.dataset.rmvac;
+    if (id && confirm('Deze vakantie verwijderen?')) saveSetting($('vacErr'), 'vacations', { vacations: state.settings.vacations.filter((h) => h.id !== id) }, (res) => { state.settings.vacations = res.vacations; });
+  });
+
   function renderSettings() {
     renderOwnChildren();
+    renderVacations();
     renderAccounts();
     $('runtimeInfo').textContent = state.settings.runtime ? `Technische info: de API draait op Node ${state.settings.runtime.replace(/^v/, '')}.` : '';
     const { rates, users, fixedUsers, me } = state.settings;

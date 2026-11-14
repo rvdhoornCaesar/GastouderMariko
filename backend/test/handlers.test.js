@@ -237,6 +237,19 @@ test('eigen kinderen: opslaan, sorteren op geboortedatum, validatie', async () =
   assert.deepEqual((await call(h.putOwnChildren, { body: { ownChildren: [] } })).jsonBody.ownChildren, []);
 });
 
+test('vakantie van de gastouder: opslaan, sorteren, validatie, leeg maken', async () => {
+  const res = await call(h.putVacations, { body: { vacations: [{ from: '2026-12-24', to: '2027-01-02', note: ' Kerst ' }, { from: '2026-07-01', to: '2026-07-14' }] } });
+  assert.deepEqual(res.jsonBody.vacations.map((x) => [x.from, x.to, x.note]), [['2026-07-01', '2026-07-14', ''], ['2026-12-24', '2027-01-02', 'Kerst']]);
+  assert.ok(res.jsonBody.vacations.every((x) => x.id));
+  assert.deepEqual((await call(h.getSettings)).jsonBody.vacations, res.jsonBody.vacations);
+  const bad = (list) => assert.rejects(call(h.putVacations, { body: { vacations: list } }), { status: 400 });
+  await bad([{ from: '2026-07-10', to: '2026-07-01' }]);
+  await bad([{ from: '2026-07-10' }]);
+  await bad([{ from: '2026-02-30', to: '2026-03-01' }]);
+  await assert.rejects(call(h.putVacations, { body: {} }), { status: 400 });
+  assert.deepEqual((await call(h.putVacations, { body: { vacations: [] } })).jsonBody.vacations, []);
+});
+
 // --- Lokale accounts ---
 const admin = { email: 'mariko@voorbeeld.nl', kind: 'microsoft', fixed: true, role: 'admin', instanceId: 'main' };
 const PW = 'koekjes-tomaat-fiets-42';
@@ -432,7 +445,7 @@ test('gebruiker: uren en lezen mag, wijzigen van kinderen en instellingen niet',
   assert.deepEqual(s.fixedUsers, []);
   assert.equal(s.runtime, undefined);
   for (const [fn, extra] of [[h.createChild, { body: { firstName: 'X', contracts: [K()] } }], [h.updateChild, { params: { id: 'x' }, body: {} }], [h.deleteChild, { params: { id: 'x' } }],
-    [h.putRates, { body: { rates: [] } }], [h.putOpening, { body: {} }], [h.putOwnChildren, { body: { ownChildren: [] } }], [h.putUsers, { body: { users: [] } }]]) {
+    [h.putRates, { body: { rates: [] } }], [h.putOpening, { body: {} }], [h.putOwnChildren, { body: { ownChildren: [] } }], [h.putVacations, { body: { vacations: [] } }], [h.putUsers, { body: { users: [] } }]]) {
     await assert.rejects(call2(fn, extra), { status: 403 });
   }
 });

@@ -76,7 +76,7 @@ async function getSettings({ user, repo, env }) {
   perm.require(user, 'settings:read');
   const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
   const manage = perm.can(user, 'settings:write');   // wie mag toegang regelen, ziet de gebruikerslijsten en de technische info
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await repo.getUsers() : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), runtime: manage ? process.version : undefined } };
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await repo.getUsers() : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), runtime: manage ? process.version : undefined } };
 }
 
 async function putRates({ user, repo, body }) {
@@ -91,6 +91,13 @@ async function putOwnChildren({ user, repo, body }) {
   const ownChildren = v.parseOwnChildren(body && body.ownChildren, newId);
   await repo.setOwnChildren(ownChildren);
   return { status: 200, jsonBody: { ownChildren } };
+}
+
+async function putVacations({ user, repo, body }) {
+  perm.require(user, 'settings:write');
+  const vacations = v.parseVacations(body && body.vacations, newId);
+  await repo.setVacations(vacations);
+  return { status: 200, jsonBody: { vacations } };
 }
 
 async function putOpening({ user, repo, body }) {
@@ -335,4 +342,4 @@ async function deleteAccount({ user, repo, params }) {
   return { status: 204 };
 }
 
-module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putOpening, putOwnChildren, putUsers };
+module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putVacations, putOpening, putOwnChildren, putUsers };
