@@ -20,8 +20,8 @@
   h1 a { font-size: .8rem; font-weight: 400; color: var(--muted); }
   #toast { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 728px; margin: 0 auto; padding: 12px 14px;
     background: var(--danger); color: #fff; border-radius: 8px; z-index: 10; }
-  nav { display: flex; gap: 4px; }
-  nav button { flex: 1; padding: 10px 6px; border: 0; background: transparent; color: var(--muted);
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }   /* op een smal scherm op twee regels, zonder horizontaal scrollen */
+  nav button { flex: 1 1 auto; padding: 10px 6px; border: 0; background: transparent; color: var(--muted);
     font: inherit; font-weight: 600; border-bottom: 3px solid transparent; cursor: pointer; }
   nav button.active { color: var(--accent); border-color: var(--accent); }
   main { max-width: 760px; margin: 0 auto; padding: 16px; }
@@ -102,10 +102,17 @@
   .av-full { background: color-mix(in srgb, #e03131 38%, transparent); } .av-closed { background: color-mix(in srgb, #868e96 22%, transparent); color: var(--muted); font-weight: 400; }
   .month .day .badge { display: block; text-align: center; margin-top: 6px; font-size: .85rem; }
   .month .day small { display: block; color: var(--muted); font-size: .68rem; text-align: center; margin-top: 2px; }
-  table.heat { border-collapse: separate; border-spacing: 2px; width: auto; }
-  table.heat th, table.heat td { padding: 0; border: 0; text-align: center; font-size: .7rem; }
-  table.heat td { min-width: 22px; height: 24px; border-radius: 4px; cursor: pointer; font-variant-numeric: tabular-nums; }
-  table.heat th:first-child { text-align: left; padding-right: 8px; font-size: .8rem; color: var(--ink); }
+  /* Past altijd op de breedte: 31 gelijke kolommen, geen horizontaal scrollen (ook niet op een telefoon). */
+  table.heat { border-collapse: separate; border-spacing: 2px; width: 100%; table-layout: fixed; }
+  table.heat th, table.heat td { padding: 0; border: 0; text-align: center; font-size: .68rem; overflow: hidden; }
+  table.heat td { height: 24px; border-radius: 4px; cursor: pointer; font-variant-numeric: tabular-nums; }
+  table.heat th:first-child { width: 2.6rem; text-align: left; padding-right: 4px; font-size: .8rem; color: var(--ink); }
+  @media (max-width: 600px) {
+    table.heat { border-spacing: 1px; }
+    table.heat th, table.heat td { font-size: .52rem; }
+    table.heat td { height: 20px; border-radius: 2px; }
+    table.heat th:first-child { width: 1.9rem; font-size: .62rem; padding-right: 2px; }
+  }
   table.heat td.void { background: transparent; cursor: default; }
   th.agehead { border-bottom: 3px solid var(--c); }
   .warnico { cursor: help; font-size: .85em; }
@@ -122,6 +129,22 @@
   .yearcell small { display: block; color: var(--muted); font-size: .68rem; font-weight: 400; white-space: nowrap; }
   .yearcell.future { color: var(--muted); font-style: italic; }
   tr.cur-row td, tr.cur-row th { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+  .tip { position: absolute; z-index: 5; pointer-events: none; background: var(--card); color: var(--ink); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 10px; font-size: .8rem; box-shadow: 0 4px 14px rgba(0, 0, 0, .18); white-space: nowrap; }
+  .tip .tt { font-weight: 700; margin-bottom: 4px; }
+  .tip .tr { display: flex; justify-content: space-between; gap: 14px; align-items: center; }
+  .tip .tr b { font-variant-numeric: tabular-nums; }
+  .tip .key { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+  .tip .muted { color: var(--muted); }
+  :root { --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; }
+  @media (prefers-color-scheme: dark) { :root { --s1: #3987e5; --s2: #d95926; --s3: #199e70; } }
+  svg.fin text { fill: var(--muted); font-size: 11px; font-family: inherit; }
+  svg.fin text.val { fill: var(--ink); font-weight: 700; }
+  svg.fin .grid { stroke: var(--line); stroke-width: 1; }
+  svg.fin .hit { fill: transparent; cursor: pointer; outline: none; }
+  svg.fin .hit:hover, svg.fin .hit:focus { fill: color-mix(in srgb, var(--ink) 7%, transparent); }
+  .legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  @media (max-width: 600px) { .fin-table th, .fin-table td { font-size: .72rem; padding: 6px 3px; } }
   [hidden] { display: none !important; }
   @media print {
     header, .noprint { display: none !important; }
@@ -137,6 +160,7 @@
     <button data-tab="uren" class="active">Uren invullen</button>
     <button data-tab="overzicht">Overzicht</button>
     <button data-tab="kalender">Kalender</button>
+    <button data-tab="financieel">Financieel</button>
     <button data-tab="past">Past het?</button>
     <button data-tab="kinderen" data-perm="children:write" hidden>Kinderen</button>
     <button data-tab="instellingen" data-perm="settings:write" hidden>Instellingen</button>
@@ -279,6 +303,32 @@
     <div class="actions noprint" style="margin-top:14px"><button class="btn secondary" id="calPrint">Afdrukken</button></div>
   </section>
 
+  <!-- FINANCIEEL -->
+  <section id="tab-financieel" hidden>
+    <div class="datebar noprint">
+      <button class="btn secondary" id="finPrev" aria-label="Vorig jaar">‹</button>
+      <div class="caltitle" id="finTitle"></div>
+      <button class="btn secondary" id="finNext" aria-label="Volgend jaar">›</button>
+      <button class="btn secondary" id="finToday">Dit jaar</button>
+    </div>
+    <div class="card">
+      <h2 id="finTableTitle"></h2>
+      <div class="scrollx" id="finTable"></div>
+      <div class="warn" id="finWarn"></div>
+      <p class="hint" style="margin: 10px 0 0">Bedrag = uren × uurprijs, met de toeslag buiten de openingstijden. <em>Geschreven</em> = ingevulde uren, <em>gepland</em> = vaste tijden vanaf vandaag en doorbetaalde vakanties, <em>vast</em> = vaste uren per maand. Kinderen zonder uren in dit jaar staan er niet bij.</p>
+    </div>
+    <div class="card">
+      <h2 id="finChartTitle"></h2>
+      <div class="seg noprint" id="finMode" style="max-width: 360px">
+        <button data-fin="kolom" class="active">Kolommen</button>
+        <button data-fin="lijn">Lijn (cumulatief)</button>
+      </div>
+      <div class="legend" id="finLegend"></div>
+      <div id="finChart" style="position: relative"><div class="tip" id="finTip" hidden></div></div>
+    </div>
+    <div class="actions noprint"><button class="btn secondary" id="finPrint">Afdrukken</button></div>
+  </section>
+
   <!-- PAST HET? -->
   <section id="tab-past" hidden>
     <div class="card">
@@ -345,6 +395,16 @@
         <div class="wide"><button class="btn secondary">Eigen kind toevoegen</button></div>
       </form>
       <div class="err" id="ownErr"></div>
+    </div>
+
+    <div class="card">
+      <h2>Begindatum gastouder</h2>
+      <p class="hint">Vanaf wanneer je gastouder bent in deze app. Alles van vóór deze datum wordt genegeerd: je kunt er niet naartoe navigeren, er kunnen geen uren worden ingevuld en bestaande uren van vóór de datum worden niet getoond of meegeteld (ze worden niet verwijderd). Leeg laten betekent geen begindatum.</p>
+      <form class="grid2" id="startForm">
+        <div><label for="startDate">Begindatum</label><input type="date" id="startDate"></div>
+        <div style="align-self: end"><button class="btn secondary">Opslaan</button></div>
+      </form>
+      <div class="err" id="startErr"></div>
     </div>
 
     <div class="card">
@@ -453,7 +513,7 @@
   const euro = (n) => n.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR' });
   const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  const state = { children: [], entries: [], settings: { rates: [], users: [], fixedUsers: [], me: '', opening: { days: [], factor: 1 }, ownChildren: [], vacations: [] } };
+  const state = { children: [], entries: [], settings: { rates: [], users: [], fixedUsers: [], me: '', opening: { days: [], factor: 1 }, ownChildren: [], vacations: [], startDate: null } };
   const loadedMonths = new Set();
 
   // --- API ---
@@ -557,13 +617,17 @@
   // Contracten met vaste uren per maand die in maand m (JJJJ-MM) gelden.
   // Een contract geldt voor een maand als de periode die maand raakt.
   const fixedContracts = (m) => contracts().filter((x) => Number(x.contract.monthlyHours) > 0 && x.contract.start && x.contract.end
-    && x.contract.start.slice(0, 7) <= m && m <= x.contract.end.slice(0, 7));
+    && x.contract.start.slice(0, 7) <= m && m <= x.contract.end.slice(0, 7) && !(gStart() && m < gStart().slice(0, 7)));
   // Melding als een datum buiten de periode van het contract valt (invullen blijft mogelijk).
   const contractWarning = (k, date) => (k.start && k.end && (date < k.start || date > k.end)
     ? `Let op: ${nlDate(date)} valt buiten het contract (${nlDate(k.start)} t/m ${nlDate(k.end)}).` : '');
+  // Begindatum van de gastouder (Instellingen): alles ervoor wordt genegeerd en is niet te bereiken.
+  const gStart = () => state.settings.startDate || '';
+  const beforeStart = (date) => !!gStart() && date < gStart();
+  const maxDate = (a, b) => (a > b ? a : b);
   // Vakantie van de gastouder zelf (Instellingen): dan is er geen opvang.
   const vacationOf = (date) => (state.settings.vacations || []).find((h) => h.from <= date && date <= h.to) || null;
-  const vacTag = (date) => { const h = vacationOf(date); return h ? `<span class="tag">vakantie${h.note ? ': ' + esc(h.note) : ''}</span>` : ''; };
+  const vacTag = (date) => { if (beforeStart(date)) return '<span class="tag">voor begindatum</span>'; const h = vacationOf(date); return h ? `<span class="tag">vakantie${h.note ? ': ' + esc(h.note) : ''}</span>` : ''; };
   // Te veel kinderen tegelijk: totaal maximaal 6, waarvan maximaal 5 jonger dan 4 jaar, 4 jonger dan 2 jaar en 2 jonger dan 1 jaar.
   // Eigen kinderen tot 8 jaar tellen mee en zijn de hele dag aanwezig; één kind telt één keer, ook met meerdere registraties.
   // Een registratie die je nog aan het invullen bent kun je als 'extra' meegeven.
@@ -607,7 +671,7 @@
     const out = [];
     state.children.forEach((c) => (c.holidays || []).forEach((h) => c.contracts.forEach((k) => {
       if (!paysBySchedule(k) || !k.start || !k.end) return;
-      const from = [h.from, k.start, first].sort().pop(), to = [h.to, k.end, last].sort()[0];
+      const from = [h.from, k.start, first, gStart()].sort().pop(), to = [h.to, k.end, last].sort()[0];
       for (let d = new Date(from + 'T12:00'); iso(d) <= to; d.setDate(d.getDate() + 1)) {
         const date = iso(d), key = `${k.id}_${date}`, sched = scheduleFor(k, date);
         if (!sched || seen.has(key)) continue;
@@ -627,12 +691,20 @@
   // --- tabs ---
   document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
     document.querySelectorAll('nav button').forEach((x) => x.classList.toggle('active', x === b));
-    ['uren', 'overzicht', 'kalender', 'past', 'kinderen', 'instellingen', 'account', 'admin'].forEach((t) => $('tab-' + t).hidden = t !== b.dataset.tab);
+    ['uren', 'overzicht', 'kalender', 'financieel', 'past', 'kinderen', 'instellingen', 'account', 'admin'].forEach((t) => $('tab-' + t).hidden = t !== b.dataset.tab);
     render();
   }));
 
   // --- uren tab ---
-  const shiftDay = (n) => { const d = new Date($('day').value + 'T12:00'); d.setDate(d.getDate() + n); $('day').value = iso(d); renderDay(true); };
+  // Knoppen en datumvelden houden de begindatum aan: ervoor kun je niet navigeren.
+  function updateNavLimits() {
+    const g = gStart(), day = $('day').value, month = $('month').value;
+    $('day').min = g || ''; $('month').min = g ? g.slice(0, 7) : '';
+    $('prevDay').disabled = !!g && !!day && day <= g;
+    $('prevOpen').disabled = !!g && !!day && day <= g;
+    $('prevMonth').disabled = !!g && !!month && month <= g.slice(0, 7);
+  }
+  const shiftDay = (n) => { const d = new Date($('day').value + 'T12:00'); d.setDate(d.getDate() + n); if (beforeStart(iso(d))) return; $('day').value = iso(d); renderDay(true); };
   $('prevDay').onclick = () => shiftDay(-1);
   $('nextDay').onclick = () => shiftDay(1);
   // Naar de vorige of volgende openingsdag: een dag waarop de gastouder volgens de openingstijden open is en geen vakantie heeft.
@@ -641,13 +713,14 @@
     const d = new Date($('day').value + 'T12:00');
     for (let i = 0; i < 800; i++) {
       d.setDate(d.getDate() + dir);
+      if (beforeStart(iso(d))) break;
       if (isOpenDay(iso(d))) { $('day').value = iso(d); renderDay(true); return; }
     }
-    toast('Geen openingsdag gevonden. Controleer de openingstijden en de vakantie bij Instellingen.');
+    toast(gStart() && dir < 0 ? `Geen openingsdag meer vanaf de begindatum (${nlDate(gStart())}).` : 'Geen openingsdag gevonden. Controleer de openingstijden en de vakantie bij Instellingen.');
   }
   $('prevOpen').onclick = () => jumpOpen(-1);
   $('nextOpen').onclick = () => jumpOpen(1);
-  $('day').onchange = () => renderDay(true);
+  $('day').onchange = () => { if ($('day').value && beforeStart($('day').value)) $('day').value = gStart(); renderDay(true); };
   // Standaard staat het eerste kind geselecteerd waarvoor die dag nog geen uren zijn ingevuld (met een contract dat op die dag loopt).
   // Kies je zelf een kind, dan blijft dat staan tot je van dag wisselt of uren toevoegt.
   let contractTouched = false;
@@ -685,13 +758,17 @@
   $('end').addEventListener('input', updateEntryCap);
 
   async function renderDay(prefill) {
+    if ($('day').value && beforeStart($('day').value)) $('day').value = gStart();
+    updateNavLimits();
     const day = $('day').value;
     if (!day) return;
     const seq = ++daySeq;
     await guard(() => ensureMonth(day.slice(0, 7)));
     if (seq !== daySeq) return;
     $('dayTitle').textContent = new Date(day + 'T12:00').toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
-    const list = state.entries.filter((e) => e.date === day).sort((a, b) => a.start.localeCompare(b.start));
+    // Op naam van het kind (alfabetisch), daarna op begintijd; een nieuwe registratie komt dus op de juiste plek te staan.
+    const childName = (e) => { const x = findContract(e.contractId); return x ? x.child.name : '\uffff'; };
+    const list = state.entries.filter((e) => e.date === day).sort((a, b) => childName(a).localeCompare(childName(b), 'nl') || a.start.localeCompare(b.start));
     $('dayEntries').innerHTML = list.length ? list.map((e) => entryRow(e)).join('') : '<div class="empty">Nog geen uren voor deze dag.</div>';
     $('dayTotal').textContent = fmt(list.reduce((s, e) => s + entryMin(e), 0));
 
@@ -742,16 +819,18 @@
   });
 
   // --- overzicht ---
-  const shiftMonth = (n) => { const [y, m] = $('month').value.split('-').map(Number); $('month').value = iso(new Date(y, m - 1 + n, 1)).slice(0, 7); renderMonth(); };
+  const shiftMonth = (n) => { const [y, m] = $('month').value.split('-').map(Number); const next = iso(new Date(y, m - 1 + n, 1)).slice(0, 7); if (gStart() && next < gStart().slice(0, 7)) return; $('month').value = next; renderMonth(); };
   $('prevMonth').onclick = () => shiftMonth(-1);
   $('nextMonth').onclick = () => shiftMonth(1);
-  $('month').onchange = renderMonth;
+  $('month').onchange = () => { if ($('month').value && gStart() && $('month').value < gStart().slice(0, 7)) $('month').value = gStart().slice(0, 7); renderMonth(); };
 
   const monthEntries = () => state.entries.filter((e) => e.date.startsWith($('month').value))
     .sort((a, b) => a.date.localeCompare(b.date) || a.start.localeCompare(b.start));
 
   let monthSeq = 0;
   async function renderMonth() {
+    if ($('month').value && gStart() && $('month').value < gStart().slice(0, 7)) $('month').value = gStart().slice(0, 7);
+    updateNavLimits();
     const m = $('month').value;
     if (!m) return;
     const seq = ++monthSeq;
@@ -847,7 +926,7 @@
     const days = new Map(), vast = new Map();
     const add = (date, x, kind, start, end, holiday) => {
       if (!days.has(date)) days.set(date, []);
-      days.get(date).push({ child: x.child, kind, start, end, min: toMin(end) - toMin(start), holiday: !!holiday });
+      days.get(date).push({ child: x.child, kind, date, contractId: x.contract.id, start, end, min: toMin(end) - toMin(start), holiday: !!holiday });
     };
     const registered = state.entries.filter((e) => e.date.startsWith(m));
     registered.forEach((e) => { const x = findContract(e.contractId); if (x) add(e.date, x, 'written', e.start, e.end); });
@@ -856,7 +935,7 @@
     const [y, mo] = m.split('-').map(Number), today = iso(new Date());
     for (let i = 1; i <= new Date(y, mo, 0).getDate(); i++) {
       const date = `${m}-${pad(i)}`;
-      if (date < today || vacationOf(date)) continue;   // geen geplande uren op dagen in het verleden of tijdens vakantie van de gastouder
+      if (date < today || beforeStart(date) || vacationOf(date)) continue;   // geen geplande uren op dagen in het verleden of tijdens vakantie van de gastouder
       contracts().forEach((x) => {
         const k = x.contract, sched = scheduleFor(k, date);
         if (!sched || !k.start || !k.end || date < k.start || date > k.end || Number(k.monthlyHours) > 0) return;
@@ -913,7 +992,7 @@
   };
   $('calPrev').onclick = () => shiftCal(-1);
   $('calNext').onclick = () => shiftCal(1);
-  $('calToday').onclick = () => { cal.date = new Date(); renderCal(); };
+  $('calToday').onclick = () => { cal.date = new Date(maxDate(iso(new Date()), gStart()) + 'T12:00'); renderCal(); };
   $('calPrint').onclick = () => window.print();
   $('calBody').addEventListener('click', (ev) => {
     const cell = ev.target.closest('[data-goto]');
@@ -968,10 +1047,10 @@
   function dayFree(date, items) {
     const segs = segmentsFor(date, items);
     const dow = (new Date(date + 'T12:00').getDay() + 6) % 7, od = (state.settings.opening.days || [])[dow];
-    const vac = vacationOf(date), closed = !segs.length && !!(vac || (od && !od.open));
+    const pre = beforeStart(date), vac = vacationOf(date), closed = pre || (!segs.length && !!(vac || (od && !od.open)));
     const free = segs.length ? segs.reduce((m, s) => ({ older: Math.min(m.older, s.free.older), toddler: Math.min(m.toddler, s.free.toddler),
       one: Math.min(m.one, s.free.one), baby: Math.min(m.baby, s.free.baby) }), segs[0].free) : freeOf(ownAges(date));
-    return { segs, free, closed, vac };
+    return { segs, free, closed, vac, pre };
   }
   // Te veel kinderen tegelijk (geschreven of gepland): boven het totaal of boven een staffel voor jonge kinderen.
   const isOver = (d) => !d.closed && (d.free.older < 0 || d.free.toddler < 0 || d.free.one < 0 || d.free.baby < 0);
@@ -980,7 +1059,7 @@
   const warnIco = (d) => (isOver(d) ? `<span class="warnico" role="img" aria-label="Te veel kinderen" title="Te veel kinderen: ${overText(d)}">⚠️</span>` : '');
   const availClass = (d) => (d.closed ? 'av-closed' : d.free.older <= 0 || isOver(d) ? 'av-full' : d.free.older === 1 ? 'av-low' : 'av-ok');
   const freeNum = (n) => (n < 0 ? `${n}` : String(n));
-  const availText = (d) => (d.closed ? (d.vac ? 'vakantie' : 'gesloten') : d.free.older < 0 ? `${-d.free.older} te veel` : isOver(d) ? 'te veel jonge' : d.free.older === 0 ? 'vol' : `${d.free.older} vrij`);
+  const availText = (d) => (d.closed ? (d.pre ? 'voor begindatum' : d.vac ? 'vakantie' : 'gesloten') : d.free.older < 0 ? `${-d.free.older} te veel` : isOver(d) ? 'te veel jonge' : d.free.older === 0 ? 'vol' : `${d.free.older} vrij`);
   // Extra regel voor jonge kinderen als daar minder plek voor is dan voor oudere kinderen.
   const youngNote = (f) => [f.toddler < f.older && `2–3 jr: ${Math.max(0, f.toddler)}`, f.one < f.toddler && `1 jr: ${Math.max(0, f.one)}`, f.baby < f.one && `baby: ${Math.max(0, f.baby)}`]
     .filter(Boolean).join(' · ');
@@ -994,7 +1073,10 @@
   let calSeq = 0;
   async function renderCal() {
     if ($('tab-kalender').hidden) return;
+    if (beforeStart(iso(cal.date))) cal.date = new Date(gStart() + 'T12:00');
     const seq = ++calSeq, view = cal.view, d = cal.date, today = iso(new Date()), vrij = cal.mode === 'vrij';
+    // Terug bladeren kan niet voorbij de periode waarin de begindatum valt.
+    $('calPrev').disabled = !!gStart() && (view === 'week' ? iso(mondayOf(d)) <= gStart() : view === 'maand' ? `${iso(d).slice(0, 7)}-01` <= gStart() : `${d.getFullYear()}-01-01` <= gStart());
     document.querySelectorAll('#calMode [data-mode]').forEach((x) => x.classList.toggle('active', x.dataset.mode === cal.mode));
     let dates = [];
     if (view === 'week') dates = Array.from({ length: 7 }, (_, i) => noon(mondayOf(d), i));
@@ -1032,7 +1114,7 @@
               <div class="meta">${sg.kids.map((c) => `${dot(c, date)}${esc(firstName(c))}${ageSuffix(c, date)}`).join(', ')}</div>
               ${youngNote(sg.free) ? `<div class="meta">Plek voor jonge kinderen: ${youngNote(sg.free)}</div>` : ''}</div>
               <span class="badge ${sg.free.older <= 0 ? 'av-full' : sg.free.older === 1 ? 'av-low' : 'av-ok'}">${sg.free.older <= 0 ? (sg.free.older < 0 ? `${-sg.free.older} te veel` : 'vol') : `${sg.free.older} vrij`}</span></div>`).join('')
-            : `<div class="meta">${f.closed ? (f.vac ? `Vakantie gastouder${f.vac.note ? `: ${esc(f.vac.note)}` : ''}` : 'Gesloten') : 'Geen kinderen'}${f.closed ? '' : youngNote(f.free) ? ` · ${youngNote(f.free)}` : ''}</div>`}</div>`;
+            : `<div class="meta">${f.closed ? (f.pre ? 'Voor de begindatum van de gastouder' : f.vac ? `Vakantie gastouder${f.vac.note ? `: ${esc(f.vac.note)}` : ''}` : 'Gesloten') : 'Geen kinderen'}${f.closed ? '' : youngNote(f.free) ? ` · ${youngNote(f.free)}` : ''}</div>`}</div>`;
         }
         return `<div class="card" style="${border}">
           <h2 style="display:flex;justify-content:space-between"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))} ${warnIco(fd)} ${vacTag(date)}</span><span class="hours">${hrs(tot)}</span></h2>
@@ -1052,12 +1134,12 @@
         let wkMin = 0;
         for (let i = 0; i < 7; i++) {
           const dt = dates[w * 7 + i], date = iso(dt), items = dayMap.get(date), groups = groupDay(items), mine = date.startsWith(mainM);
-          const cls = `day${mine ? '' : ' other'}${date === today ? ' today' : ''}${vacationOf(date) ? ' vac' : ''}`, fd = dayFree(date, items);
+          const cls = `day${mine && !beforeStart(date) ? '' : ' other'}${date === today ? ' today' : ''}${vacationOf(date) ? ' vac' : ''}`, fd = dayFree(date, items);
           if (mine && isOver(fd)) overDays.push(date);
           if (vrij) {
             const f = fd;
-            if (mine) tally[availClass(f).slice(3)]++;
-            html += `<div class="${cls}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()} ${warnIco(f)}</div><span class="badge ${availClass(f)}">${availText(f)}</span>
+            if (mine && !f.pre) tally[availClass(f).slice(3)]++;
+            html += `<div class="${cls}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()} ${warnIco(f)}</div><span class="badge ${availClass(f)}" ${f.pre ? 'title="voor de begindatum"' : ''}>${f.pre ? '–' : availText(f)}</span>
               ${youngNote(f.free) && !f.closed ? `<small>${youngNote(f.free)}</small>` : ''}${items ? `<small>${names(items, date)}</small>` : ''}</div>`;
             continue;
           }
@@ -1189,7 +1271,8 @@
     if (!start) return err.textContent = 'Vul een startdatum in.';
     if (end && end < start) return err.textContent = 'De einddatum ligt voor de startdatum.';
     if (end && end < today) return err.textContent = 'De einddatum ligt in het verleden; er is niets meer te plannen.';
-    const from = start < today ? today : start;
+    if (end && gStart() && end < gStart()) return err.textContent = `De einddatum ligt vóór de begindatum van de gastouder (${nlDate(gStart())}).`;
+    const from = maxDate(start < today ? today : start, gStart());
     // Zonder einddatum: tot de laatste einddatum van een bestaand contract (minimaal 8 weken, maximaal 2 jaar).
     const plus = (d, n) => iso(noon(new Date(d + 'T12:00'), n));
     const maxEnd = contracts().map((x) => x.contract.end || '').sort().pop() || '';
@@ -1256,10 +1339,156 @@
     const verdict = !checkedAny ? '<span class="badge av-closed">niets te controleren</span> Geen dagen in de gekozen periode.'
       : failing.length ? `<span class="badge av-full">past niet overal</span> Past niet (altijd) op: ${failing.join(', ')}.` : '<span class="badge av-ok">past</span> Past op alle gevraagde dagen en tijden.';
     $('pResult').innerHTML = `<div class="card"><h2>Uitkomst voor ${esc(child.firstName || child.name)}${existing ? ' (aangepast rooster)' : ''}</h2><p style="margin:0 0 8px">${verdict}</p>
-      <p class="hint" style="margin:0">Gecontroleerd: ${nlDate(from)} t/m ${nlDate(horizon)}${end ? '' : ` (geen einddatum opgegeven; tot de laatste einddatum van een bestaand contract, minimaal 8 weken)`}${start < today ? ' (vanaf vandaag; eerdere dagen zijn al geweest)' : ''}${skipped ? `, ${skipped} dag${skipped === 1 ? '' : 'en'} overgeslagen wegens vakantie van het kind` : ''}${skippedVac ? `, ${skippedVac} dag${skippedVac === 1 ? '' : 'en'} overgeslagen wegens vakantie van de gastouder` : ''}.
+      <p class="hint" style="margin:0">Gecontroleerd: ${nlDate(from)} t/m ${nlDate(horizon)}${end ? '' : ` (geen einddatum opgegeven; tot de laatste einddatum van een bestaand contract, minimaal 8 weken)`}${start < today ? ' (vanaf vandaag; eerdere dagen zijn al geweest)' : ''}${gStart() && start < gStart() ? ' (vanaf de begindatum van de gastouder)' : ''}${skipped ? `, ${skipped} dag${skipped === 1 ? '' : 'en'} overgeslagen wegens vakantie van het kind` : ''}${skippedVac ? `, ${skippedVac} dag${skippedVac === 1 ? '' : 'en'} overgeslagen wegens vakantie van de gastouder` : ''}.
       Meegeteld: geschreven en geplande uren van de andere kinderen, en je eigen kinderen onder 8 jaar. Vaste uren per maand hebben geen tijden en tellen niet mee.</p></div>${cards}`;
   }
   $('pRun').onclick = runPast;
+
+  // --- financieel: opbrengst per kind per maand (tabel) en per maand (grafiek) ---
+  const fin = { year: new Date().getFullYear(), mode: 'kolom' };
+  try { fin.mode = localStorage.getItem('fin.mode') === 'lijn' ? 'lijn' : 'kolom'; } catch (e) { /* standaard */ }
+  const euro0 = (n) => n.toLocaleString('nl-NL', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+  // Eén stijl per as: volledig onder 10.000, compact (€ 2,5K) zodra de as daar komt.
+  const euroAxis = (n, compact) => (n === 0 ? '€ 0' : compact ? `€ ${(n / 1000).toLocaleString('nl-NL')}K` : euro0(n));
+  const niceMax = (v) => { if (v <= 0) return 100; const e = 10 ** Math.floor(Math.log10(v)), f = v / e; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * e; };
+  const MONTHS_SHORT = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('nl-NL', { month: 'short' }).replace('.', ''));
+  const MONTHS_LONG = Array.from({ length: 12 }, (_, i) => new Date(2000, i, 1).toLocaleDateString('nl-NL', { month: 'long' }));
+  document.querySelectorAll('[data-fin]').forEach((b) => b.addEventListener('click', () => {
+    fin.mode = b.dataset.fin; try { localStorage.setItem('fin.mode', fin.mode); } catch (e) { /* niet erg */ }
+    renderFin();
+  }));
+  $('finPrev').onclick = () => { fin.year -= 1; renderFin(); };
+  $('finNext').onclick = () => { fin.year += 1; renderFin(); };
+  $('finToday').onclick = () => { fin.year = new Date().getFullYear(); renderFin(); };
+  $('finPrint').onclick = () => window.print();
+
+  // Bedragen per maand en kind: geschreven (w), gepland (p, ook doorbetaalde vakantie) en vast (v).
+  async function finData(year) {
+    const months = Array.from({ length: 12 }, (_, i) => `${year}-${pad(i + 1)}`), { factor } = state.settings.opening;
+    await Promise.all(months.map((m) => guard(() => ensureMonth(m))));
+    const cells = months.map(() => new Map()), kids = new Map();
+    let missing = false;
+    const bump = (i, child, key, eur) => {
+      kids.set(child.id, child);
+      const c = cells[i].get(child.id) || { w: 0, p: 0, v: 0 };
+      c[key] += eur; cells[i].set(child.id, c);
+    };
+    months.forEach((m, i) => {
+      monthPlan(m).days.forEach((items, date) => items.forEach((it) => {
+        const x = findContract(it.contractId);
+        if (!x) return;
+        const rate = rateFor(x, date), { inside, outside } = splitMinutes({ date, start: it.start, end: it.end });
+        if (rate === null) missing = true;
+        bump(i, it.child, it.kind === 'written' ? 'w' : 'p', ((inside + outside * factor) / 60) * (rate ?? 0));
+      }));
+      fixedContracts(m).forEach((x) => {
+        const hours = Number(x.contract.monthlyHours), rate = rateFor(x, m + '-01');
+        if (rate === null) missing = true;
+        bump(i, x.child, 'v', hours * (rate ?? 0));
+      });
+    });
+    return { months, cells, kids, missing };
+  }
+  const cellSum = (c) => (c ? c.w + c.p + c.v : 0);
+
+  let finSeq = 0;
+  async function renderFin() {
+    if ($('tab-financieel').hidden) return;
+    if (gStart() && fin.year < Number(gStart().slice(0, 4))) fin.year = Number(gStart().slice(0, 4));
+    const seq = ++finSeq, year = fin.year, nowM = iso(new Date()).slice(0, 7);
+    $('finTitle').textContent = String(year);
+    $('finPrev').disabled = !!gStart() && `${year}-01-01` <= gStart();
+    $('finTableTitle').textContent = `Opbrengst per kind per maand, ${year}`;
+    $('finChartTitle').textContent = `Opbrengst per maand, ${year}`;
+    document.querySelectorAll('#finMode [data-fin]').forEach((x) => x.classList.toggle('active', x.dataset.fin === fin.mode));
+    const data = await finData(year);
+    if (seq !== finSeq) return;
+    const { months, cells, missing } = data;
+    const kids = [...data.kids.values()].filter((c) => cells.some((m) => cellSum(m.get(c.id)) > 0)).sort((a, b) => firstName(a).localeCompare(firstName(b), 'nl'));
+
+    // Tabel
+    const colTot = new Map(kids.map((c) => [c.id, 0]));
+    let grand = 0;
+    const rows = months.map((m, i) => {
+      let rowTot = 0;
+      const tds = kids.map((c) => {
+        const cell = cells[i].get(c.id), tot = cellSum(cell);
+        colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot;
+        const parts = cell ? [cell.w > 0.005 && `geschreven ${euro0(cell.w)}`, cell.p > 0.005 && `gepland ${euro0(cell.p)}`, cell.v > 0.005 && `vast ${euro0(cell.v)}`].filter(Boolean) : [];
+        return `<td class="num yearcell${tot > 0 && !(cell && cell.w > 0) && m > nowM ? ' future' : ''}">${tot > 0.005 ? euro(tot) : '–'}${parts.length > 1 || (parts.length === 1 && !(cell && cell.w > 0)) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
+      }).join('');
+      grand += rowTot;
+      return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(MONTHS_LONG[i])}</th>${tds}<td class="num"><strong>${rowTot > 0.005 ? euro(rowTot) : '–'}</strong></td></tr>`;
+    }).join('');
+    $('finTable').innerHTML = kids.length ? `<table class="fin-table"><tr><th>Maand</th>${kids.map((c) => `<th class="num">${esc(firstName(c))}</th>`).join('')}<th class="num">Totaal</th></tr>${rows}
+      <tr><th>Totaal ${year}</th>${kids.map((c) => `<th class="num">${euro(colTot.get(c.id))}</th>`).join('')}<th class="num">${euro(grand)}</th></tr></table>` : `<div class="empty">Geen uren in ${year}.</div>`;
+    $('finWarn').textContent = missing ? `Voor sommige uren is geen tarief bekend (het bedrag telt als € 0). ${can('settings:write') ? 'Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.' : 'Vraag een beheerder een tarief toe te voegen.'}` : '';
+
+    // Grafiek
+    const W = months.map((_, i) => [...cells[i].values()].reduce((s, c) => s + c.w, 0)), V = months.map((_, i) => [...cells[i].values()].reduce((s, c) => s + c.v, 0)),
+      P = months.map((_, i) => [...cells[i].values()].reduce((s, c) => s + c.p, 0)), T = months.map((_, i) => W[i] + V[i] + P[i]);
+    drawFinChart({ W, V, P, T, year, nowM, months });
+  }
+
+  function drawFinChart({ W, V, P, T, year, nowM, months }) {
+    const box = $('finChart'), tip = $('finTip'), column = fin.mode === 'kolom';
+    const C = []; T.reduce((s, v, i) => (C[i] = s + v), 0);
+    const VW = 720, VH = 300, L = 58, R = 18, TOP = 22, B = 30, pw = VW - L - R, ph = VH - TOP - B, slot = pw / 12;
+    const yMax = niceMax(column ? Math.max(...T) : C[11]), sy = (v) => TOP + ph - (v / yMax) * ph, cx = (i) => L + slot * (i + 0.5);
+    const ticks = [0, 1, 2, 3, 4].map((k) => (yMax * k) / 4);
+    const idxNow = year < Number(nowM.slice(0, 4)) ? 11 : year > Number(nowM.slice(0, 4)) ? -1 : Number(nowM.slice(5)) - 1;
+    const roundTop = (x, y, w, h, r) => { r = Math.min(r, h, w / 2); return `M${x},${y + r}a${r},${r} 0 0 1 ${r},${-r}h${w - 2 * r}a${r},${r} 0 0 1 ${r},${r}v${h - r}h${-w}z`; };
+    let g = `<defs><pattern id="finHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--s3)"/>
+      <rect width="2.4" height="6" fill="var(--card)" opacity=".55"/></pattern></defs>`;
+    ticks.forEach((t) => { g += `<line class="grid" x1="${L}" x2="${VW - R}" y1="${sy(t)}" y2="${sy(t)}"/><text x="${L - 8}" y="${sy(t) + 4}" text-anchor="end">${euroAxis(t, yMax >= 10000)}</text>`; });
+    months.forEach((m, i) => { g += `<text x="${cx(i)}" y="${VH - 10}" text-anchor="middle"${m === nowM ? ' class="val"' : ''}>${MONTHS_SHORT[i]}</text>`; });
+    const maxI = T.indexOf(Math.max(...T));
+    if (column) {
+      const bw = Math.min(24, slot - 8);
+      T.forEach((t, i) => {
+        const segs = [['w', W[i], 'var(--s1)'], ['v', V[i], 'var(--s2)'], ['p', P[i], 'url(#finHatch)']].filter((s) => s[1] > 0.005);
+        let lo = 0;
+        segs.forEach(([, val, fill], k) => {
+          const hi = lo + val, top = sy(hi) + (k < segs.length - 1 ? 1 : 0), bot = sy(lo) - (k > 0 ? 1 : 0), h = bot - top;
+          if (h > 0.4) g += k === segs.length - 1 ? `<path d="${roundTop(cx(i) - bw / 2, top, bw, h, 4)}" fill="${fill}"/>` : `<rect x="${cx(i) - bw / 2}" y="${top}" width="${bw}" height="${h}" fill="${fill}"/>`;
+          lo = hi;
+        });
+        if (t > 0.005 && (i === maxI || (idxNow === i && i !== maxI))) g += `<text class="val" x="${cx(i)}" y="${sy(t) - 6}" text-anchor="middle">${euro0(t)}</text>`;
+      });
+    } else {
+      const pts = C.map((v, i) => [cx(i), sy(v)]);
+      const solid = idxNow >= 0 ? pts.slice(0, idxNow + 1) : [], dashed = pts.slice(Math.max(idxNow, 0));
+      const path = (a) => a.map((p, k) => `${k ? 'L' : 'M'}${p[0]},${p[1]}`).join('');
+      if (dashed.length > 1) g += `<path d="${path(dashed)}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 5"/>`;
+      if (solid.length > 1) g += `<path d="${path(solid)}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
+      pts.forEach((p) => { g += `<circle cx="${p[0]}" cy="${p[1]}" r="5" fill="var(--s1)" stroke="var(--card)" stroke-width="2"/>`; });
+      g += `<text class="val" x="${pts[11][0]}" y="${pts[11][1] - 12}" text-anchor="end">${euro0(C[11])}</text>`;
+    }
+    months.forEach((m, i) => { g += `<rect class="hit" data-i="${i}" tabindex="0" x="${L + slot * i}" y="${TOP}" width="${slot}" height="${ph}" aria-label="${MONTHS_LONG[i]} ${year}: ${euro(T[i])}"/>`; });
+    box.querySelector('svg')?.remove();
+    box.insertAdjacentHTML('afterbegin', `<svg class="fin" viewBox="0 0 ${VW} ${VH}" width="100%" role="img" aria-label="Opbrengst per maand in ${year}">${g}</svg>`);
+    $('finLegend').innerHTML = column
+      ? `<span><span class="sw" style="background:var(--s1)"></span>Geschreven</span><span><span class="sw" style="background:var(--s2)"></span>Vast per maand</span><span><span class="sw" style="background:repeating-linear-gradient(45deg,var(--s3) 0 3px,var(--card) 3px 5px)"></span>Gepland</span>`
+      : '<span>Cumulatief: elke maand is het totaal van januari t/m die maand. Doorgetrokken lijn = t/m deze maand, gestippeld = verwachting (gepland).</span>';
+
+    // Hover en toetsenbord: één tooltip per maand
+    const row = (key, label, val) => `<div class="tr"><span>${key ? `<span class="key" style="background:${key}"></span>` : ''}${label}</span><b>${euro(val)}</b></div>`;
+    const show = (i, x, y) => {
+      tip.innerHTML = `<div class="tt">${MONTHS_LONG[i]} ${year}</div>` + (column
+        ? row('var(--s1)', 'Geschreven', W[i]) + row('var(--s2)', 'Vast', V[i]) + row('var(--s3)', 'Gepland', P[i]) + row('', '<span class="muted">Totaal</span>', T[i])
+        : row('var(--s1)', 'Cumulatief', C[i]) + row('', '<span class="muted">Deze maand</span>', T[i]));
+      tip.hidden = false;
+      const bw = box.clientWidth, tw = tip.offsetWidth, th = tip.offsetHeight;
+      tip.style.left = `${Math.max(0, Math.min(bw - tw, x + 12))}px`; tip.style.top = `${Math.max(0, y - th - 8)}px`;
+    };
+    box.querySelectorAll('.hit').forEach((r) => {
+      const i = Number(r.dataset.i);
+      r.addEventListener('pointermove', (ev) => { const b = box.getBoundingClientRect(); show(i, ev.clientX - b.left, ev.clientY - b.top); });
+      r.addEventListener('focus', () => { const b = box.getBoundingClientRect(), q = r.getBoundingClientRect(); show(i, q.left - b.left + q.width / 2, q.top - b.top + 40); });
+      r.addEventListener('pointerleave', () => { tip.hidden = true; });
+      r.addEventListener('blur', () => { tip.hidden = true; });
+    });
+  }
 
   // --- kinderen: lijst en details ---
   let draft = null;              // het kind dat je bewerkt (een kopie, pas bij Opslaan bewaard)
@@ -1539,7 +1768,16 @@
     if (id && confirm('Deze vakantie verwijderen?')) saveSetting($('vacErr'), 'vacations', { vacations: state.settings.vacations.filter((h) => h.id !== id) }, (res) => { state.settings.vacations = res.vacations; });
   });
 
+  $('startForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    await saveSetting($('startErr'), 'start-date', { startDate: $('startDate').value || null }, (res) => {
+      state.settings.startDate = res.startDate;
+      loadedMonths.clear(); state.entries = [];   // de server laat uren van vóór de begindatum weg: opnieuw ophalen
+    });
+  });
+
   function renderSettings() {
+    if (document.activeElement !== $('startDate')) $('startDate').value = state.settings.startDate || '';
     renderOwnChildren();
     renderVacations();
     renderAccounts();
@@ -1747,7 +1985,7 @@
     }
   });
 
-  function render() { renderDay(); renderMonth(); renderCal(); renderPast(); renderChildren(); renderSettings(); }
+  function render() { renderDay(); renderMonth(); renderCal(); renderFin(); renderPast(); renderChildren(); renderSettings(); }
 
   // Laadt de gegevens en toont de app (of eerst het scherm om het tijdelijke wachtwoord te vervangen).
   async function start(mustChange) {

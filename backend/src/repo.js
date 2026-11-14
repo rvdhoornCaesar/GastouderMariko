@@ -121,6 +121,8 @@ function createRepo(connectionString) {
     setUsers: (list) => setSetting('users', list),
     getRates: () => getSetting('rates'),
     setRates: (list) => setSetting('rates', list),
+    getStartDate: () => getSetting('startDate', null),
+    setStartDate: (d) => setSetting('startDate', d),
     getVacations: () => getSetting('vacations'),
     setVacations: (list) => setSetting('vacations', list),
     getOwnChildren: () => getSetting('ownChildren'),

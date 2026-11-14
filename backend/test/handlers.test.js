@@ -250,6 +250,25 @@ test('vakantie van de gastouder: opslaan, sorteren, validatie, leeg maken', asyn
   assert.deepEqual((await call(h.putVacations, { body: { vacations: [] } })).jsonBody.vacations, []);
 });
 
+test('begindatum gastouder: instellen, wissen, validatie; uren ervoor worden genegeerd', async () => {
+  assert.equal((await call(h.getSettings)).jsonBody.startDate, null);
+  const [child] = (await call(h.listChildren)).jsonBody;
+  const contractIdForStartTest = child.contracts[0].id;
+  await call(h.createEntry, { body: { date: '2027-03-02', contractId: contractIdForStartTest, start: '08:00', end: '12:00' } });
+  await call(h.createEntry, { body: { date: '2027-03-20', contractId: contractIdForStartTest, start: '08:00', end: '12:00' } });
+  assert.equal((await call(h.listEntries, { query: { month: '2027-03' } })).jsonBody.length, 2);
+  assert.equal((await call(h.putStartDate, { body: { startDate: '2027-03-10' } })).jsonBody.startDate, '2027-03-10');
+  assert.equal((await call(h.getSettings)).jsonBody.startDate, '2027-03-10');
+  assert.deepEqual((await call(h.listEntries, { query: { month: '2027-03' } })).jsonBody.map((e) => e.date), ['2027-03-20']);
+  assert.equal((await call(h.listEntries, { query: { month: '2027-02' } })).jsonBody.length, 0);
+  await assert.rejects(call(h.createEntry, { body: { date: '2027-03-09', contractId: contractIdForStartTest, start: '08:00', end: '09:00' } }), { status: 400 });
+  await call(h.createEntry, { body: { date: '2027-03-10', contractId: contractIdForStartTest, start: '08:00', end: '09:00' } });
+  await assert.rejects(call(h.putStartDate, { body: { startDate: '2027-02-30' } }), { status: 400 });
+  await assert.rejects(call(h.putStartDate, { body: {} }), { status: 400 });
+  assert.equal((await call(h.putStartDate, { body: { startDate: null } })).jsonBody.startDate, null);
+  assert.equal((await call(h.listEntries, { query: { month: '2027-03' } })).jsonBody.length, 3);   // de ingevulde uren bleven bewaard
+});
+
 // --- Lokale accounts ---
 const admin = { email: 'mariko@voorbeeld.nl', kind: 'microsoft', fixed: true, role: 'admin', instanceId: 'main' };
 const PW = 'koekjes-tomaat-fiets-42';
@@ -445,7 +464,7 @@ test('gebruiker: uren en lezen mag, wijzigen van kinderen en instellingen niet',
   assert.deepEqual(s.fixedUsers, []);
   assert.equal(s.runtime, undefined);
   for (const [fn, extra] of [[h.createChild, { body: { firstName: 'X', contracts: [K()] } }], [h.updateChild, { params: { id: 'x' }, body: {} }], [h.deleteChild, { params: { id: 'x' } }],
-    [h.putRates, { body: { rates: [] } }], [h.putOpening, { body: {} }], [h.putOwnChildren, { body: { ownChildren: [] } }], [h.putVacations, { body: { vacations: [] } }], [h.putUsers, { body: { users: [] } }]]) {
+    [h.putRates, { body: { rates: [] } }], [h.putOpening, { body: {} }], [h.putOwnChildren, { body: { ownChildren: [] } }], [h.putVacations, { body: { vacations: [] } }], [h.putStartDate, { body: { startDate: null } }], [h.putUsers, { body: { users: [] } }]]) {
     await assert.rejects(call2(fn, extra), { status: 403 });
   }
 });
