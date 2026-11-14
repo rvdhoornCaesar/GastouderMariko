@@ -163,6 +163,9 @@ function createRepo(connectionString) {
       const t = await table('entries');
       await t.upsertEntity({ partitionKey: PK, rowKey: e.id, contractId: e.contractId, start: e.start, end: e.end, note: e.note }, 'Replace');
     },
+    async getEntry(id) {
+      try { return toEntry(await (await table('entries')).getEntity(PK, id)); } catch (e) { if (e.statusCode === 404) return null; throw e; }
+    },
     async deleteEntry(id) {
       await (await table('entries')).deleteEntity(PK, id);
     },

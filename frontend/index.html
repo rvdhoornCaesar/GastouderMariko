@@ -20,8 +20,8 @@
   h1 a { font-size: .8rem; font-weight: 400; color: var(--muted); }
   #toast { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 728px; margin: 0 auto; padding: 12px 14px;
     background: var(--danger); color: #fff; border-radius: 8px; z-index: 10; }
-  nav { display: flex; gap: 4px; flex-wrap: wrap; }   /* op een smal scherm op twee regels, zonder horizontaal scrollen */
-  nav button { flex: 1 1 auto; padding: 10px 6px; border: 0; background: transparent; color: var(--muted);
+  nav { display: flex; gap: 2px; flex-wrap: wrap; }   /* op een smal scherm op twee regels, zonder horizontaal scrollen */
+  nav button { flex: 1 1 auto; padding: 8px 2px; font-size: .82rem; white-space: nowrap; border: 0; background: transparent; color: var(--muted);
     font: inherit; font-weight: 600; border-bottom: 3px solid transparent; cursor: pointer; }
   nav button.active { color: var(--accent); border-color: var(--accent); }
   main { max-width: 760px; margin: 0 auto; padding: 16px; }
@@ -145,6 +145,29 @@
   svg.fin .hit:hover, svg.fin .hit:focus { fill: color-mix(in srgb, var(--ink) 7%, transparent); }
   .legend .sw { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
   @media (max-width: 600px) { .fin-table th, .fin-table td { font-size: .72rem; padding: 6px 3px; } }
+  /* Compacte registraties: één regel per kind, zodat zes kinderen met het formulier op één scherm passen. */
+  .entry.c { padding: 4px 0; gap: 8px; }
+  .entry.c .main { display: flex; gap: 8px; align-items: baseline; min-width: 0; flex: 1; flex-wrap: wrap; }
+  .entry.c .who { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+  .entry.c .note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 14rem; }
+  .entry.c .act { display: flex; gap: 2px; align-items: center; flex: none; }
+  .entry.c .act button.link { padding: 2px 6px; }
+  .entry.edit { display: grid; grid-template-columns: minmax(0, 1.6fr) 92px 92px minmax(0, 1fr) auto; gap: 6px; align-items: center; padding: 6px 0; }
+  .entry.edit input, .entry.edit select { padding: 6px; }
+  .entry.edit .btns { display: flex; gap: 6px; align-items: center; }
+  .dayhead { display: flex; justify-content: space-between; align-items: baseline; margin: 0 0 6px; }
+  .dayhead .hours { font-size: 1.05rem; }
+  #entryForm { padding: 10px 14px; }
+  #entryForm h2 { font-size: .9rem; margin: 0 0 6px; }
+  .formrow { display: grid; grid-template-columns: minmax(0, 1.6fr) 92px 92px minmax(0, 1fr) auto; gap: 6px; align-items: center; }
+  .formrow input, .formrow select { padding: 8px 6px; }
+  #entryForm .warn:empty, #entryForm .err:empty, #tab-uren > .card .warn:empty { display: none; }
+  #tab-uren > .card { padding: 10px 14px; margin-bottom: 10px; }
+  @media (max-width: 640px) {
+    .formrow, .entry.edit { grid-template-columns: 1fr 1fr; }
+    .formrow > :first-child, .entry.edit > :first-child { grid-column: 1 / -1; }
+    .formrow > :nth-child(4), .entry.edit > :nth-child(4) { grid-column: 1 / -1; }
+  }
   [hidden] { display: none !important; }
   @media print {
     header, .noprint { display: none !important; }
@@ -229,31 +252,22 @@
     </div>
 
     <div class="card">
-      <h2 id="dayTitle">Vandaag</h2>
+      <h2 class="dayhead"><span id="dayTitle">Vandaag</span><span class="hours" id="dayTotal" title="Totaal deze dag">0:00</span></h2>
       <div id="dayEntries"></div>
       <div class="warn" id="dayCap"></div>
-      <div class="total"><span>Totaal deze dag</span><span class="hours" id="dayTotal">0:00</span></div>
     </div>
 
-    <form class="card" id="entryForm">
-      <h2>Uren toevoegen</h2>
-      <div class="row">
-        <div style="grid-column: 1 / -1">
-          <label for="contract">Kind / contract</label>
-          <select id="contract" required></select>
-        </div>
-      </div>
-      <div class="row">
-        <div><label for="start">Van</label><input type="time" id="start" required></div>
-        <div><label for="end">Tot</label><input type="time" id="end" required></div>
-      </div>
-      <div class="row">
-        <div style="grid-column: 1 / -1"><label for="note">Opmerking (optioneel)</label><input type="text" id="note"></div>
+    <form class="card" id="entryForm" aria-label="Uren toevoegen">
+      <div class="formrow">
+        <select id="contract" required aria-label="Kind / contract" title="Kind / contract"></select>
+        <input type="time" id="start" required aria-label="Van" title="Van">
+        <input type="time" id="end" required aria-label="Tot" title="Tot">
+        <input type="text" id="note" placeholder="Opmerking" maxlength="200" aria-label="Opmerking (optioneel)" title="Opmerking (optioneel)">
+        <button class="btn" type="submit">Toevoegen</button>
       </div>
       <div class="warn" id="entryWarn"></div>
       <div class="warn" id="entryCap"></div>
       <div class="err" id="entryErr"></div>
-      <button class="btn" type="submit">Toevoegen</button>
     </form>
   </section>
 
@@ -267,6 +281,12 @@
     <div class="card">
       <h2 id="monthTitle"></h2>
       <div id="summary"></div>
+    </div>
+    <div class="card noprint" id="takeCard">
+      <h2>Geplande uren overnemen</h2>
+      <p class="hint">Vult voor een kind de dagen van deze maand tot en met vandaag in volgens de vaste tijden van het contract, voor dagen waarvoor nog niets is ingevuld. Vakantiedagen (van het kind of de gastouder) en dagen vóór de begindatum worden overgeslagen. Daarna kun je registraties nog aanpassen met ✎ (bij Uren invullen).</p>
+      <div id="takeList"></div>
+      <div class="ok" id="takeOk"></div><div class="err" id="takeErr"></div>
     </div>
     <div class="card">
       <h2>Alle registraties</h2>
@@ -598,6 +618,8 @@
   const findContract = (id) => contracts().find((x) => x.contract.id === id);
   // Een contract heeft geen naam: de periode (en het nummer, als het er is) herkent het.
   const contractPeriod = (k) => (k.start && k.end ? `${nlDate(k.start)} t/m ${nlDate(k.end)}` : k.name || 'contract');
+  // Kort: alleen de naam van het kind, met de periode erbij als het kind meerdere contracten heeft.
+  const shortLabel = (x) => (x ? x.child.name + (x.child.contracts.length > 1 ? ` – ${contractPeriod(x.contract)}` : '') : '(verwijderd contract)');
   const label = (x) => x ? `${x.child.name} – ${contractPeriod(x.contract)}${x.contract.number ? ` (${x.contract.number})` : ''}` : '(verwijderd contract)';
   // Tarief voor een registratie: eigen contracttarief, anders het algemene tarief op die datum (null = onbekend).
   const generalRate = (date) => { const r = state.settings.rates.find((x) => x.from <= date && (!x.to || date <= x.to)); return r ? r.rate : null; };
@@ -769,12 +791,12 @@
     // Op naam van het kind (alfabetisch), daarna op begintijd; een nieuwe registratie komt dus op de juiste plek te staan.
     const childName = (e) => { const x = findContract(e.contractId); return x ? x.child.name : '\uffff'; };
     const list = state.entries.filter((e) => e.date === day).sort((a, b) => childName(a).localeCompare(childName(b), 'nl') || a.start.localeCompare(b.start));
-    $('dayEntries').innerHTML = list.length ? list.map((e) => entryRow(e)).join('') : '<div class="empty">Nog geen uren voor deze dag.</div>';
+    $('dayEntries').innerHTML = list.length ? list.map((e) => (e.id === editingId ? editRow(e) : entryRow(e))).join('') : '<div class="empty">Nog geen uren voor deze dag.</div>';
     $('dayTotal').textContent = fmt(list.reduce((s, e) => s + entryMin(e), 0));
 
     const sel = $('contract'), prev = sel.value;
     sel.innerHTML = contracts().length
-      ? contracts().map((x) => `<option value="${x.contract.id}">${esc(label(x))}</option>`).join('')
+      ? contracts().map((x) => `<option value="${x.contract.id}">${esc(shortLabel(x))}</option>`).join('')
       : `<option value="">${can('children:write') ? 'Voeg eerst een kind + contract toe (tab Kinderen)' : 'Er is nog geen kind of contract. Vraag een beheerder dit toe te voegen.'}</option>`;
     if (prefill === true) contractTouched = false;
     const pick = contractTouched ? null : defaultContract(day);
@@ -783,13 +805,23 @@
     updateEntryHints(prefill === true || (!!pick && pick !== prev));
   }
 
+  // Eén compacte regel per registratie. Bij een kind met meerdere contracten staat de periode erbij.
   function entryRow(e, withDate) {
-    const x = findContract(e.contractId);
-    return `<div class="entry"><div><div class="who">${withDate ? esc(e.date.split('-').reverse().join('-')) + ' · ' : ''}${esc(label(x))}</div>
-      <div class="meta">${e.start}–${e.end}${e.note ? ' · ' + esc(e.note) : ''}</div>${x && contractWarning(x.contract, e.date) ? '<div class="flag">⚠ buiten de contractperiode</div>' : ''}${vacationOf(e.date) ? '<div class="flag">⚠ vakantie gastouder</div>' : ''}</div>
-      <div><span class="hours">${fmt(entryMin(e))}</span> <button class="link noprint" data-del="${e.id}" title="Verwijderen">✕</button></div></div>`;
+    const x = findContract(e.contractId), multi = x && x.child.contracts.length > 1;
+    const name = x ? x.child.name + (multi ? ` · ${contractPeriod(x.contract)}` : '') : '(verwijderd contract)';
+    const flags = (x && contractWarning(x.contract, e.date) ? '<span class="flag">⚠ buiten contract</span>' : '') + (vacationOf(e.date) ? '<span class="flag">⚠ vakantie gastouder</span>' : '');
+    return `<div class="entry c"><div class="main"><span class="who">${withDate ? esc(nlDate(e.date)) + ' · ' : ''}${esc(name)}</span><span class="meta">${e.start}–${e.end}</span>${e.note ? `<span class="meta note" title="${esc(e.note)}">${esc(e.note)}</span>` : ''}${flags}</div>
+      <div class="act"><span class="hours">${fmt(entryMin(e))}</span><button class="link neutral noprint" data-edit="${e.id}" title="Bewerken" aria-label="Bewerken">✎</button><button class="link noprint" data-del="${e.id}" title="Verwijderen" aria-label="Verwijderen">✕</button></div></div>`;
   }
-
+  // Bewerken: de regel wordt een formulier (kind/contract, tijden, opmerking). De datum blijft staan.
+  let editingId = null;
+  function editRow(e) {
+    const opts = contracts().map((x) => `<option value="${x.contract.id}"${x.contract.id === e.contractId ? ' selected' : ''}>${esc(shortLabel(x))}</option>`).join('');
+    return `<div class="entry edit" data-editrow="${e.id}"><select class="ed-contract" aria-label="Kind / contract">${opts}</select>
+      <input type="time" class="ed-start" value="${e.start}" aria-label="Van"><input type="time" class="ed-end" value="${e.end}" aria-label="Tot">
+      <input type="text" class="ed-note" value="${esc(e.note || '')}" maxlength="200" placeholder="Opmerking" aria-label="Opmerking">
+      <div class="btns"><button class="btn small" data-save="${e.id}">Opslaan</button><button class="link neutral" data-cancel="1">Annuleren</button></div></div>`;
+  }
   $('entryForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const e = { date: $('day').value, contractId: $('contract').value, start: $('start').value,
@@ -809,13 +841,85 @@
   });
 
   document.addEventListener('click', async (ev) => {
-    const id = ev.target.dataset && ev.target.dataset.del;
-    if (id && confirm('Deze registratie verwijderen?')) {
-      if (await guard(() => api('DELETE', 'entries/' + id).then(() => true))) {
-        state.entries = state.entries.filter((e) => e.id !== id);
+    const d = (ev.target && ev.target.dataset) || {};
+    if (d.del && confirm('Deze registratie verwijderen?')) {
+      if (await guard(() => api('DELETE', 'entries/' + d.del).then(() => true))) {
+        state.entries = state.entries.filter((e) => e.id !== d.del);
+        if (editingId === d.del) editingId = null;
         render();
       }
     }
+    if (d.edit) {
+      const e = state.entries.find((x) => x.id === d.edit);
+      if (!e) return;
+      editingId = e.id;
+      $('day').value = e.date;
+      if ($('tab-uren').hidden) document.querySelector('nav [data-tab=uren]').click(); else renderDay();
+    }
+    if (d.cancel) { editingId = null; renderDay(); }
+    if (d.save) await saveEdit(d.save);
+  });
+  document.addEventListener('keydown', (ev) => {
+    const row = ev.target.closest && ev.target.closest('[data-editrow]');
+    if (!row) return;
+    if (ev.key === 'Enter') { ev.preventDefault(); saveEdit(row.dataset.editrow); }
+    if (ev.key === 'Escape') { editingId = null; renderDay(); }
+  });
+  async function saveEdit(id) {
+    const row = document.querySelector(`[data-editrow="${id}"]`), old = state.entries.find((e) => e.id === id);
+    if (!row || !old) return;
+    const e = { date: old.date, contractId: row.querySelector('.ed-contract').value, start: row.querySelector('.ed-start').value,
+      end: row.querySelector('.ed-end').value, note: row.querySelector('.ed-note').value.trim() };
+    if (!e.start || !e.end || entryMin(e) <= 0) return toast('Eindtijd moet na de begintijd liggen.');
+    const saved = await guard(() => api('PUT', 'entries/' + id, e));
+    if (!saved) return;
+    state.entries = state.entries.filter((x) => x.id !== id).concat(saved);
+    editingId = null;
+    render();
+  }
+
+  // --- geplande uren overnemen (Overzicht) ---
+  // Dagen van de maand tot en met vandaag waarvoor het kind nog niets heeft ingevuld, volgens de vaste tijden van een lopend contract.
+  function takeoverFor(child, m) {
+    const [y, mo] = m.split('-').map(Number), today = iso(new Date()), out = [];
+    for (let i = 1; i <= new Date(y, mo, 0).getDate(); i++) {
+      const date = `${m}-${pad(i)}`;
+      if (date > today || beforeStart(date) || vacationOf(date)) continue;
+      if ((child.holidays || []).some((h) => h.from <= date && date <= h.to)) continue;
+      if (state.entries.some((e) => e.date === date && child.contracts.some((k) => k.id === e.contractId))) continue;
+      const k = child.contracts.find((c) => c.start && c.end && c.start <= date && date <= c.end && !(Number(c.monthlyHours) > 0) && scheduleFor(c, date));
+      if (!k) continue;
+      const sc = scheduleFor(k, date);
+      out.push({ date, contractId: k.id, start: sc.from, end: sc.to, note: '' });
+    }
+    return out;
+  }
+  function renderTake() {
+    const m = $('month').value;
+    $('takeCard').hidden = !can('entries:write');
+    if (!m) return;
+    const rows = state.children.map((c) => ({ c, list: takeoverFor(c, m) })).filter((r) => r.list.length);
+    $('takeList').innerHTML = rows.length ? rows.map(({ c, list }) => {
+      const days = list.map((x) => Number(x.date.slice(8))).join(', ');
+      return `<div class="entry c"><div class="main"><span class="who">${esc(c.name)}</span><span class="meta">${list.length} dag${list.length === 1 ? '' : 'en'} · ${fmt(list.reduce((t, x) => t + entryMin(x), 0))} uur</span><span class="meta note" title="dag ${days}">dag ${days}</span></div>
+        <div class="act"><button class="btn small" data-take="${c.id}">Overnemen</button></div></div>`;
+    }).join('') : '<div class="empty">Er zijn geen geplande dagen om over te nemen: alles tot en met vandaag is al ingevuld, of er zijn geen vaste tijden.</div>';
+  }
+  $('takeList').addEventListener('click', async (ev) => {
+    const id = ev.target.dataset && ev.target.dataset.take;
+    if (!id) return;
+    const child = state.children.find((c) => c.id === id), m = $('month').value, list = child ? takeoverFor(child, m) : [];
+    $('takeOk').textContent = ''; $('takeErr').textContent = '';
+    if (!list.length) return;
+    const hours = fmt(list.reduce((t, x) => t + entryMin(x), 0));
+    if (!confirm(`Voor ${child.name} ${list.length} dag${list.length === 1 ? '' : 'en'} (${hours} uur) invullen volgens de vaste tijden?`)) return;
+    ev.target.disabled = true;
+    try {
+      const res = await api('POST', 'entries-batch', { entries: list });
+      state.entries.push(...res.entries);
+      $('takeOk').textContent = `${res.entries.length} registratie${res.entries.length === 1 ? '' : 's'} toegevoegd voor ${child.name}.`;
+      render();
+    } catch (e) { if (!e.noAccess) $('takeErr').textContent = e.message; ev.target.disabled = false; }
   });
 
   // --- overzicht ---
@@ -880,6 +984,7 @@
       : '<div class="empty">Geen uren in deze maand.</div>';
     $('monthEntries').innerHTML = (list.length ? list.map((e) => entryRow(e, true)).join('') : '<div class="empty">Geen registraties.</div>')
       + (holidayEntries.length ? `<h3 class="subhead">Doorbetaalde vakantiedagen</h3>${holidayEntries.map(holidayRow).join('')}` : '');
+    renderTake();
   }
 
   $('print').onclick = () => window.print();

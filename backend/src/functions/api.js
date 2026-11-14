@@ -54,6 +54,8 @@ route('updateChild', ['PUT'], 'children/{id}', handlers.updateChild);
 route('deleteChild', ['DELETE'], 'children/{id}', handlers.deleteChild);
 route('listEntries', ['GET'], 'entries', handlers.listEntries);
 route('createEntry', ['POST'], 'entries', handlers.createEntry);
+route('createEntries', ['POST'], 'entries-batch', handlers.createEntries);
+route('updateEntry', ['PUT'], 'entries/{id}', handlers.updateEntry);
 route('deleteEntry', ['DELETE'], 'entries/{id}', handlers.deleteEntry);
 route('getSettings', ['GET'], 'settings', handlers.getSettings);
 route('putRates', ['PUT'], 'settings/rates', handlers.putRates);
