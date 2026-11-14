@@ -20,8 +20,8 @@
   h1 a { font-size: .8rem; font-weight: 400; color: var(--muted); }
   #toast { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 728px; margin: 0 auto; padding: 12px 14px;
     background: var(--danger); color: #fff; border-radius: 8px; z-index: 10; }
-  nav { display: flex; gap: 4px; }
-  nav button { flex: 1; padding: 10px 6px; border: 0; background: transparent; color: var(--muted);
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }   /* op een smal scherm op twee regels, zonder horizontaal scrollen */
+  nav button { flex: 1 1 auto; padding: 10px 6px; border: 0; background: transparent; color: var(--muted);
     font: inherit; font-weight: 600; border-bottom: 3px solid transparent; cursor: pointer; }
   nav button.active { color: var(--accent); border-color: var(--accent); }
   main { max-width: 760px; margin: 0 auto; padding: 16px; }
@@ -102,10 +102,17 @@
   .av-full { background: color-mix(in srgb, #e03131 38%, transparent); } .av-closed { background: color-mix(in srgb, #868e96 22%, transparent); color: var(--muted); font-weight: 400; }
   .month .day .badge { display: block; text-align: center; margin-top: 6px; font-size: .85rem; }
   .month .day small { display: block; color: var(--muted); font-size: .68rem; text-align: center; margin-top: 2px; }
-  table.heat { border-collapse: separate; border-spacing: 2px; width: auto; }
-  table.heat th, table.heat td { padding: 0; border: 0; text-align: center; font-size: .7rem; }
-  table.heat td { min-width: 22px; height: 24px; border-radius: 4px; cursor: pointer; font-variant-numeric: tabular-nums; }
-  table.heat th:first-child { text-align: left; padding-right: 8px; font-size: .8rem; color: var(--ink); }
+  /* Past altijd op de breedte: 31 gelijke kolommen, geen horizontaal scrollen (ook niet op een telefoon). */
+  table.heat { border-collapse: separate; border-spacing: 2px; width: 100%; table-layout: fixed; }
+  table.heat th, table.heat td { padding: 0; border: 0; text-align: center; font-size: .68rem; overflow: hidden; }
+  table.heat td { height: 24px; border-radius: 4px; cursor: pointer; font-variant-numeric: tabular-nums; }
+  table.heat th:first-child { width: 2.6rem; text-align: left; padding-right: 4px; font-size: .8rem; color: var(--ink); }
+  @media (max-width: 600px) {
+    table.heat { border-spacing: 1px; }
+    table.heat th, table.heat td { font-size: .52rem; }
+    table.heat td { height: 20px; border-radius: 2px; }
+    table.heat th:first-child { width: 1.9rem; font-size: .62rem; padding-right: 2px; }
+  }
   table.heat td.void { background: transparent; cursor: default; }
   th.agehead { border-bottom: 3px solid var(--c); }
   .warnico { cursor: help; font-size: .85em; }
