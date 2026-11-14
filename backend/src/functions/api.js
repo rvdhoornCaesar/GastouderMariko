@@ -58,6 +58,7 @@ route('deleteEntry', ['DELETE'], 'entries/{id}', handlers.deleteEntry);
 route('getSettings', ['GET'], 'settings', handlers.getSettings);
 route('putRates', ['PUT'], 'settings/rates', handlers.putRates);
 route('putOwnChildren', ['PUT'], 'settings/own-children', handlers.putOwnChildren);
+route('putVacations', ['PUT'], 'settings/vacations', handlers.putVacations);
 route('putOpening', ['PUT'], 'settings/opening', handlers.putOpening);
 route('putUsers', ['PUT'], 'settings/users', handlers.putUsers);
 

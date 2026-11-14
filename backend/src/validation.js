@@ -170,6 +170,16 @@ function parseOpening(b) {
 }
 
 // Eigen kinderen van de gastouder (voornaam en geboortedatum); ze tellen mee voor het maximum aantal kinderen.
+// Vakantie van de gastouder zelf: periodes (van, t/m) waarin er geen opvang is, met een optionele omschrijving.
+function parseVacations(list, newId) {
+  if (!Array.isArray(list) || list.length > 100) throw bad('Ongeldige lijst met vakanties.');
+  return list.map((h) => {
+    const from = requiredDate(h && h.from, 'Vakantie: ongeldige begindatum.');
+    const to = requiredDate(h.to, 'Vakantie: ongeldige t/m datum.');
+    if (to < from) throw bad('Vakantie: de t/m datum ligt voor de begindatum.');
+    return { id: h.id && ID.test(h.id) ? h.id : newId(), from, to, note: text(h.note, 100) };
+  }).sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
+}
 function parseOwnChildren(list, newId) {
   if (!Array.isArray(list) || list.length > 20) throw bad('Ongeldige lijst met eigen kinderen.');
   const today = new Date().toISOString().slice(0, 10);
@@ -196,4 +206,4 @@ function parseRole(v) {
   return r;
 }
 
-module.exports = { parseRole, parseAccountEmail, parseOwnChildren, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
+module.exports = { parseRole, parseAccountEmail, parseOwnChildren, parseVacations, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
