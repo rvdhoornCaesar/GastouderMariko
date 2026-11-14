@@ -648,7 +648,19 @@
   $('prevOpen').onclick = () => jumpOpen(-1);
   $('nextOpen').onclick = () => jumpOpen(1);
   $('day').onchange = () => renderDay(true);
-  $('contract').addEventListener('change', () => updateEntryHints(true));
+  // Standaard staat het eerste kind geselecteerd waarvoor die dag nog geen uren zijn ingevuld (met een contract dat op die dag loopt).
+  // Kies je zelf een kind, dan blijft dat staan tot je van dag wisselt of uren toevoegt.
+  let contractTouched = false;
+  function defaultContract(day) {
+    const done = new Set(state.entries.filter((e) => e.date === day).map((e) => findContract(e.contractId)).filter(Boolean).map((x) => x.child.id));
+    const open = contracts().filter((x) => !done.has(x.child.id));
+    const active = (x) => (x.contract.start && x.contract.end ? x.contract.start <= day && day <= x.contract.end : true);
+    const pick = open.find(active);
+    if (pick) return pick.contract.id;
+    // Iedereen met een lopend contract heeft al uren: de keuze laten staan. Heeft niemand een lopend contract, dan het eerste kind.
+    return !contracts().some(active) && open[0] ? open[0].contract.id : null;
+  }
+  $('contract').addEventListener('change', () => { contractTouched = true; updateEntryHints(true); });
 
   let daySeq = 0;
   // Waarschuwing bij een datum buiten het contract; bij wisselen van dag of contract ook de vaste tijden invullen.
@@ -687,9 +699,11 @@
     sel.innerHTML = contracts().length
       ? contracts().map((x) => `<option value="${x.contract.id}">${esc(label(x))}</option>`).join('')
       : `<option value="">${can('children:write') ? 'Voeg eerst een kind + contract toe (tab Kinderen)' : 'Er is nog geen kind of contract. Vraag een beheerder dit toe te voegen.'}</option>`;
-    if (prev) sel.value = prev;
+    if (prefill === true) contractTouched = false;
+    const pick = contractTouched ? null : defaultContract(day);
+    if (pick) sel.value = pick; else if (prev) sel.value = prev;
     $('dayCap').innerHTML = capacityIssues(day).map(capacityLine).join('');
-    updateEntryHints(prefill === true);
+    updateEntryHints(prefill === true || (!!pick && pick !== prev));
   }
 
   function entryRow(e, withDate) {
@@ -713,6 +727,7 @@
     if (!saved) return;
     state.entries.push(saved);
     $('note').value = '';
+    contractTouched = false;
     renderDay();
   });
 
