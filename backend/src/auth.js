@@ -3,8 +3,11 @@ const { hashToken } = require('./passwords');
 
 // E-mailadressen uit de app-setting ALLOWED_USERS: de vaste gebruikers (beheerders).
 // Zij kunnen nooit buitengesloten worden; extra gebruikers worden in de app beheerd (zie repo.getUsers).
+// Onzichtbare tekens (spatie met nulbreedte, harde spatie, BOM) komen mee bij plakken uit mail of Teams; trim() haalt ze deels niet weg.
+const clean = (v) => String(v).replace(/[\u200B-\u200D\u2060\uFEFF\u00A0]/g, '').trim().toLowerCase();
+
 function fixedUsers(env = process.env) {
-  return (env.ALLOWED_USERS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+  return (env.ALLOWED_USERS || '').split(',').map((s) => clean(s)).filter(Boolean);
 }
 
 const COOKIE = 'gu_session';
@@ -15,6 +18,13 @@ const SESSION_DAYS = 7;
 // - Lokaal account, onder /api/...: een sessiecookie. Daar negeren we x-ms-client-principal, want die route is openbaar
 //   en de header kan dan door iedereen worden meegestuurd.
 
+// Claim-types waarin een e-mailadres kan staan. Alleen deze worden gebruikt (de header zet Static Web Apps zelf op /api/ms/*).
+const EMAIL_CLAIMS = ['email', 'emails', 'preferred_username', 'upn', 'unique_name',
+  'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress', 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/upn'];
+const isMasked = (v) => String(v).includes('*');
+
+// Het adres staat normaal in userDetails. Soms komt daar een afgeschermde versie binnen (bijvoorbeeld 'dot*****'); dan gebruiken we
+// een volledig e-mailadres uit de claims. 'diag' beschrijft alleen de vorm van de gegevens (geen adressen) voor de 403-log.
 function parsePrincipal(headers) {
   const raw = headers.get('x-ms-client-principal');
   if (!raw) throw new HttpError(401, 'Niet ingelogd.');
@@ -25,17 +35,27 @@ function parsePrincipal(headers) {
     throw new HttpError(401, 'Ongeldige inloggegevens.');
   }
   if (!principal || !principal.userId || !principal.userDetails) throw new HttpError(401, 'Ongeldige inloggegevens.');
-  return { name: String(principal.userDetails), email: String(principal.userDetails).toLowerCase() };
+  const claims = Array.isArray(principal.claims) ? principal.claims.filter((c) => c && typeof c.typ === 'string' && typeof c.val === 'string') : [];
+  const details = String(principal.userDetails);
+  let chosen = details;
+  if (isMasked(details)) {
+    const alt = claims.filter((c) => EMAIL_CLAIMS.includes(c.typ)).map((c) => c.val).find((v) => v.includes('@') && !isMasked(v));
+    if (alt) chosen = alt;
+  }
+  const diag = { provider: principal.identityProvider || null, detailsMasked: isMasked(details), usedClaim: chosen !== details,
+    claimTypes: claims.map((c) => c.typ).slice(0, 20), emailClaimsMasked: claims.filter((c) => EMAIL_CLAIMS.includes(c.typ)).map((c) => isMasked(c.val)) };
+  return { name: chosen, email: chosen.toLowerCase(), diag };
 }
 
 // Elk Microsoft-account kan inloggen; alleen vaste en toegevoegde gebruikers mogen erbij.
 async function authorizeMicrosoft(headers, repo, env = process.env) {
   const user = parsePrincipal(headers);
   const fixed = fixedUsers(env).includes(user.email);
-  if (!fixed && !(await repo.getUsers()).includes(user.email)) throw new HttpError(403, 'Geen toegang.', { user: user.email });
+  if (!fixed && !(await repo.getUsers()).includes(user.email)) throw new HttpError(403, 'Geen toegang.', { user: user.email, diag: user.diag });
   // instanceId: nu één instantie, maar al wel vastgelegd.
   // Vaste gebruikers (ALLOWED_USERS) zijn admin; in de app toegevoegde Microsoft-gebruikers zijn beheerder.
-  return { ...user, kind: 'microsoft', fixed, role: fixed ? 'admin' : 'beheerder', instanceId: 'main', mustChange: false };
+  const { diag, ...rest } = user;
+  return { ...rest, kind: 'microsoft', fixed, role: fixed ? 'admin' : 'beheerder', instanceId: 'main', mustChange: false };
 }
 
 function sessionToken(headers) {
