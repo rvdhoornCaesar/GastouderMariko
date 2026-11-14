@@ -197,9 +197,11 @@
   <!-- UREN -->
   <section id="tab-uren">
     <div class="datebar">
-      <button class="btn secondary" id="prevDay" aria-label="Vorige dag">‹</button>
+      <button class="btn secondary" id="prevOpen" aria-label="Vorige openingsdag" title="Vorige openingsdag">«</button>
+      <button class="btn secondary" id="prevDay" aria-label="Vorige dag" title="Vorige dag">‹</button>
       <input type="date" id="day">
-      <button class="btn secondary" id="nextDay" aria-label="Volgende dag">›</button>
+      <button class="btn secondary" id="nextDay" aria-label="Volgende dag" title="Volgende dag">›</button>
+      <button class="btn secondary" id="nextOpen" aria-label="Volgende openingsdag" title="Volgende openingsdag">»</button>
     </div>
 
     <div class="card">
@@ -633,6 +635,18 @@
   const shiftDay = (n) => { const d = new Date($('day').value + 'T12:00'); d.setDate(d.getDate() + n); $('day').value = iso(d); renderDay(true); };
   $('prevDay').onclick = () => shiftDay(-1);
   $('nextDay').onclick = () => shiftDay(1);
+  // Naar de vorige of volgende openingsdag: een dag waarop de gastouder volgens de openingstijden open is en geen vakantie heeft.
+  const isOpenDay = (date) => { const o = (state.settings.opening.days || [])[(new Date(date + 'T12:00').getDay() + 6) % 7]; return !!(o && o.open) && !vacationOf(date); };
+  function jumpOpen(dir) {
+    const d = new Date($('day').value + 'T12:00');
+    for (let i = 0; i < 800; i++) {
+      d.setDate(d.getDate() + dir);
+      if (isOpenDay(iso(d))) { $('day').value = iso(d); renderDay(true); return; }
+    }
+    toast('Geen openingsdag gevonden. Controleer de openingstijden en de vakantie bij Instellingen.');
+  }
+  $('prevOpen').onclick = () => jumpOpen(-1);
+  $('nextOpen').onclick = () => jumpOpen(1);
   $('day').onchange = () => renderDay(true);
   $('contract').addEventListener('change', () => updateEntryHints(true));
 
