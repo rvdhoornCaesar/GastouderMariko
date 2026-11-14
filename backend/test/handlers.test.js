@@ -60,6 +60,35 @@ test('uren: toevoegen, per maand ophalen, verwijderen', async () => {
   assert.equal((await call(h.listEntries, { query: { month: '2026-10' } })).jsonBody.length, 0);
 });
 
+test('uren: bewerken (ook van datum) en meerdere tegelijk toevoegen', async () => {
+  const [child] = (await call(h.listChildren)).jsonBody;
+  const contractId = child.contracts[0].id;
+  const base = { contractId, start: '08:00', end: '12:00', note: '' };
+  const batch = (await call(h.createEntries, { body: { entries: [{ ...base, date: '2027-05-03' }, { ...base, date: '2027-05-04', start: '09:00' }] } })).jsonBody.entries;
+  assert.equal(batch.length, 2);
+  assert.equal((await call(h.listEntries, { query: { month: '2027-05' } })).jsonBody.length, 2);
+  // bewerken: tijd en opmerking, zelfde id
+  const upd = (await call(h.updateEntry, { params: { id: batch[0].id }, body: { ...base, date: '2027-05-03', end: '13:30', note: 'langer' } })).jsonBody;
+  assert.equal(upd.id, batch[0].id);
+  assert.equal(upd.end, '13:30');
+  assert.equal(upd.note, 'langer');
+  // bewerken met andere datum: nieuw id, oude weg
+  const moved = (await call(h.updateEntry, { params: { id: batch[1].id }, body: { ...base, date: '2027-06-01' } })).jsonBody;
+  assert.notEqual(moved.id, batch[1].id);
+  assert.ok(moved.id.startsWith('2027-06-01_'));
+  const mei = (await call(h.listEntries, { query: { month: '2027-05' } })).jsonBody;
+  assert.deepEqual(mei.map((e) => e.id), [batch[0].id]);
+  assert.equal((await call(h.listEntries, { query: { month: '2027-06' } })).jsonBody.length, 1);
+  // fouten
+  await assert.rejects(call(h.updateEntry, { params: { id: '2027-05-09_zzzzzz' }, body: { ...base, date: '2027-05-09' } }), { status: 404 });
+  await assert.rejects(call(h.updateEntry, { params: { id: batch[0].id }, body: { ...base, date: '2027-05-03', end: '07:00' } }), { status: 400 });
+  await assert.rejects(call(h.updateEntry, { params: { id: batch[0].id }, body: { ...base, date: '2027-05-03', contractId: 'bestaatniet' } }), { status: 400 });
+  await assert.rejects(call(h.createEntries, { body: { entries: [] } }), { status: 400 });
+  await assert.rejects(call(h.createEntries, { body: { entries: [{ ...base, date: '2027-05-05' }, { ...base, date: 'kapot' }] } }), { status: 400 });
+  assert.equal((await call(h.listEntries, { query: { month: '2027-05' } })).jsonBody.length, 1);   // niets half opgeslagen
+  for (const e of [batch[0], moved]) await call(h.deleteEntry, { params: { id: e.id } });
+});
+
 test('validatie', async () => {
   const [child] = (await call(h.listChildren)).jsonBody;
   const ok = { date: '2026-10-21', contractId: child.contracts[0].id, start: '08:00', end: '17:00' };

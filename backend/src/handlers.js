@@ -68,6 +68,44 @@ async function createEntry({ user, repo, body }) {
   return { status: 201, jsonBody: entry };
 }
 
+// Meerdere registraties tegelijk (bijvoorbeeld geplande uren van een maand overnemen). Eerst alles controleren, dan opslaan.
+async function createEntries({ user, repo, body }) {
+  perm.require(user, 'entries:write');
+  const list = body && body.entries;
+  if (!Array.isArray(list) || !list.length || list.length > 100) throw new HttpError(400, 'Geef 1 tot 100 registraties op.');
+  const items = list.map((e) => v.parseEntry(e));
+  const children = await repo.listChildren();
+  const contractIds = new Set(children.flatMap((c) => c.contracts.map((k) => k.id)));
+  const startDate = await repo.getStartDate();
+  for (const e of items) {
+    if (!contractIds.has(e.contractId)) throw new HttpError(400, 'Dat contract bestaat niet.');
+    if (startDate && e.date < startDate) throw new HttpError(400, 'Vóór de begindatum van de gastouder kun je geen uren invullen.');
+  }
+  const saved = [];
+  for (const data of items) {
+    const entry = { id: `${data.date}_${newId()}`, ...data };
+    await repo.saveEntry(entry);
+    saved.push(entry);
+  }
+  return { status: 201, jsonBody: { entries: saved } };
+}
+
+// Registratie bewerken. Verandert de datum, dan krijgt de registratie een nieuw id (het id begint met de datum).
+async function updateEntry({ user, repo, params, body }) {
+  perm.require(user, 'entries:write');
+  const id = v.parseEntryId(params.id);
+  if (!(await repo.getEntry(id))) throw new HttpError(404, 'Niet gevonden.');
+  const data = v.parseEntry(body);
+  const children = await repo.listChildren();
+  if (!children.some((c) => c.contracts.some((k) => k.id === data.contractId))) throw new HttpError(400, 'Dat contract bestaat niet.');
+  const startDate = await repo.getStartDate();
+  if (startDate && data.date < startDate) throw new HttpError(400, 'Vóór de begindatum van de gastouder kun je geen uren invullen.');
+  const entry = { id: data.date === id.slice(0, 10) ? id : `${data.date}_${newId()}`, ...data };
+  await repo.saveEntry(entry);
+  if (entry.id !== id) await repo.deleteEntry(id);
+  return { status: 200, jsonBody: entry };
+}
+
 async function deleteEntry({ user, repo, params }) {
   perm.require(user, 'entries:write');
   await repo.deleteEntry(v.parseEntryId(params.id));
@@ -353,4 +391,4 @@ async function deleteAccount({ user, repo, params }) {
   return { status: 204 };
 }
 
-module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers };
+module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers };
