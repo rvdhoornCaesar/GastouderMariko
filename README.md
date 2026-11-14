@@ -141,7 +141,7 @@ Het tabblad **Kalender** toont de uren per kind in drie weergaven, met `‹ ›`
 
 - **Week:** per dag welke kinderen er zijn, met begin- en eindtijd en het aantal uren, plus een weektotaal per kind.
 - **Maand:** een kalender met een week per regel, met per dag de kinderen, tijden en uren en een weektotaal aan het eind van de regel. Tik op een dag om die week te openen. Onder de kalender staat het maandtotaal per kind.
-- **Jaar:** een regel per maand en een kolom per kind, met totalen (standaard het huidige jaar).
+- **Jaar:** een regel per maand en een kolom per kind, met totalen (standaard het huidige jaar), alleen voor kinderen die in dat jaar uren hebben (geschreven, gepland of vast). Het maandtotaal en het weektotaal tonen ook alleen kinderen met uren.
 
 **Geschreven of gepland:** *geschreven* uren zijn ingevuld (volle kleur, label *geschreven*). *Gepland* uren (stippellijn, cursief, label *gepland*) komen uit de vaste tijden van het contract, voor dagen vanaf vandaag waarvoor nog niets is ingevuld, en uit doorbetaalde vakanties. Contracten met een vast aantal uren per maand hebben geen tijden; die uren staan als *vast* in het maand- en jaaroverzicht. Staat er voor een contract op een dag wel iets ingevuld, dan telt alleen dat.
 

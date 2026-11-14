@@ -1084,7 +1084,13 @@
         <tr><th></th>${Array.from({ length: 31 }, (_, i) => `<th>${i + 1}</th>`).join('')}</tr>${rowsHtml}</table></div>
         <p class="hint" style="margin:10px 0 0">Elk vakje is een dag met het aantal vrije plekken; tik erop om de week te openen. Grijs = gesloten.</p></div>`;
     } else {
-      const kids = [...state.children].sort((a, b) => firstName(a).localeCompare(firstName(b)));
+      // Alleen kinderen die in dit jaar uren hebben (geschreven, gepland of vast); de rest krijgt geen kolom.
+      const hasHours = new Set();
+      months.forEach((m, i) => {
+        sumChildren([].concat(...[...plans[i].days.values()].map(groupDay))).forEach((r) => { if (r.written + r.planned > 0) hasHours.add(r.child.id); });
+        plans[i].vast.forEach((min, id) => { if (min > 0) hasHours.add(id); });
+      });
+      const kids = state.children.filter((c) => hasHours.has(c.id)).sort((a, b) => firstName(a).localeCompare(firstName(b)));
       const nowM = today.slice(0, 7);
       const colTot = new Map(kids.map((c) => [c.id, 0]));
       const rowsHtml = months.map((m, i) => {
@@ -1104,7 +1110,7 @@
         <tr><th>Maand</th>${kids.map((c) => `<th class="num${cal.age ? ' agehead' : ''}"${cStyle(c, today)}>${esc(firstName(c))}${cal.age && c.birthDate ? `<small class="sub" style="display:block">${ageShort(c, today)}</small>` : ''}</th>`).join('')}<th class="num">Totaal</th></tr>${rowsHtml}
         <tr><th>Totaal ${d.getFullYear()}</th>${kids.map((c) => `<th class="num">${hrs(colTot.get(c.id))}</th>`).join('')}<th class="num">${hrs(grand)}</th></tr></table></div>
         <p class="hint" style="margin:10px 0 0">Geschreven = ingevuld; gepland = vaste tijden vanaf vandaag en doorbetaalde vakanties; vast = vaste uren per maand van het contract. Alleen geschreven uren staan zonder toelichting.${cal.age ? ' De leeftijd is van vandaag.' : ''}</p></div>`
-        : '<div class="card"><div class="empty">Nog geen kinderen.</div></div>';
+        : `<div class="card"><div class="empty">Geen uren in ${d.getFullYear()}.</div></div>`;
     }
   }
 
