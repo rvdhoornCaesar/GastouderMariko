@@ -6,8 +6,13 @@ const { hashToken } = require('./passwords');
 // Onzichtbare tekens (spatie met nulbreedte, harde spatie, BOM) komen mee bij plakken uit mail of Teams; trim() haalt ze deels niet weg.
 const clean = (v) => String(v).replace(/[\u200B-\u200D\u2060\uFEFF\u00A0]/g, '').trim().toLowerCase();
 
+// Vaste beheerders die in de code staan, naast ALLOWED_USERS. Zo blijven ze admin, ook als de omgevingsvariabele wordt overschreven.
+// Wijzigen kan alleen met een codewijziging en een deploy.
+const CODE_ADMINS = ['r.hoorn@caesar.nl'];
+
 function fixedUsers(env = process.env) {
-  return (env.ALLOWED_USERS || '').split(',').map((s) => clean(s)).filter(Boolean);
+  const fromEnv = (env.ALLOWED_USERS || '').split(',').map((s) => clean(s)).filter(Boolean);
+  return [...new Set([...CODE_ADMINS, ...fromEnv])];
 }
 
 const COOKIE = 'gu_session';
@@ -44,17 +49,40 @@ function parsePrincipal(headers) {
   }
   const diag = { provider: principal.identityProvider || null, detailsMasked: isMasked(details), usedClaim: chosen !== details,
     claimTypes: claims.map((c) => c.typ).slice(0, 20), emailClaimsMasked: claims.filter((c) => EMAIL_CLAIMS.includes(c.typ)).map((c) => isMasked(c.val)) };
-  return { name: chosen, email: chosen.toLowerCase(), diag };
+  return { name: chosen, email: chosen.toLowerCase(), userId: String(principal.userId), masked: isMasked(chosen), diag };
+}
+
+// Het platform geeft soms een afgeschermd adres door ('dot*****') zonder claims. Het userId van Static Web Apps blijft wel gelijk. Na
+// een geslaagde login met een volledig adres onthouden we daarom userId -> adres; komt het adres afgeschermd binnen, dan zoeken we het
+// daar op. Daarna geldt gewoon de controle op de lijsten, dus wie uit de lijst gaat, kan er ook zo niet meer in.
+const knownIdentities = new Map();   // per instantie, om niet bij elk verzoek de opslag te raadplegen
+const identityKey = (userId) => hashToken(userId);
+
+async function resolveMasked(user, repo) {
+  const key = identityKey(user.userId);
+  let email = knownIdentities.get(key);
+  if (!email && repo.getIdentity) email = await repo.getIdentity(key);
+  if (!email) return user;
+  knownIdentities.set(key, email);
+  return { ...user, email, name: email, masked: false, diag: { ...user.diag, usedStored: true } };
+}
+async function rememberIdentity(user, repo) {
+  const key = identityKey(user.userId);
+  if (user.masked || knownIdentities.get(key) === user.email) return;
+  knownIdentities.set(key, user.email);
+  if (repo.setIdentity) await repo.setIdentity(key, user.email);
 }
 
 // Elk Microsoft-account kan inloggen; alleen vaste en toegevoegde gebruikers mogen erbij.
 async function authorizeMicrosoft(headers, repo, env = process.env) {
-  const user = parsePrincipal(headers);
+  let user = parsePrincipal(headers);
+  if (user.masked) user = await resolveMasked(user, repo);
   const fixed = fixedUsers(env).includes(user.email);
   if (!fixed && !(await repo.getUsers()).includes(user.email)) throw new HttpError(403, 'Geen toegang.', { user: user.email, diag: user.diag });
+  await rememberIdentity(user, repo);
   // instanceId: nu één instantie, maar al wel vastgelegd.
   // Vaste gebruikers (ALLOWED_USERS) zijn admin; in de app toegevoegde Microsoft-gebruikers zijn beheerder.
-  const { diag, ...rest } = user;
+  const { diag, userId, masked, ...rest } = user;
   return { ...rest, kind: 'microsoft', fixed, role: fixed ? 'admin' : 'beheerder', instanceId: 'main', mustChange: false };
 }
 
@@ -92,4 +120,4 @@ const sessionCookie = (token, now = new Date()) => ({
 });
 const expiredCookie = () => ({ name: COOKIE, value: '', httpOnly: true, secure: true, sameSite: 'Strict', path: '/', maxAge: 0 });
 
-module.exports = { authorizeMicrosoft, authorizeSession, sessionToken, sessionCookie, expiredCookie, fixedUsers, SESSION_DAYS, COOKIE };
+module.exports = { authorizeMicrosoft, authorizeSession, sessionToken, sessionCookie, expiredCookie, fixedUsers, CODE_ADMINS, SESSION_DAYS, COOKIE };
