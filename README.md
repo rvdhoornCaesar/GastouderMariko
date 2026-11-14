@@ -155,6 +155,14 @@ Het tabblad **Kalender** toont de uren per kind in drie weergaven, met `‹ ›`
 
 **Waarschuwing te veel kinderen:** op een dag met te veel kinderen tegelijk (geschreven of gepland: meer dan 6, meer dan 5 jonger dan 4 jaar, meer dan 4 jonger dan 2 jaar of meer dan 2 jonger dan 1 jaar) staat een ⚠️ in alle weergaven en overzichten, met de reden bij het icoon. In de maand staat onder het totaal welke dagen het zijn; in het jaar staat het aantal dagen bij de maand (Kinderen) of een ⚠️ in het dagvakje (Beschikbaarheid).
 
+### Financieel
+Het tabblad **Financieel** (voor elke rol, net als de bedragen in het Overzicht) toont per jaar, met ‹ › en *Dit jaar* om te wisselen:
+
+1. **Opbrengst per kind per maand:** een regel per maand, een kolom per kind, met totalen per maand, per kind en per jaar. Het bedrag is uren × uurprijs, met de toeslag buiten de openingstijden, voor *geschreven* uren, *geplande* uren (vaste tijden vanaf vandaag en doorbetaalde vakanties) en *vaste* uren per maand. Waar meer dan alleen geschreven uren in zitten, staat de uitsplitsing eronder. Kinderen zonder uren in dat jaar staan er niet bij. Is er voor sommige uren geen tarief bekend, dan telt dat als € 0 en staat er een waarschuwing.
+2. **Grafiek met de opbrengst per maand**, met een schakelaar tussen *Kolommen* (per maand gestapeld: geschreven, vast, gepland) en *Lijn (cumulatief)*: maart is januari + februari + maart. In de lijn is het deel t/m de huidige maand doorgetrokken en het verwachte deel gestippeld. Beweeg over een maand (of kies hem met het toetsenbord) voor de bedragen; de tabel erboven bevat alle waarden. De keuze kolommen of lijn wordt in de browser onthouden.
+
+De begindatum en de vakantie van de gastouder gelden ook hier (er worden geen uren gepland op die dagen of ervoor).
+
 ### Past het?
 Het tabblad **Past het?** (voor elke rol; er wordt niets opgeslagen) test of een extra kind of een ander rooster past:
 
