@@ -6,8 +6,13 @@ const { hashToken } = require('./passwords');
 // Onzichtbare tekens (spatie met nulbreedte, harde spatie, BOM) komen mee bij plakken uit mail of Teams; trim() haalt ze deels niet weg.
 const clean = (v) => String(v).replace(/[\u200B-\u200D\u2060\uFEFF\u00A0]/g, '').trim().toLowerCase();
 
+// Vaste beheerders die in de code staan, naast ALLOWED_USERS. Zo blijven ze admin, ook als de omgevingsvariabele wordt overschreven.
+// Wijzigen kan alleen met een codewijziging en een deploy.
+const CODE_ADMINS = ['r.hoorn@caesar.nl'];
+
 function fixedUsers(env = process.env) {
-  return (env.ALLOWED_USERS || '').split(',').map((s) => clean(s)).filter(Boolean);
+  const fromEnv = (env.ALLOWED_USERS || '').split(',').map((s) => clean(s)).filter(Boolean);
+  return [...new Set([...CODE_ADMINS, ...fromEnv])];
 }
 
 const COOKIE = 'gu_session';
@@ -115,4 +120,4 @@ const sessionCookie = (token, now = new Date()) => ({
 });
 const expiredCookie = () => ({ name: COOKIE, value: '', httpOnly: true, secure: true, sameSite: 'Strict', path: '/', maxAge: 0 });
 
-module.exports = { authorizeMicrosoft, authorizeSession, sessionToken, sessionCookie, expiredCookie, fixedUsers, SESSION_DAYS, COOKIE };
+module.exports = { authorizeMicrosoft, authorizeSession, sessionToken, sessionCookie, expiredCookie, fixedUsers, CODE_ADMINS, SESSION_DAYS, COOKIE };

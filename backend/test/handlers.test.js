@@ -7,6 +7,7 @@ const path = require('node:path');
 const net = require('node:net');
 const { createRepo } = require('../src/repo');
 const h = require('../src/handlers');
+const { CODE_ADMINS } = require('../src/auth');
 
 // Draait tegen een echte Azurite (lokale Table Storage-emulator).
 let azurite, repo, dir;
@@ -100,7 +101,7 @@ test('algemene tarieven: opslaan, sorteren, open einddatum', async () => {
   assert.deepEqual(res.jsonBody.rates.map((r) => [r.from, r.to, r.rate]), [['2026-01-01', '2026-12-31', 8.5], ['2027-01-01', null, 9]]);
   const settings = (await call(h.getSettings)).jsonBody;
   assert.equal(settings.rates.length, 2);
-  assert.deepEqual(settings.fixedUsers, ['mariko@voorbeeld.nl']);
+  assert.deepEqual(settings.fixedUsers, [...CODE_ADMINS, 'mariko@voorbeeld.nl']);
   assert.equal(settings.me, 'mariko@voorbeeld.nl');
 });
 
@@ -439,7 +440,7 @@ test('gebruiker: uren en lezen mag, wijzigen van kinderen en instellingen niet',
 test('beheerder ziet de gebruikerslijsten en technische info', async () => {
   const u = asRole('beheerder');
   const s = (await h.getSettings({ user: u, repo, env })).jsonBody;
-  assert.deepEqual(s.fixedUsers, ['mariko@voorbeeld.nl']);
+  assert.deepEqual(s.fixedUsers, [...CODE_ADMINS, 'mariko@voorbeeld.nl']);
   assert.ok(s.runtime);
 });
 

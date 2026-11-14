@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { authorizeMicrosoft, authorizeSession, sessionToken, fixedUsers } = require('../src/auth');
+const { authorizeMicrosoft, authorizeSession, sessionToken, fixedUsers, CODE_ADMINS } = require('../src/auth');
 
 const headers = (principal, extra = {}) => ({ get: (n) => (n === 'x-ms-client-principal' && principal ? Buffer.from(JSON.stringify(principal)).toString('base64') : extra[n] ?? null) });
 const mariko = { userId: 'abc123', userDetails: 'Mariko@Voorbeeld.nl', identityProvider: 'aad' };
@@ -34,8 +34,8 @@ test('toegevoegde gebruiker uit de app is geen vaste gebruiker en alleen beheerd
 });
 
 test('fixedUsers leest lijst', () => {
-  assert.deepEqual(fixedUsers({ ALLOWED_USERS: ' A@x.nl,,b@x.nl ' }), ['a@x.nl', 'b@x.nl']);
-  assert.deepEqual(fixedUsers({}), []);
+  assert.deepEqual(fixedUsers({ ALLOWED_USERS: ' A@x.nl,,b@x.nl ' }), [...CODE_ADMINS, 'a@x.nl', 'b@x.nl']);
+  assert.deepEqual(fixedUsers({}), CODE_ADMINS);
 });
 
 test('sessieroute negeert x-ms-client-principal (kan op een openbare route vervalst zijn)', async () => {
@@ -65,7 +65,7 @@ test('afgeschermd zonder bruikbare claim: geen toegang, met diagnose zonder adre
 });
 
 test('onzichtbare tekens in ALLOWED_USERS worden genegeerd', async () => {
-  assert.deepEqual(fixedUsers({ ALLOWED_USERS: 'a@x.nl,\u200Br.hoorn@caesar.nl\u200B' }), ['a@x.nl', 'r.hoorn@caesar.nl']);
+  assert.deepEqual(fixedUsers({ ALLOWED_USERS: 'a@x.nl,\u200Bb@x.nl\u200B' }), [...CODE_ADMINS, 'a@x.nl', 'b@x.nl']);
 });
 
 test('afgeschermd adres zonder claims: het eerder onthouden adres bij hetzelfde userId wordt gebruikt', async () => {
@@ -86,4 +86,12 @@ test('onthouden adres geeft geen toegang meer als het uit de lijst is', async ()
   const repo = { getUsers: async () => [], getIdentity: async (k) => store.get(k) || null, setIdentity: async (k, e) => { store.set(k, e); } };
   await authorizeMicrosoft(headers({ userId: 'uid-x-2', userDetails: 'x@y.nl' }), repo, { ALLOWED_USERS: 'x@y.nl' });
   await assert.rejects(authorizeMicrosoft(headers({ userId: 'uid-x-2', userDetails: 'x*****' }), repo, { ALLOWED_USERS: 'ander@y.nl' }), { status: 403 });
+});
+
+test('vaste beheerder uit de code is admin, ook zonder ALLOWED_USERS', async () => {
+  const p = { userId: 'uid-code', identityProvider: 'aad', userDetails: CODE_ADMINS[0].toUpperCase() };
+  const u = await authorizeMicrosoft(headers(p), repoWith([]), {});
+  assert.equal(u.email, CODE_ADMINS[0]);
+  assert.equal(u.role, 'admin');
+  assert.equal(u.fixed, true);
 });
