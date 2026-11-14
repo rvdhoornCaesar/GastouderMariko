@@ -51,7 +51,9 @@ async function deleteChild({ user, repo, params }) {
 
 async function listEntries({ user, repo, query }) {
   perm.require(user, 'entries:read');
-  return { status: 200, jsonBody: await repo.listEntriesOfMonth(v.parseMonth(query.month)) };
+  const startDate = await repo.getStartDate();   // uren van vóór de begindatum van de gastouder worden genegeerd
+  const entries = await repo.listEntriesOfMonth(v.parseMonth(query.month));
+  return { status: 200, jsonBody: startDate ? entries.filter((e) => e.date >= startDate) : entries };
 }
 
 async function createEntry({ user, repo, body }) {
@@ -59,6 +61,8 @@ async function createEntry({ user, repo, body }) {
   const data = v.parseEntry(body);
   const children = await repo.listChildren();
   if (!children.some((c) => c.contracts.some((k) => k.id === data.contractId))) throw new HttpError(400, 'Dat contract bestaat niet.');
+  const startDate = await repo.getStartDate();
+  if (startDate && data.date < startDate) throw new HttpError(400, 'Vóór de begindatum van de gastouder kun je geen uren invullen.');
   const entry = { id: `${data.date}_${newId()}`, ...data };
   await repo.saveEntry(entry);
   return { status: 201, jsonBody: entry };
@@ -76,7 +80,7 @@ async function getSettings({ user, repo, env }) {
   perm.require(user, 'settings:read');
   const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
   const manage = perm.can(user, 'settings:write');   // wie mag toegang regelen, ziet de gebruikerslijsten en de technische info
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await repo.getUsers() : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), runtime: manage ? process.version : undefined } };
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await repo.getUsers() : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), startDate: await repo.getStartDate(), runtime: manage ? process.version : undefined } };
 }
 
 async function putRates({ user, repo, body }) {
@@ -91,6 +95,13 @@ async function putOwnChildren({ user, repo, body }) {
   const ownChildren = v.parseOwnChildren(body && body.ownChildren, newId);
   await repo.setOwnChildren(ownChildren);
   return { status: 200, jsonBody: { ownChildren } };
+}
+
+async function putStartDate({ user, repo, body }) {
+  perm.require(user, 'settings:write');
+  const startDate = v.parseStartDate(body && body.startDate);
+  await repo.setStartDate(startDate);
+  return { status: 200, jsonBody: { startDate } };
 }
 
 async function putVacations({ user, repo, body }) {
@@ -342,4 +353,4 @@ async function deleteAccount({ user, repo, params }) {
   return { status: 204 };
 }
 
-module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putVacations, putOpening, putOwnChildren, putUsers };
+module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers };

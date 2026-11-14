@@ -180,6 +180,12 @@ function parseVacations(list, newId) {
     return { id: h.id && ID.test(h.id) ? h.id : newId(), from, to, note: text(h.note, 100) };
   }).sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to));
 }
+// Begindatum van de gastouder: alles ervoor wordt genegeerd. Leeg of null = geen begindatum.
+function parseStartDate(value) {
+  if (value === undefined) throw bad('Geen begindatum opgegeven.');
+  if (value === null || value === '') return null;
+  return requiredDate(value, 'Ongeldige begindatum.');
+}
 function parseOwnChildren(list, newId) {
   if (!Array.isArray(list) || list.length > 20) throw bad('Ongeldige lijst met eigen kinderen.');
   const today = new Date().toISOString().slice(0, 10);
@@ -206,4 +212,4 @@ function parseRole(v) {
   return r;
 }
 
-module.exports = { parseRole, parseAccountEmail, parseOwnChildren, parseVacations, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
+module.exports = { parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
