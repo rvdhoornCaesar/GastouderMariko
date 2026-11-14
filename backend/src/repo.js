@@ -109,6 +109,14 @@ function createRepo(connectionString) {
       try { await (await table('throttle')).deleteEntity('throttle', key); } catch (e) { if (e.statusCode !== 404) throw e; }
     },
 
+    // Microsoft-identiteiten: gehasht userId van Static Web Apps -> e-mailadres (zie auth.js, voor als het adres afgeschermd binnenkomt).
+    async getIdentity(key) {
+      try { return (await (await table('identities')).getEntity('identities', key)).email; } catch (e) { if (e.statusCode === 404) return null; throw e; }
+    },
+    async setIdentity(key, email) {
+      await (await table('identities')).upsertEntity({ partitionKey: 'identities', rowKey: key, email }, 'Replace');
+    },
+
     getUsers: () => getSetting('users'),
     setUsers: (list) => setSetting('users', list),
     getRates: () => getSetting('rates'),

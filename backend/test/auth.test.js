@@ -59,11 +59,31 @@ test('afgeschermde userDetails: het volledige adres uit de claims wordt gebruikt
 });
 
 test('afgeschermd zonder bruikbare claim: geen toegang, met diagnose zonder adressen', async () => {
-  const masked = { userId: 'abc', identityProvider: 'aad', userDetails: 'dot*****', claims: [{ typ: 'name', val: 'Dot' }] };
+  const masked = { userId: 'abc-onbekend', identityProvider: 'aad', userDetails: 'dot*****', claims: [{ typ: 'name', val: 'Dot' }] };
   await assert.rejects(authorizeMicrosoft(headers(masked), repoWith([]), { ALLOWED_USERS: 'dot@hotmail.com' }),
     (e) => e.status === 403 && e.extra.diag.detailsMasked === true && e.extra.diag.usedClaim === false && JSON.stringify(e.extra.diag).includes('hotmail') === false);
 });
 
 test('onzichtbare tekens in ALLOWED_USERS worden genegeerd', async () => {
   assert.deepEqual(fixedUsers({ ALLOWED_USERS: 'a@x.nl,\u200Br.hoorn@caesar.nl\u200B' }), ['a@x.nl', 'r.hoorn@caesar.nl']);
+});
+
+test('afgeschermd adres zonder claims: het eerder onthouden adres bij hetzelfde userId wordt gebruikt', async () => {
+  const store = new Map();
+  const repo = { getUsers: async () => [], getIdentity: async (k) => store.get(k) || null, setIdentity: async (k, e) => { store.set(k, e); } };
+  const env = { ALLOWED_USERS: 'dot@hotmail.com' };
+  const full = { userId: 'uid-dot-1', identityProvider: 'aad', userDetails: 'Dot@Hotmail.com' };
+  const masked = { userId: 'uid-dot-1', identityProvider: 'aad', userDetails: 'dot*****' };
+  await assert.rejects(authorizeMicrosoft(headers(masked), repo, env), { status: 403 });          // nog niet bekend
+  assert.equal((await authorizeMicrosoft(headers(full), repo, env)).email, 'dot@hotmail.com');       // volledig adres: onthouden
+  const u = await authorizeMicrosoft(headers(masked), repo, env);
+  assert.equal(u.email, 'dot@hotmail.com');
+  assert.equal(u.role, 'admin');
+});
+
+test('onthouden adres geeft geen toegang meer als het uit de lijst is', async () => {
+  const store = new Map();
+  const repo = { getUsers: async () => [], getIdentity: async (k) => store.get(k) || null, setIdentity: async (k, e) => { store.set(k, e); } };
+  await authorizeMicrosoft(headers({ userId: 'uid-x-2', userDetails: 'x@y.nl' }), repo, { ALLOWED_USERS: 'x@y.nl' });
+  await assert.rejects(authorizeMicrosoft(headers({ userId: 'uid-x-2', userDetails: 'x*****' }), repo, { ALLOWED_USERS: 'ander@y.nl' }), { status: 403 });
 });
