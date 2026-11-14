@@ -50,3 +50,20 @@ test('sessiecookie wordt uit de cookie-header gehaald', () => {
 test('wijzigend verzoek zonder x-requested-with → 403', async () => {
   await assert.rejects(authorizeSession(headers(null, { cookie: 'gu_session=x' }), 'POST', {}), { status: 403 });
 });
+
+test('afgeschermde userDetails: het volledige adres uit de claims wordt gebruikt', async () => {
+  const masked = { userId: 'abc', identityProvider: 'aad', userDetails: 'dot*****', claims: [{ typ: 'name', val: 'Dot' }, { typ: 'preferred_username', val: 'Dot@Hotmail.com' }] };
+  const u = await authorizeMicrosoft(headers(masked), repoWith([]), { ALLOWED_USERS: 'dot@hotmail.com' });
+  assert.equal(u.email, 'dot@hotmail.com');
+  assert.equal(u.role, 'admin');
+});
+
+test('afgeschermd zonder bruikbare claim: geen toegang, met diagnose zonder adressen', async () => {
+  const masked = { userId: 'abc', identityProvider: 'aad', userDetails: 'dot*****', claims: [{ typ: 'name', val: 'Dot' }] };
+  await assert.rejects(authorizeMicrosoft(headers(masked), repoWith([]), { ALLOWED_USERS: 'dot@hotmail.com' }),
+    (e) => e.status === 403 && e.extra.diag.detailsMasked === true && e.extra.diag.usedClaim === false && JSON.stringify(e.extra.diag).includes('hotmail') === false);
+});
+
+test('onzichtbare tekens in ALLOWED_USERS worden genegeerd', async () => {
+  assert.deepEqual(fixedUsers({ ALLOWED_USERS: 'a@x.nl,\u200Br.hoorn@caesar.nl\u200B' }), ['a@x.nl', 'r.hoorn@caesar.nl']);
+});
