@@ -691,7 +691,9 @@
     await guard(() => ensureMonth(day.slice(0, 7)));
     if (seq !== daySeq) return;
     $('dayTitle').textContent = new Date(day + 'T12:00').toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
-    const list = state.entries.filter((e) => e.date === day).sort((a, b) => a.start.localeCompare(b.start));
+    // Op naam van het kind (alfabetisch), daarna op begintijd; een nieuwe registratie komt dus op de juiste plek te staan.
+    const childName = (e) => { const x = findContract(e.contractId); return x ? x.child.name : '\uffff'; };
+    const list = state.entries.filter((e) => e.date === day).sort((a, b) => childName(a).localeCompare(childName(b), 'nl') || a.start.localeCompare(b.start));
     $('dayEntries').innerHTML = list.length ? list.map((e) => entryRow(e)).join('') : '<div class="empty">Nog geen uren voor deze dag.</div>';
     $('dayTotal').textContent = fmt(list.reduce((s, e) => s + entryMin(e), 0));
 
