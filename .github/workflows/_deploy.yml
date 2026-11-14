@@ -75,6 +75,9 @@ jobs:
           mkdir api
           cp -r backend/src backend/host.json backend/package.json backend/package-lock.json api/
           npm ci --omit=dev --prefix api
+          # Elke deploy krijgt een andere API-inhoud, zodat de functies altijd opnieuw worden uitgerold. Anders blijven ze met oude
+          # app-settings (zoals ALLOWED_USERS) draaien als alleen een instelling is gewijzigd en de code gelijk is gebleven.
+          echo "${{ github.sha }} ${{ github.run_id }}" > api/build-id.txt
           du -sh api
 
       - name: Deployment-token Static Web App ophalen
