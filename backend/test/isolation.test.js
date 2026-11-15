@@ -78,6 +78,7 @@ test('instellingen: elke administratie heeft eigen tarieven, openingstijden, geb
   await A.setVacations([{ id: 'v1', from: '2026-07-01', to: '2026-07-14' }]);
   await A.setOwnChildren([{ id: 'o1', firstName: 'Eigen', birthDate: '2020-01-01' }]);
   await A.setOpening({ days: [], factor: 1.5 });
+  await A.setSickDays(['2026-03-12']);
   await B.setRates([{ id: 'r9', from: '2026-01-01', to: null, rate: 11 }]);
   assert.equal((await A.getRates())[0].rate, 8.5);
   assert.equal((await B.getRates())[0].rate, 11);
@@ -85,6 +86,8 @@ test('instellingen: elke administratie heeft eigen tarieven, openingstijden, geb
   assert.deepEqual(await B.getUsers(), []);
   assert.equal(await B.getStartDate(), null);
   assert.deepEqual(await B.getVacations(), []);
+  assert.deepEqual(await B.getSickDays(), []);   // een ziekmelding van A geldt niet voor B
+  assert.deepEqual(await A.getSickDays(), ['2026-03-12']);
   assert.deepEqual(await B.getOwnChildren(), []);
   assert.equal(await B.getOpening(), null);
   assert.deepEqual(await C.getRates(), []);

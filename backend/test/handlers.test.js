@@ -603,3 +603,43 @@ test('verwijderen haalt het lidmaatschap weg; het account pas als er geen lidmaa
   assert.equal(await repo.getAccount('bg1@voorbeeld.nl'), null);   // geen lidmaatschap meer: account weg
 });
 
+
+// --- Gastouder ziek melden ---
+test('ziek melden: toevoegen, dubbel is niets, gesorteerd, weer weghalen', async () => {
+  await repo.setSickDays([]);
+  await repo.setStartDate(null);
+  assert.deepEqual((await call(h.putSickDay, { body: { date: '2026-03-12' } })).jsonBody.sickDays, ['2026-03-12']);
+  assert.deepEqual((await call(h.putSickDay, { body: { date: '2026-03-05', sick: true } })).jsonBody.sickDays, ['2026-03-05', '2026-03-12']);
+  assert.deepEqual((await call(h.putSickDay, { body: { date: '2026-03-05' } })).jsonBody.sickDays, ['2026-03-05', '2026-03-12']);   // al ziek gemeld
+  assert.deepEqual(await repo.getSickDays(), ['2026-03-05', '2026-03-12']);
+  assert.deepEqual((await call(h.getSettings)).jsonBody.sickDays, ['2026-03-05', '2026-03-12']);
+  assert.deepEqual((await call(h.putSickDay, { body: { date: '2026-03-05', sick: false } })).jsonBody.sickDays, ['2026-03-12']);
+  assert.deepEqual((await call(h.putSickDay, { body: { date: '2026-03-31', sick: false } })).jsonBody.sickDays, ['2026-03-12']);   // was niet ziek: niets te doen
+  await call(h.putSickDay, { body: { date: '2026-03-12', sick: false } });
+  assert.deepEqual(await repo.getSickDays(), []);
+});
+
+test('ziek melden: validatie, begindatum en maximum', async () => {
+  for (const body of [undefined, {}, { date: '' }, { date: '12-03-2026' }, { date: '2026-02-30' }, { date: '2026-03-12', sick: 'ja' }]) {
+    await assert.rejects(call(h.putSickDay, { body }), { status: 400 }, JSON.stringify(body));
+  }
+  await repo.setStartDate('2026-02-01');
+  await assert.rejects(call(h.putSickDay, { body: { date: '2026-01-31' } }), { status: 400, message: /begindatum/ });
+  assert.equal((await call(h.putSickDay, { body: { date: '2026-02-01' } })).status, 200);
+  await call(h.putSickDay, { body: { date: '2026-02-01', sick: false } });
+  assert.equal((await call(h.putSickDay, { body: { date: '2026-01-31', sick: false } })).status, 200);   // weghalen mag altijd
+  await repo.setStartDate(null);
+  await repo.setSickDays(Array.from({ length: 1000 }, (_, i) => new Date(Date.UTC(2020, 0, 1 + i)).toISOString().slice(0, 10)));
+  await assert.rejects(call(h.putSickDay, { body: { date: '2030-01-01' } }), { status: 400, message: /maximaal 1000/ });
+  assert.equal((await call(h.putSickDay, { body: { date: '2020-01-01', sick: false } })).jsonBody.sickDays.length, 999);
+  await repo.setSickDays([]);
+});
+
+test('ziek melden mag elke gebruiker die uren invult; platformbeheer zonder lidmaatschap niet', async () => {
+  const u = { email: 'rol@voorbeeld.nl', kind: 'local', role: 'gebruiker', instanceId: 'main' };
+  assert.equal((await h.putSickDay({ user: u, repo, env, params: {}, query: {}, body: { date: '2026-04-01' } })).status, 200);
+  assert.deepEqual((await h.getSettings({ user: u, repo, env })).jsonBody.sickDays, ['2026-04-01']);   // ook zichtbaar voor een gebruiker
+  const platform = { email: 'p@voorbeeld.nl', kind: 'microsoft', platformAdmin: true, role: null, instanceId: null };
+  await assert.rejects(h.putSickDay({ user: platform, repo, env, body: { date: '2026-04-02' } }), { status: 403 });
+  await repo.setSickDays([]);
+});

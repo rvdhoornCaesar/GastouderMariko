@@ -187,6 +187,8 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     setRates: (list) => setSetting('rates', list),
     getStartDate: () => getSetting('startDate', null),
     setStartDate: (d) => setSetting('startDate', d),
+    getSickDays: () => getSetting('sickDays'),
+    setSickDays: (list) => setSetting('sickDays', list),
     getVacations: () => getSetting('vacations'),
     setVacations: (list) => setSetting('vacations', list),
     getOwnChildren: () => getSetting('ownChildren'),
