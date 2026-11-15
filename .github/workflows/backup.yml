@@ -1,0 +1,99 @@
+name: Back-up en herstel (tabellen)
+
+# Maakt een kopie van alle tabellen in Table Storage van een omgeving, toont de beschikbare back-ups of zet er een terug.
+# Een back-up verandert niets aan de bestaande gegevens: de kopieën staan in aparte tabellen "bak<tijdstip><naam>" in hetzelfde
+# storage account, met een controle dat elke kopie gelijk is aan de bron. Sessies en inlogpogingen worden niet meegenomen.
+# Voor production vraagt GitHub om goedkeuring, net als bij een deploy.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Omgeving
+        type: choice
+        options: [test, production]
+        default: test
+      action:
+        description: backup = nieuwe back-up, list = overzicht, restore = terugzetten
+        type: choice
+        options: [backup, list, restore]
+        default: backup
+      label:
+        description: Omschrijving bij een nieuwe back-up (bijvoorbeeld "voor migratie")
+        type: string
+        default: ''
+      backup_id:
+        description: Alleen bij restore, het id van de back-up (zie list), bijvoorbeeld 20261115t093012
+        type: string
+        default: ''
+      apply:
+        description: Alleen bij restore, uit = proefrun (er verandert niets), aan = echt terugzetten
+        type: boolean
+        default: false
+      replace:
+        description: Alleen bij restore met apply, ook rijen verwijderen die niet in de back-up staan
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: backup-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    env:
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || format('gastouder-{0}-rg', inputs.environment) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci --omit=dev
+        working-directory: backend
+
+      - name: Opdracht uitvoeren
+        env:
+          ACTION: ${{ inputs.action }}
+          LABEL: ${{ inputs.label }}
+          BACKUP_ID: ${{ inputs.backup_id }}
+          APPLY: ${{ inputs.apply }}
+          REPLACE: ${{ inputs.replace }}
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          account=$(az storage account list -g "$RESOURCE_GROUP" --query "[?starts_with(name,'gastouder')].name | [0]" -o tsv)
+          if [ -z "$account" ] || [ "$account" = "None" ]; then echo "::error::Geen storage account gevonden in $RESOURCE_GROUP."; exit 1; fi
+          conn=$(az storage account show-connection-string -g "$RESOURCE_GROUP" -n "$account" --query connectionString -o tsv)
+          echo "::add-mask::$conn"
+          export TABLES_CONNECTION="$conn"
+          args=("$ACTION")
+          case "$ACTION" in
+            backup) if [ -n "$LABEL" ]; then args+=(--label "$LABEL"); fi ;;
+            restore)
+              if [ -z "$BACKUP_ID" ]; then echo "::error::Geef bij restore het id van de back-up (zie de opdracht list)."; exit 1; fi
+              args+=(--id "$BACKUP_ID")
+              if [ "$APPLY" = "true" ]; then args+=(--apply); fi
+              if [ "$REPLACE" = "true" ]; then args+=(--replace); fi
+              ;;
+          esac
+          {
+            echo "### $ACTION: $ENVIRONMENT ($account)"
+            echo '```'
+            node backend/scripts/backup-tables.js "${args[@]}"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
