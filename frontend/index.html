@@ -563,6 +563,14 @@
       </form>
       <div class="err" id="agencyAdminErr"></div>
     </div>
+    <div class="card" id="importCard">
+      <h2>Import uit Excel-planning</h2>
+      <p class="hint">Eenmalige import van historische gegevens uit het Excel-planningsbestand (blad <em>Kinderen</em> en één blad met een jaartal, zoals <em>2025</em>), in de organisatie <strong id="importOrg"></strong> waarin je nu zit. Per kind wordt een contract voor dat hele jaar aangemaakt (zonder vaste tijden en zonder eigen tarief), en de ingevulde tijden worden geschreven uren. Er wordt alleen toegevoegd: bestaande kinderen, contracten en uren blijven ongemoeid, en nogmaals importeren voegt niets dubbel toe. Je ziet eerst een voorbeeld.</p>
+      <input type="file" id="importFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+      <div class="err" id="importErr"></div>
+      <div id="importResult"></div>
+      <button class="btn" id="importApply" hidden style="margin-top:8px">Importeren</button>
+    </div>
     <form class="card" id="orgForm">
       <h2>Organisatie toevoegen</h2>
       <label for="orgNewName">Naam</label>
@@ -2302,6 +2310,39 @@
       if (r) { showOrgMsg(`<p class="hint">Definitief verwijderd: ${r.children} kinderen, ${r.entries} uren, ${r.settings} instellingen, ${r.members} leden, ${r.accounts} accounts.</p>`); await loadOrgs(); }
     }
   });
+
+  // --- Import uit het Excel-planningsbestand (platformbeheer) ---
+  let importB64 = null;
+  const fileToBase64 = (file) => file.arrayBuffer().then((buf) => { const bytes = new Uint8Array(buf); let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); });
+  function showImport(r) {
+    const e = r.entries;
+    $('importResult').innerHTML = `<p><strong>${r.applied ? 'Geïmporteerd' : 'Voorbeeld'} (${r.year}):</strong> ${e.add} uren ${r.applied ? 'toegevoegd' : 'toe te voegen'}${e.duplicate ? `, ${e.duplicate} stonden er al` : ''}${e.outside ? `, ${e.outside} buiten ${r.year}` : ''}${e.before ? `, ${e.before} vóór de begindatum` : ''}.</p>
+      <table><tr><th>Kind</th><th>Kind in app</th><th>Contract ${r.year}</th><th class="num">Uren</th></tr>${r.children.map((c) => `<tr><td>${esc(c.name)}</td><td>${c.child}</td><td>${c.contract}</td><td class="num">${c.entries}${c.duplicates ? ` <small class="sub">(+${c.duplicates} al aanwezig)</small>` : ''}</td></tr>`).join('')}</table>
+      ${r.warnings.length ? `<div class="warn" style="margin-top:8px">${r.warnings.map((w) => `<div>${esc(w)}</div>`).join('')}</div>` : ''}`;
+  }
+  $('importFile').addEventListener('change', async (ev) => {
+    const file = ev.target.files[0];
+    $('importErr').textContent = ''; $('importResult').innerHTML = ''; $('importApply').hidden = true; importB64 = null;
+    if (!file) return;
+    if (file.size > 25 * 1024 * 1024) { $('importErr').textContent = 'Het bestand is te groot (maximaal 25 MB).'; return; }
+    try {
+      importB64 = await fileToBase64(file);
+      const r = await api('POST', 'import/planning', { file: importB64 });
+      showImport(r);
+      $('importApply').hidden = !(r.entries.add || r.children.some((c) => c.child === 'nieuw' || c.contract === 'nieuw'));
+    } catch (e) { if (!e.noAccess) $('importErr').textContent = e.message; }
+  });
+  $('importApply').onclick = async () => {
+    if (!importB64 || !confirm('Dit voegt de kinderen, contracten en uren uit het voorbeeld toe aan de huidige organisatie. Er wordt niets verwijderd of gewijzigd. Doorgaan?')) return;
+    $('importErr').textContent = ''; $('importApply').disabled = true;
+    try {
+      const r = await api('POST', 'import/planning', { file: importB64, apply: true });
+      showImport(r); $('importApply').hidden = true; importB64 = null; $('importFile').value = '';
+      await reloadSettings();
+      const [children] = await Promise.all([guard(() => api('GET', 'children'))]);
+      if (children) { state.children = children; loadedMonths.clear(); state.entries = []; render(); }
+    } catch (e) { if (!e.noAccess) $('importErr').textContent = e.message; } finally { $('importApply').disabled = false; }
+  };
 
   // --- Export van de eigen organisatie (beheerder) ---
   $('exportBtn').onclick = async () => {
