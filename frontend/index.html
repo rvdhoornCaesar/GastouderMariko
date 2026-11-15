@@ -31,6 +31,14 @@
   label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: 3px; }
   input, select, textarea { width: 100%; padding: 10px; font: inherit; border: 1px solid var(--line);
     border-radius: 8px; background: var(--bg); color: var(--ink); }
+  /* Datumvelden: Tab loopt door dag, maand en jaar en dan naar het volgende veld. Het kalenderknopje van de browser is een eigen tabstop en
+     kan niet uit de tabvolgorde worden gehaald, dus we verbergen het en tekenen zelf een icoon (een klik erop opent de kiezer, zie het script);
+     met het toetsenbord opent de kiezer met Alt+pijl-omlaag of F4. */
+  @supports selector(::-webkit-calendar-picker-indicator) {
+    input[type=date]::-webkit-calendar-picker-indicator { display: none; }
+    input[type=date] { padding-right: 36px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='%23777' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='12' height='11' rx='2'/%3E%3Cpath d='M2 6.5h12M5.5 1.5v3M10.5 1.5v3'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px 16px; }
+    @media (prefers-color-scheme: dark) { input[type=date] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='%23bbb' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='12' height='11' rx='2'/%3E%3Cpath d='M2 6.5h12M5.5 1.5v3M10.5 1.5v3'/%3E%3C/svg%3E"); } }
+  }
   .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-bottom: 10px; }
   button.btn { padding: 10px 16px; border: 0; border-radius: 8px; font: inherit; font-weight: 600;
     background: var(--accent); color: var(--accent-ink); cursor: pointer; }
@@ -38,7 +46,7 @@
   button.btn.small { padding: 5px 10px; font-size: .85rem; }
   button.link { background: none; border: 0; color: var(--danger); cursor: pointer; font: inherit; padding: 4px; }
   .datebar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
-  .datebar input { flex: 1; min-width: 0; text-align: center; }
+  .datebar input { flex: 1; min-width: 0; text-align: center; padding-left: 36px; }
   .datebar .btn { flex: none; padding-left: 10px; padding-right: 10px; }
   .entry { display: flex; justify-content: space-between; align-items: center; gap: 10px;
     padding: 10px 0; border-bottom: 1px solid var(--line); }
@@ -757,6 +765,14 @@
 
   // Vaste tijden van een contract op de weekdag van een datum (of null).
   const scheduleFor = (k, date) => { const d = k.schedule && k.schedule[(new Date(date + 'T12:00').getDay() + 6) % 7]; return d && d.open ? d : null; };
+
+  // Een klik op het kalendericoon (rechterrand) van een datumveld opent de kiezer; het icoon van de browser is verborgen (zie de stijl bij input[type=date]).
+  document.addEventListener('click', (ev) => {
+    const el = ev.target;
+    if (!(el instanceof HTMLInputElement) || el.type !== 'date' || el.disabled || el.readOnly || typeof el.showPicker !== 'function') return;
+    if (!CSS.supports('selector(::-webkit-calendar-picker-indicator)')) return;
+    if (ev.clientX > el.getBoundingClientRect().right - 40) { try { el.showPicker(); } catch (e) { /* kiezer niet beschikbaar */ } }
+  });
 
   // --- tabs ---
   document.querySelectorAll('nav button').forEach((b) => b.addEventListener('click', () => {
