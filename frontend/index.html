@@ -64,6 +64,7 @@
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; align-items: end; }
   .grid2 > * { min-width: 0; }
   .wide { grid-column: 1 / -1; }
+  .contract-card > summary { cursor: pointer; }
   .contract-card { border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
   .actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .hint { color: var(--muted); font-size: .9rem; margin: 0 0 10px; }
@@ -1626,7 +1627,7 @@
         const cell = cells[i].get(c.id), tot = cellSum(cell);
         colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot;
         const parts = cell ? [cell.w > 0.005 && `geschreven ${euro0(cell.w)}`, cell.p > 0.005 && `gepland ${euro0(cell.p)}`, cell.v > 0.005 && `vast ${euro0(cell.v)}`].filter(Boolean) : [];
-        return `<td class="num yearcell${tot > 0 && !(cell && cell.w > 0) && m > nowM ? ' future' : ''}">${tot > 0.005 ? euro(tot) : '–'}${parts.length > 1 || (parts.length === 1 && !(cell && cell.w > 0)) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
+        return `<td class="num yearcell${tot > 0 && !(cell && cell.w > 0) && m > nowM ? ' future' : ''}">${tot > 0.005 ? euro(tot) : '–'}${parts.length > 1 || (parts.length === 1 && !(cell && (cell.w > 0 || cell.v > 0.005))) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
       }).join('');
       grand += rowTot;
       return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(MONTHS_LONG[i])}</th>${tds}<td class="num"><strong>${rowTot > 0.005 ? euro(rowTot) : '–'}</strong></td></tr>`;
@@ -1738,14 +1739,19 @@
     $('childDetail').querySelector(`[data-paidhint="${ci}"]`).textContent = ps.hint;
   }
 
+  // Afgelopen contracten staan standaard ingeklapt; wat je zelf open- of dichtklapt blijft zo staan zolang je dit kind bewerkt.
+  const contractOpen = new WeakMap();
+  const contractEnded = (k) => !!k.end && k.end < iso(new Date());
   function contractEditor(k, i) {
     const ps = paidState(k);
+    const open = contractOpen.has(k) ? contractOpen.get(k) : !contractEnded(k);
     const f = (name, label, attrs, value, cls = '') => `<div class="${cls}"><label>${label}</label><input ${attrs} data-c="${i}" data-f="${name}" value="${esc(value ?? '')}"></div>`;
     const days = k.schedule.map((d, di) => `<div class="day-row"><label><input type="checkbox" data-c="${i}" data-day="${di}" ${d.open ? 'checked' : ''}> ${WEEKDAYS[di]}</label>
         <input type="time" data-c="${i}" data-day="${di}" data-t="from" value="${d.from ?? ''}" ${d.open ? '' : 'disabled'}>
         <input type="time" data-c="${i}" data-day="${di}" data-t="to" value="${d.to ?? ''}" ${d.open ? '' : 'disabled'}></div>`).join('');
-    return `<div class="contract-card grid2">
-      <div class="wide"><strong>Contract ${i + 1}</strong></div>
+    return `<details class="contract-card" data-ci="${i}" ${open ? 'open' : ''}>
+      <summary><strong>Contract ${i + 1}</strong>${k.start || k.end ? ` <span class="sub">${esc(contractPeriod(k))}</span>` : ''}${contractEnded(k) ? ' <span class="tag">afgelopen</span>' : ''}</summary>
+      <div class="grid2" style="margin-top: 10px">
       ${f('start', 'Startdatum', 'type="date"', k.start)}
       ${f('end', 'T/m datum', 'type="date"', k.end)}
       ${f('number', 'Contractnummer (optioneel)', '', k.number)}
@@ -1755,7 +1761,8 @@
         <div class="sub" data-paidhint="${i}">${ps.hint}</div></div>
       <div class="wide"><label>Vaste tijden per weekdag (optioneel)</label>${days}</div>
       <div class="wide" style="text-align: right"><button class="link" data-rmc="${i}">Contract verwijderen</button></div>
-    </div>`;
+      </div>
+    </details>`;
   }
 
   function renderDetail() {
@@ -1845,6 +1852,7 @@
       draft[f] = t.value;
     }
   }
+  $('childDetail').addEventListener('toggle', (ev) => { const t = ev.target; if (draft && t.dataset && t.dataset.ci !== undefined) contractOpen.set(draft.contracts[Number(t.dataset.ci)], t.open); }, true);
   $('childDetail').addEventListener('input', (ev) => { if (draft) syncField(ev.target); });
   $('childDetail').addEventListener('change', (ev) => { if (draft) syncField(ev.target); });
 
@@ -1881,7 +1889,7 @@
     if (b.id === 'childBack' || b.id === 'childCancel') return closeChild();
     if (b.id === 'childSave') return saveDraft();
     if (b.id === 'childDelete') return deleteDraft();
-    if (b.id === 'contractAdd') { draft.contracts.push(newContract()); return renderDetail(); }
+    if (b.id === 'contractAdd') { const k = newContract(); contractOpen.set(k, true); draft.contracts.push(k); return renderDetail(); }
     if (b.dataset.rmc !== undefined) {
       if (confirm('Dit contract verwijderen? De uren van dit contract verdwijnen ook zodra je opslaat.')) { draft.contracts.splice(Number(b.dataset.rmc), 1); renderDetail(); }
       return;
