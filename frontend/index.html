@@ -695,6 +695,17 @@
   // Een contract geldt voor een maand als de periode die maand raakt.
   const fixedContracts = (m) => contracts().filter((x) => Number(x.contract.monthlyHours) > 0 && x.contract.start && x.contract.end
     && x.contract.start.slice(0, 7) <= m && m <= x.contract.end.slice(0, 7) && !(gStart() && m < gStart().slice(0, 7)));
+  // Per contract met vaste uren in maand m: hoeveel geschreven minuten niet extra tellen (maximaal de vaste uren). Map contractId -> { child, min }.
+  function fixedWrittenDrop(m, registered) {
+    const out = new Map();
+    fixedContracts(m).forEach((x) => {
+      const vastMin = Math.round(Number(x.contract.monthlyHours) * 60);
+      const written = registered.filter((e) => e.contractId === x.contract.id).reduce((s, e) => s + toMin(e.end) - toMin(e.start), 0);
+      if (written > 0) out.set(x.contract.id, { child: x.child, written, min: Math.min(written, vastMin) });
+    });
+    return out;
+  }
+  const dropByChild = (drop) => { const t = new Map(); (drop || new Map()).forEach((d) => t.set(d.child.id, (t.get(d.child.id) || 0) + d.min)); return t; };
   // Melding als een datum buiten de periode van het contract valt (invullen blijft mogelijk).
   const contractWarning = (k, date) => (k.start && k.end && (date < k.start || date > k.end)
     ? `Let op: ${nlDate(date)} valt buiten het contract (${nlDate(k.start)} t/m ${nlDate(k.end)}).` : '');
@@ -1055,13 +1066,15 @@
     const per = {};
     let missing = false;
     const bucket = (x, cid) => (per[cid] ||= { x, min: 0, fixedMin: 0, holidayMin: 0, outsideMin: 0, eur: 0, rates: new Set() });
-    const holidayEntries = paidHolidayEntries(m, list);
+    const holidayEntries = paidHolidayEntries(m, list), drop = fixedWrittenDrop(m, list);
     [...list, ...holidayEntries].forEach((e) => {
-      const x = findContract(e.contractId), rate = rateFor(x, e.date), { inside, outside } = splitMinutes(e);
+      const x = findContract(e.contractId), rate = rateFor(x, e.date), s = splitMinutes(e);
+      const d = !e.holiday && drop.get(e.contractId), keep = d ? (d.written - d.min) / d.written : 1;   // vaste uren: alleen het meerdere telt
+      const inside = s.inside * keep, outside = s.outside * keep;
       const p = bucket(x, e.contractId);
-      p.min += inside + outside;
-      p.outsideMin += outside;
-      if (e.holiday) p.holidayMin += inside + outside;
+      p.min += Math.round(inside + outside);
+      p.outsideMin += Math.round(outside);
+      if (e.holiday) p.holidayMin += Math.round(inside + outside);
       p.eur += ((inside + outside * factor) / 60) * (rate ?? 0);
       if (rate === null) missing = true; else p.rates.add(rate);
     });
@@ -1160,7 +1173,9 @@
       });
     }
     fixedContracts(m).forEach((x) => vast.set(x.child.id, (vast.get(x.child.id) || 0) + Math.round(Number(x.contract.monthlyHours) * 60)));
-    return { days, vast };
+    // Bij een contract met vaste uren zijn de geschreven uren geen extra: de vaste uren tellen. Alleen wat je méér schrijft dan de vaste uren komt erbij.
+    const drop = fixedWrittenDrop(m, registered);
+    return { days, vast, drop };
   }
   // Per kind en soort (geschreven/gepland) samenvoegen: één regel met alle tijden van die dag.
   function groupDay(items) {
@@ -1189,8 +1204,9 @@
       ${rows.map((r) => `<tr><td>${esc(firstName(r.child))}</td><td class="num">${hrs(r.written)}</td><td class="num">${hrs(r.planned)}</td>${withVast ? `<td class="num">${hrs(r.vast)}</td>` : ''}<td class="num"><strong>${hrs(r.written + r.planned + (r.vast || 0))}</strong></td></tr>`).join('')}
       <tr><th>Totaal</th><th class="num">${hrs(sum('written'))}</th><th class="num">${hrs(sum('planned'))}</th>${withVast ? `<th class="num">${hrs(sum('vast'))}</th>` : ''}<th class="num">${hrs(sum('written') + sum('planned') + sum('vast'))}</th></tr></table>`;
   };
-  const withVast = (rows, vast) => {
-    const map = new Map(rows.map((r) => [r.child.id, { ...r, vast: 0 }]));
+  const withVast = (rows, vast, drop) => {
+    const dropped = dropByChild(drop);
+    const map = new Map(rows.map((r) => [r.child.id, { ...r, vast: 0, written: Math.max(0, r.written - (dropped.get(r.child.id) || 0)) }]));
     vast.forEach((min, id) => { const c = state.children.find((x) => x.id === id); if (!c) return; const r = map.get(id) || { child: c, written: 0, planned: 0, vast: 0 }; r.vast += min; map.set(id, r); });
     return [...map.values()].sort((a, b) => firstName(a.child).localeCompare(firstName(b.child)));
   };
@@ -1310,9 +1326,9 @@
         + (cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '');
     await Promise.all(months.map((m) => guard(() => ensureMonth(m))));
     if (seq !== calSeq) return;
-    const plans = months.map(monthPlan), dayMap = new Map(), vast = new Map();
+    const plans = months.map(monthPlan), dayMap = new Map(), vast = new Map(), drops = new Map();
     plans.forEach((p) => p.days.forEach((v, k) => dayMap.set(k, v)));
-    plans.forEach((p, i) => vast.set(months[i], p.vast));
+    plans.forEach((p, i) => { vast.set(months[i], p.vast); drops.set(months[i], p.drop); });
     const body = $('calBody');
     const names = (items, date) => [...new Map((items || []).map((i) => [i.child.id, i.child])).values()].map((c) => `${dot(c, date)}${esc(firstName(c))}`).join(', ');
 
@@ -1375,7 +1391,7 @@
           <tr><td><span class="badge av-closed">gesloten / vakantie / ziek</span></td><td class="num">${tally.closed} dagen</td></tr></table>
           ${overWarn}<p class="hint" style="margin:10px 0 0">Tik op een dag om de week te openen.</p></div>`;
       } else {
-        const rows = withVast(sumChildren(inMonth), vast.get(mainM) || new Map());
+        const rows = withVast(sumChildren(inMonth), vast.get(mainM) || new Map(), drops.get(mainM));
         html += `<div class="card" style="margin-top:14px"><h2>Totaal ${esc(nlLong(d, { month: 'long' }))}</h2>${rows.length ? totalsTable(rows, true) : '<div class="empty">Geen uren in deze maand.</div>'}
           ${overWarn}<p class="hint" style="margin:10px 0 0">Tik op een dag om de week te openen. De weektotalen tellen ook dagen van een aangrenzende maand mee.</p></div>`;
       }
@@ -1409,9 +1425,10 @@
         const rows = new Map(sumChildren([].concat(...[...plans[i].days.values()].map(groupDay))).map((r) => [r.child.id, r]));
         let rowTot = 0;
         const cells = kids.map((c) => {
-          const r = rows.get(c.id) || { written: 0, planned: 0 }, v = plans[i].vast.get(c.id) || 0, tot = r.written + r.planned + v;
+          const r0 = rows.get(c.id) || { written: 0, planned: 0 }, v = plans[i].vast.get(c.id) || 0;
+          const r = { ...r0, written: Math.max(0, r0.written - (dropByChild(plans[i].drop).get(c.id) || 0)) }, tot = r.written + r.planned + v;
           colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot;
-          const parts = [r.written && `geschreven ${fmt(r.written)}`, r.planned && `gepland ${fmt(r.planned)}`, v && `vast ${fmt(v)}`].filter(Boolean);
+          const parts = [r.written && `${v ? 'extra' : 'geschreven'} ${fmt(r.written)}`, r.planned && `gepland ${fmt(r.planned)}`, v && `vast ${fmt(v)}`].filter(Boolean);
           return `<td class="num yearcell${tot && !r.written && m > nowM ? ' future' : ''}">${hrs(tot)}${parts.length > 1 || (parts.length === 1 && !r.written) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
         }).join('');
         const overN = [...plans[i].days.entries()].filter(([dt, it]) => isOver(dayFree(dt, it))).length;
@@ -1589,12 +1606,14 @@
       c[key] += eur; cells[i].set(child.id, c);
     };
     months.forEach((m, i) => {
-      monthPlan(m).days.forEach((items, date) => items.forEach((it) => {
+      const plan = monthPlan(m);
+      plan.days.forEach((items, date) => items.forEach((it) => {
         const x = findContract(it.contractId);
         if (!x) return;
         const rate = rateFor(x, date), { inside, outside } = splitMinutes({ date, start: it.start, end: it.end });
         if (rate === null) missing = true;
-        bump(i, it.child, it.kind === 'written' ? 'w' : 'p', ((inside + outside * factor) / 60) * (rate ?? 0));
+        const d = it.kind === 'written' && plan.drop.get(it.contractId), keep = d ? (d.written - d.min) / d.written : 1;   // vaste uren: alleen het meerdere telt
+        bump(i, it.child, it.kind === 'written' ? 'w' : 'p', keep * ((inside + outside * factor) / 60) * (rate ?? 0));
       }));
       fixedContracts(m).forEach((x) => {
         const hours = Number(x.contract.monthlyHours), rate = rateFor(x, m + '-01');
@@ -1629,7 +1648,7 @@
       const tds = kids.map((c) => {
         const cell = cells[i].get(c.id), tot = cellSum(cell);
         colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot;
-        const parts = cell ? [cell.w > 0.005 && `geschreven ${euro0(cell.w)}`, cell.p > 0.005 && `gepland ${euro0(cell.p)}`, cell.v > 0.005 && `vast ${euro0(cell.v)}`].filter(Boolean) : [];
+        const parts = cell ? [cell.w > 0.005 && `${cell.v > 0.005 ? 'extra' : 'geschreven'} ${euro0(cell.w)}`, cell.p > 0.005 && `gepland ${euro0(cell.p)}`, cell.v > 0.005 && `vast ${euro0(cell.v)}`].filter(Boolean) : [];
         return `<td class="num yearcell${tot > 0 && !(cell && cell.w > 0) && m > nowM ? ' future' : ''}">${tot > 0.005 ? euro(tot) : '–'}${parts.length > 1 || (parts.length === 1 && !(cell && (cell.w > 0 || cell.v > 0.005))) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
       }).join('');
       grand += rowTot;
