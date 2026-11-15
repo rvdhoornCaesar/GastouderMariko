@@ -27,6 +27,7 @@ async function checkAgencies(repo, contracts, existing) {
 async function createChild({ user, repo, body }) {
   perm.require(user, 'children:write');
   const child = { id: newId(), ...v.parseChild(body, newId) };
+  child.photo = child.photo ?? null;
   await checkAgencies(repo, child.contracts, null);
   await repo.saveChild(child);
   return { status: 201, jsonBody: child };
@@ -38,6 +39,7 @@ async function updateChild({ user, repo, params, body }) {
   const existing = await repo.getChild(id);
   if (!existing) throw new HttpError(404, 'Kind niet gevonden.');
   const child = { id, ...v.parseChild(body, newId) };
+  if (child.photo === undefined) child.photo = existing.photo || null;   // niet meegestuurd: de foto blijft
   await checkAgencies(repo, child.contracts, existing);
 
   // Verwijderde contracten nemen hun uren mee.
