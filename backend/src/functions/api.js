@@ -33,7 +33,12 @@ function route(name, methods, path, handler, { auth = 'both', allowMustChange = 
             try { body = JSON.parse(text); } catch { throw new HttpError(400, 'Ongeldige JSON.'); }
           }
         }
-        return await handler({ user, repo: db, env: process.env, params: request.params, query: Object.fromEntries(request.query), body, headers: request.headers });
+        // Vanaf hier ziet de handler alleen nog de gegevens van de administratie van de ingelogde gebruiker.
+        let scoped = db;
+        if (user) {
+          try { scoped = db.forInstance(user.instanceId); } catch { throw new HttpError(403, 'Geen toegang.'); }
+        }
+        return await handler({ user, repo: scoped, env: process.env, params: request.params, query: Object.fromEntries(request.query), body, headers: request.headers });
       } catch (e) {
         // Geweigerde toegang loggen we (naar Application Insights) om problemen met inloggen te kunnen vinden.
         if (e instanceof HttpError && [401, 403, 429].includes(e.status)) context.warn(`${e.status} ${request.method} ${new URL(request.url).pathname}: ${e.message} ${JSON.stringify(e.extra || {})}`);
