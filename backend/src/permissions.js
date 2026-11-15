@@ -8,9 +8,9 @@ const { HttpError } = require('./errors');
 // Platformbeheer (user.platformAdmin) staat los van een organisatie: het geeft het admin-tabblad, maar geen toegang tot de gegevens
 // van een organisatie. Daarvoor moet je lid zijn van die organisatie.
 const GEBRUIKER = ['entries:read', 'entries:write', 'children:read', 'settings:read'];
-const BEHEERDER = [...GEBRUIKER, 'children:write', 'settings:write', 'accounts:manage'];
+const BEHEERDER = [...GEBRUIKER, 'children:write', 'settings:write', 'accounts:manage', 'data:export'];
 const PERMISSIONS = { gebruiker: GEBRUIKER, beheerder: BEHEERDER };
-const PLATFORM = ['admin:view'];
+const PLATFORM = ['admin:view', 'orgs:manage'];
 const ROLES = Object.keys(PERMISSIONS);
 
 const permissionsOf = (role) => PERMISSIONS[role] || [];   // onbekende rol: geen enkel recht

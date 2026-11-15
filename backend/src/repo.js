@@ -156,6 +156,10 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
       if (!INSTANCE_ID.test(o.id)) throw new Error('Ongeldige administratie.');
       await (await table('organisations')).upsertEntity({ partitionKey: 'organisations', rowKey: o.id, name: o.name, status: o.status || 'active', createdAt: o.createdAt || '', deletedAt: o.deletedAt || '' }, 'Replace');
     },
+    async deleteOrganisation(id) {
+      if (!INSTANCE_ID.test(id)) return;
+      try { await (await table('organisations')).deleteEntity('organisations', id); } catch (e) { if (e.statusCode !== 404) throw e; }
+    },
     async getMembership(orgId, email) {
       if (!INSTANCE_ID.test(orgId) || !keySafe(email)) return null;
       try { return memberOf(await (await table('memberships')).getEntity(orgId, email)); } catch (e) { if (e.statusCode === 404) return null; throw e; }
@@ -228,6 +232,21 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     },
     async deleteEntry(id) {
       await (await table('entries')).deleteEntity(scope.id, id);
+    },
+    // Alle uren van deze administratie (voor een export).
+    listAllEntries() {
+      return listEntries('');
+    },
+    // Verwijdert alle gegevens van deze administratie (kinderen, uren, instellingen) en niets van een andere. Onomkeerbaar, behalve via een back-up.
+    async purgeInstanceData() {
+      const counts = {};
+      for (const name of ['children', 'entries', 'settings']) {
+        const t = await table(name);
+        const rows = own(await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${scope.id}'` } })));
+        for (const r of rows) await t.deleteEntity(r.partitionKey, r.rowKey);
+        counts[name] = rows.length;
+      }
+      return counts;
     },
     async deleteEntriesOfContracts(contractIds) {
       const t = await table('entries');
