@@ -2316,8 +2316,8 @@
   const fileToBase64 = (file) => file.arrayBuffer().then((buf) => { const bytes = new Uint8Array(buf); let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); });
   function showImport(r) {
     const e = r.entries;
-    $('importResult').innerHTML = `<p><strong>${r.applied ? 'Geïmporteerd' : 'Voorbeeld'} (${r.year}):</strong> ${e.add} uren ${r.applied ? 'toegevoegd' : 'toe te voegen'}${e.duplicate ? `, ${e.duplicate} stonden er al` : ''}${e.outside ? `, ${e.outside} buiten ${r.year}` : ''}${e.before ? `, ${e.before} vóór de begindatum` : ''}.</p>
-      <table><tr><th>Kind</th><th>Kind in app</th><th>Contract ${r.year}</th><th class="num">Uren</th></tr>${r.children.map((c) => `<tr><td>${esc(c.name)}</td><td>${c.child}</td><td>${c.contract}</td><td class="num">${c.entries}${c.duplicates ? ` <small class="sub">(+${c.duplicates} al aanwezig)</small>` : ''}</td></tr>`).join('')}</table>
+    $('importResult').innerHTML = `<p><strong>${r.applied ? 'Geïmporteerd' : 'Voorbeeld'} (${r.year}):</strong> ${e.add} registraties (${hrs(e.minutes)} uur) ${r.applied ? 'toegevoegd' : 'toe te voegen'}${e.duplicate ? `, ${e.duplicate} stonden er al` : ''}${e.outside ? `, ${e.outside} buiten ${r.year}` : ''}${e.before ? `, ${e.before} vóór de begindatum` : ''}.</p>
+      <table><tr><th>Kind</th><th>Kind in app</th><th>Contract ${r.year}</th><th class="num">Registraties</th><th class="num">Uren</th></tr>${r.children.map((c) => `<tr><td>${esc(c.name)}</td><td>${c.child}</td><td>${c.contract}</td><td class="num">${c.entries}${c.duplicates ? ` <small class="sub">(+${c.duplicates} al aanwezig)</small>` : ''}</td><td class="num">${hrs(c.minutes)}</td></tr>`).join('')}</table>
       ${r.warnings.length ? `<div class="warn" style="margin-top:8px">${r.warnings.map((w) => `<div>${esc(w)}</div>`).join('')}</div>` : ''}`;
   }
   $('importFile').addEventListener('change', async (ev) => {

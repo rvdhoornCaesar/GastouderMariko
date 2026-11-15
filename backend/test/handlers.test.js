@@ -697,6 +697,7 @@ test('import van de Excel-planning: alleen platformbeheer, voorbeeld zonder opsl
   assert.equal(preview.applied, false);
   assert.equal(preview.year, 2025);
   assert.deepEqual(preview.children.map((c) => [c.name, c.child, c.entries]), [['Imp Eerste', 'nieuw', 2], ['Tweede Kind', 'nieuw', 1], ['Zonder', 'nieuw', 0]]);
+  assert.equal(preview.entries.minutes, 8.5 * 60 + 3.25 * 60 + 60);   // 08:30–17:00, 09:00–12:15 en 10:00–11:00
   assert.equal(preview.entries.outside, 1);                       // 31-12-2024 valt buiten het jaar
   assert.ok(preview.warnings.some((w) => /Onbekend/.test(w)) && preview.warnings.some((w) => /eindtijd/.test(w)));
   assert.equal((await repo.listChildren()).length, before);       // voorbeeld slaat niets op

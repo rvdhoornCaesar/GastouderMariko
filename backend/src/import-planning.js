@@ -12,6 +12,7 @@ const newId = () => Math.random().toString(36).slice(2, 10).padEnd(8, '0');
 const SERIAL_MIN = 20000, SERIAL_MAX = 80000;   // Excel-datums (1954 t/m 2118); tijden zijn delen van een dag (< 1)
 const isoOfSerial = (n) => new Date(Math.round((Math.floor(n) - 25569) * 86400000)).toISOString().slice(0, 10);
 const hhmm = (f) => { const m = Math.round(f * 1440); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
+const mins = (e) => (+e.end.slice(0, 2) * 60 + +e.end.slice(3)) - (+e.start.slice(0, 2) * 60 + +e.start.slice(3));
 const key = (first, last) => `${String(first).trim().toLowerCase()}|${String(last || '').trim().toLowerCase()}`;
 const str = (x) => (typeof x === 'string' ? x.replace(/\s+/g, ' ').trim() : '');
 
@@ -137,9 +138,9 @@ async function runImport({ repo, parsed, apply }) {
     name: [p.src.firstName, p.src.lastName].filter(Boolean).join(' '),
     child: p.isNew ? 'nieuw' : 'bestaat al',
     contract: p.newContract ? 'nieuw' : 'bestaand',
-    entries: p.add.length, duplicates: p.duplicate,
+    entries: p.add.length, duplicates: p.duplicate, minutes: p.add.reduce((s, e) => s + mins(e), 0),
   }));
-  return { applied: !!apply, year, children: rows, entries: { found: entries.length, add: rows.reduce((s, r) => s + r.entries, 0), duplicate: rows.reduce((s, r) => s + r.duplicates, 0), outside, before }, warnings };
+  return { applied: !!apply, year, children: rows, entries: { found: entries.length, minutes: rows.reduce((s, r) => s + r.minutes, 0), add: rows.reduce((s, r) => s + r.entries, 0), duplicate: rows.reduce((s, r) => s + r.duplicates, 0), outside, before }, warnings };
 }
 
 module.exports = { parsePlanning, runImport };
