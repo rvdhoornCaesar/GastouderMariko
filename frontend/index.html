@@ -480,6 +480,13 @@
       <div class="err" id="userErr"></div>
     </div>
 
+    <div class="card" id="exportCard" hidden>
+      <h2>Gegevens downloaden</h2>
+      <p class="hint">Alles van deze organisatie (kinderen, contracten, alle uren, instellingen en leden) als één bestand (JSON). Het bevat persoonsgegevens van kinderen en ouders: bewaar het veilig.</p>
+      <button class="btn secondary" id="exportBtn">Downloaden</button>
+      <div class="err" id="exportErr"></div>
+    </div>
+
     <p class="hint" id="runtimeInfo"></p>
   </section>
   <!-- ACCOUNT (alleen lokale accounts) -->
@@ -520,9 +527,22 @@
   <!-- ADMIN -->
   <section id="tab-admin" hidden>
     <div class="card">
-      <h2>Admin</h2>
-      <p class="hint">Hier komen later de beheeronderdelen voor admins. Nu is er nog niets.</p>
+      <h2>Organisaties</h2>
+      <p class="hint">Een organisatie is een losse administratie met eigen kinderen, uren, instellingen en gebruikers. Als platformbeheerder zie je hier alleen de organisaties zelf, nooit de gegevens erin; daarvoor moet je lid zijn van die organisatie.</p>
+      <div id="orgList"></div>
+      <div id="orgTemp" class="card" hidden style="margin-top:10px"></div>
     </div>
+    <form class="card" id="orgForm">
+      <h2>Organisatie toevoegen</h2>
+      <label for="orgNewName">Naam</label>
+      <input type="text" id="orgNewName" maxlength="100" required>
+      <label for="orgNewMgr" style="margin-top:8px">Eerste beheerder (e-mailadres, mag leeg)</label>
+      <input type="email" id="orgNewMgr" autocomplete="off">
+      <label for="orgNewLogin" style="margin-top:8px">Inloggen van de beheerder</label>
+      <select id="orgNewLogin"><option value="microsoft">Microsoft-account</option><option value="lokaal">Lokaal account (tijdelijk wachtwoord)</option></select>
+      <div class="err" id="orgErr"></div>
+      <button class="btn" style="margin-top:8px">Toevoegen</button>
+    </form>
   </section>
 </main>
 <div id="toast" role="alert" hidden></div>
@@ -2072,10 +2092,90 @@
     });
     const active = document.querySelector('nav button.active');
     if (active && active.hidden) document.querySelector(noOrg ? 'nav button[data-tab=admin]' : 'nav button[data-tab=uren]').click();
+    $('exportCard').hidden = !can('data:export');
     $('accRole').innerHTML = roleOptions('gebruiker', assignable());
     renderOrg();
     $('accountInfo').textContent = me ? `Ingelogd als ${me.email} (${ROLE_LABELS[me.role] || me.role}).` : '';
   }
+
+  // --- Platformbeheer: organisaties (tabblad Admin) ---
+  let orgs = [], retentionDays = 30;
+  async function loadOrgs() {
+    if (!can('orgs:manage')) return;
+    const r = await guard(() => api('GET', 'organisations'));
+    if (r) { orgs = r.organisations; retentionDays = r.retentionDays; renderOrgs(); }
+  }
+  function renderOrgs() {
+    $('orgList').innerHTML = orgs.length ? orgs.map((o) => {
+      const deleted = o.status === 'deleted', ready = deleted && o.purgeAfter && new Date() >= new Date(o.purgeAfter);
+      return `<div class="entry" style="flex-wrap:wrap"><div style="min-width:0;overflow-wrap:anywhere;flex:1 1 100%"><div class="who">${esc(o.name)}${deleted ? '<span class="tag">verwijderd</span>' : ''}</div>
+        <div class="meta">id <code>${esc(o.id)}</code> · ${o.members} ${o.members === 1 ? 'lid' : 'leden'}, ${o.managers} ${o.managers === 1 ? 'beheerder' : 'beheerders'}${deleted ? ` · definitief verwijderen kan vanaf ${nlDate(o.purgeAfter.slice(0, 10))}` : ''}</div></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          ${deleted ? `<button class="btn secondary small" data-orgrestore="${esc(o.id)}">Terugzetten</button>
+            <button class="btn secondary small" data-orgpurge="${esc(o.id)}" ${ready ? '' : 'disabled title="Pas na de bewaartermijn"'}>Definitief verwijderen</button>`
+            : `<button class="btn secondary small" data-orgrename="${esc(o.id)}">Naam wijzigen</button>
+            <button class="btn secondary small" data-orgmgr="${esc(o.id)}">Beheerder toevoegen</button>
+            <button class="link" data-orgdelete="${esc(o.id)}" title="Verwijderen">✕</button>`}
+        </div></div>`;
+    }).join('') : '<div class="empty">Nog geen organisaties.</div>';
+  }
+  function showOrgMsg(html) {
+    const box = $('orgTemp');
+    box.hidden = false;
+    box.innerHTML = `${html}<button class="btn secondary small" id="orgTempClose" style="margin-top:6px">Sluiten</button>`;
+    $('orgTempClose').onclick = () => { box.hidden = true; box.innerHTML = ''; };
+  }
+  const managerMsg = (m) => !m ? '' : m.tempPassword
+    ? `<p class="hint">Tijdelijk wachtwoord voor <strong>${esc(m.email)}</strong>. Geef dit door en sluit deze melding; het wordt hierna niet meer getoond.</p><p style="font-size:1.3rem;font-family:monospace;margin:6px 0">${esc(m.tempPassword)}</p>`
+    : m.login === 'lokaal' || m.existing ? `<p class="hint"><strong>${esc(m.email)}</strong> is toegevoegd${m.existing ? ' en had al een account: de persoon logt in met het eigen wachtwoord' : ''}.</p>`
+      : `<p class="hint"><strong>${esc(m.email)}</strong> is toegevoegd en logt in met een Microsoft-account.</p>`;
+  $('orgForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault(); $('orgErr').textContent = '';
+    try {
+      const r = await api('POST', 'organisations', { name: $('orgNewName').value, managerEmail: $('orgNewMgr').value || undefined, login: $('orgNewLogin').value });
+      ev.target.reset();
+      showOrgMsg(`<p class="hint">Organisatie <strong>${esc(r.organisation.name)}</strong> is aangemaakt.</p>${managerMsg(r.manager)}`);
+      await loadOrgs();
+    } catch (e) { if (!e.noAccess) $('orgErr').textContent = e.message; }
+  });
+  $('orgList').addEventListener('click', async (ev) => {
+    const d = ev.target.dataset, o = (id) => orgs.find((x) => x.id === id);
+    if (d.orgrename) {
+      const name = prompt('Nieuwe naam van de organisatie:', o(d.orgrename).name);
+      if (name && await guard(() => api('PUT', `organisations/${d.orgrename}`, { name }).then(() => true))) await loadOrgs();
+    } else if (d.orgmgr) {
+      const email = prompt('E-mailadres van de nieuwe beheerder:');
+      if (!email) return;
+      const lokaal = confirm('Moet de beheerder met een lokaal account inloggen (tijdelijk wachtwoord)?\n\nOK = lokaal account, Annuleren = Microsoft-account.');
+      const r = await guard(() => api('POST', `organisations/${d.orgmgr}/managers`, { email, login: lokaal ? 'lokaal' : 'microsoft' }));
+      if (r) { showOrgMsg(managerMsg(r)); await loadOrgs(); }
+    } else if (d.orgdelete) {
+      if (confirm(`Organisatie "${o(d.orgdelete).name}" verwijderen?\n\nDe leden kunnen er direct niet meer in. De gegevens blijven ${retentionDays} dagen bewaard en je kunt hem terugzetten.`)) {
+        if (await guard(() => api('POST', `organisations/${d.orgdelete}/delete`).then(() => true))) await loadOrgs();
+      }
+    } else if (d.orgrestore) {
+      if (await guard(() => api('POST', `organisations/${d.orgrestore}/restore`).then(() => true))) await loadOrgs();
+    } else if (d.orgpurge) {
+      const confirmId = prompt(`Definitief verwijderen kan niet ongedaan worden gemaakt (alleen via een eerdere back-up).\n\nTyp de id van de organisatie ter bevestiging:\n${d.orgpurge}`);
+      if (confirmId === null) return;
+      const r = await guard(() => api('POST', `organisations/${d.orgpurge}/purge`, { confirm: confirmId }));
+      if (r) { showOrgMsg(`<p class="hint">Definitief verwijderd: ${r.children} kinderen, ${r.entries} uren, ${r.settings} instellingen, ${r.members} leden, ${r.accounts} accounts.</p>`); await loadOrgs(); }
+    }
+  });
+
+  // --- Export van de eigen organisatie (beheerder) ---
+  $('exportBtn').onclick = async () => {
+    $('exportErr').textContent = '';
+    try {
+      const data = await api('GET', 'export');
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `export-${data.organisation.id}-${iso(new Date())}.json`;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    } catch (e) { if (!e.noAccess) $('exportErr').textContent = e.message; }
+  };
 
   let accounts = [];
   function renderAccounts() {
@@ -2147,6 +2247,7 @@
     showOnly('app');
     $('user').textContent = currentUser;
     applyRole();
+    loadOrgs();
     if (me && !me.organisation) return;   // alleen platformbeheer: er zijn geen gegevens om te laden
     const [children, settings] = await Promise.all([guard(() => api('GET', 'children')), guard(() => api('GET', 'settings'))]);
     if (children) state.children = children;

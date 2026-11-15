@@ -206,10 +206,17 @@ function parseAccountEmail(v) {
   return e;
 }
 
+// Naam van een organisatie: gewone tekst, 1 tot 100 tekens.
+function parseOrgName(v) {
+  const n = String(v ?? '').replace(/\s+/g, ' ').trim();
+  if (!n || n.length > 100 || /[\u0000-\u001f\u007f-\u009f<>]/.test(n)) throw bad('Geef een naam van 1 tot 100 tekens.');
+  return n;
+}
+
 function parseRole(v) {
   const r = String(v ?? '').trim();
   if (!require('./permissions').ROLES.includes(r)) throw bad('Ongeldige rol.');
   return r;
 }
 
-module.exports = { parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
+module.exports = { parseOrgName, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };

@@ -2,7 +2,7 @@ const { app } = require('@azure/functions');
 const { authorizeMicrosoft, authorizeSession } = require('../auth');
 const { HttpError } = require('../errors');
 const { createRepo } = require('../repo');
-const handlers = require('../handlers');
+const handlers = { ...require('../handlers'), ...require('../admin-handlers') };
 const { ensureSeeded } = require('../organisations');
 
 let repo;
@@ -88,3 +88,13 @@ route('createAccount', ['POST'], 'accounts', handlers.createAccount);
 route('setAccountRole', ['PUT'], 'accounts/{email}/role', handlers.setAccountRole);
 route('resetAccount', ['POST'], 'accounts/{email}/reset', handlers.resetAccount);
 route('deleteAccount', ['DELETE'], 'accounts/{email}', handlers.deleteAccount);
+
+// Platformbeheer (organisaties) en export van de eigen organisatie
+route('listOrganisations', ['GET'], 'organisations', handlers.listOrganisations);
+route('createOrganisation', ['POST'], 'organisations', handlers.createOrganisation);
+route('renameOrganisation', ['PUT'], 'organisations/{id}', handlers.renameOrganisation);
+route('addOrganisationManager', ['POST'], 'organisations/{id}/managers', handlers.addOrganisationManager);
+route('deleteOrganisation', ['POST'], 'organisations/{id}/delete', handlers.deleteOrganisation);
+route('restoreOrganisation', ['POST'], 'organisations/{id}/restore', handlers.restoreOrganisation);
+route('purgeOrganisation', ['POST'], 'organisations/{id}/purge', handlers.purgeOrganisation);
+route('exportData', ['GET'], 'export', handlers.exportData);
