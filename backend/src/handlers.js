@@ -118,7 +118,7 @@ async function getSettings({ user, repo, env }) {
   perm.require(user, 'settings:read');
   const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
   const manage = perm.can(user, 'settings:write');   // wie mag toegang regelen, ziet de gebruikerslijsten en de technische info
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await repo.getUsers() : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), startDate: await repo.getStartDate(), runtime: manage ? process.version : undefined } };
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), startDate: await repo.getStartDate(), runtime: manage ? process.version : undefined } };
 }
 
 async function putRates({ user, repo, body }) {
@@ -156,12 +156,24 @@ async function putOpening({ user, repo, body }) {
   return { status: 200, jsonBody: { opening } };
 }
 
-async function putUsers({ user, repo, env, body }) {
+// Microsoft-gebruikers van een organisatie: leden zonder lokaal account (die staan bij Lokale accounts) en niet de vaste beheerders.
+async function msMembers(repo, orgId, env) {
+  const fixed = fixedUsers(env), out = [];
+  for (const m of await repo.listMembersOf(orgId)) if (!fixed.includes(m.email) && !(await repo.getAccount(m.email))) out.push(m.email);
+  return out;
+}
+
+async function putUsers({ user, repo, env, body, now = new Date() }) {
   perm.require(user, 'settings:write');
   const fixed = fixedUsers(env);
   const users = v.parseUsers(body && body.users).filter((e) => !fixed.includes(e));
-  if (!user.fixed && !users.includes(user.email)) throw new HttpError(400, 'Je kunt jezelf niet verwijderen.');
-  await repo.setUsers(users);
+  if (!user.fixed && !users.includes(user.email) && !(await repo.getAccount(user.email))) throw new HttpError(400, 'Je kunt jezelf niet verwijderen.');
+  const current = await msMembers(repo, user.instanceId, env);
+  for (const email of users) {
+    if (!(await repo.getMembership(user.instanceId, email))) await repo.saveMembership({ orgId: user.instanceId, email, role: 'beheerder', createdAt: now.toISOString(), source: 'toegestane gebruiker' });
+  }
+  for (const email of current) if (!users.includes(email)) await repo.deleteMembership(user.instanceId, email);
+  await repo.setUsers(users);   // ook in de oude lijst, zodat terugdraaien naar de vorige versie dezelfde toegang geeft
   return { status: 200, jsonBody: { users } };
 }
 
@@ -172,7 +184,7 @@ const MAX_FAILED = 5;   // na elke 5 mislukte pogingen een blokkade van 15 minut
 const lockMinutes = (count) => Math.min(15 * 2 ** (Math.floor(count / MAX_FAILED) - 1), 24 * 60);
 const throttleKey = (email) => P.hashToken(`login:${email}`);
 const toAccount = (e) => ({ email: e.rowKey, name: e.name, role: e.role, instanceId: e.instanceId, passwordHash: e.passwordHash, mustChange: e.mustChange, createdAt: e.createdAt, lastLogin: e.lastLogin,
-  totpSecret: e.totpSecret, totpPending: e.totpPending, totpLastStep: e.totpLastStep, recoveryCodes: e.recoveryCodes });
+  totpSecret: e.totpSecret, totpPending: e.totpPending, totpLastStep: e.totpLastStep, recoveryCodes: e.recoveryCodes, platformAdmin: e.platformAdmin });
 const publicAccount = ({ email, name, role, instanceId, mustChange, createdAt, lastLogin, totpSecret }) => ({ email, name, role, instanceId, mustChange: !!mustChange, totp: !!totpSecret, createdAt, lastLogin: lastLogin || null });
 
 async function checkThrottle(repo, key, now) {
@@ -307,7 +319,9 @@ async function logout({ repo, headers }) {
 }
 
 async function me({ user }) {
-  return { status: 200, jsonBody: { kind: user.kind, email: user.email, name: user.name, role: user.role, permissions: perm.permissionsOf(user.role), assignableRoles: perm.assignableRoles(user.role), mustChange: user.mustChange, totp: !!user.totp } };
+  return { status: 200, jsonBody: { kind: user.kind, email: user.email, name: user.name, role: user.role, platformAdmin: !!user.platformAdmin,
+    organisation: user.organisation, organisations: user.organisations || [],
+    permissions: perm.permissionsFor(user), assignableRoles: perm.assignableRoles(user.role), mustChange: user.mustChange, totp: !!user.totp } };
 }
 
 async function changePassword({ user, repo, body, now = new Date() }) {
@@ -332,41 +346,57 @@ async function changePassword({ user, repo, body, now = new Date() }) {
 
 const requireAdmin = (user) => perm.require(user, 'accounts:manage');
 
-// Een account mag alleen beheerd worden binnen de eigen instantie, met een rol tot en met die van jezelf, en nooit je eigen account
-// (je eigen wachtwoord wijzig je bij Account; zo kun je jezelf ook niet buitensluiten of een hogere rol geven).
-const manageable = (user, a) => perm.canManageRole(user, a.role) && a.instanceId === user.instanceId && a.email !== user.email;
+// Accounts beheren = de leden van de eigen organisatie die een lokaal account hebben. Je beheert alleen leden met een rol tot en met die van
+// jezelf en nooit je eigen lidmaatschap (je eigen wachtwoord wijzig je bij Account; zo kun je jezelf ook niet buitensluiten of verheffen).
+// Een account is van de persoon en kan in meerdere organisaties een lidmaatschap hebben; de rol hoort bij het lidmaatschap.
+const manageable = (user, m) => perm.canManageRole(user, m.role) && m.email !== user.email;
 async function manageTarget(user, repo, rawEmail) {
   requireAdmin(user);
   const email = v.parseAccountEmail(decodeURIComponent(rawEmail));
-  const entity = await repo.getAccount(email);
-  if (!entity) throw new HttpError(404, 'Account niet gevonden.');
-  if (!manageable(user, toAccount(entity))) throw new HttpError(403, 'Je kunt dit account niet beheren.');
-  return entity;
+  const member = await repo.getMembership(user.instanceId, email), entity = await repo.getAccount(email);
+  if (!member || !entity) throw new HttpError(404, 'Account niet gevonden.');
+  if (!manageable(user, member)) throw new HttpError(403, 'Je kunt dit account niet beheren.');
+  return { member, entity };
 }
+const memberAccount = (m, entity, instanceId) => ({ ...publicAccount(toAccount(entity)), role: m.role, instanceId });
 
 async function listAccounts({ user, repo }) {
   requireAdmin(user);
-  const list = (await repo.listAccounts()).map(toAccount).filter((a) => a.instanceId === user.instanceId)
-    .map((a) => ({ ...publicAccount(a), manageable: manageable(user, a) })).sort((a, b) => a.email.localeCompare(b.email));
+  const list = [];
+  for (const m of await repo.listMembersOf(user.instanceId)) {
+    const entity = await repo.getAccount(m.email);
+    if (entity) list.push({ ...memberAccount(m, entity, user.instanceId), manageable: manageable(user, m) });
+  }
   return { status: 200, jsonBody: list };
 }
 
-// Het tijdelijke wachtwoord wordt maar één keer getoond; daarna staat er alleen een hash.
+// Het tijdelijke wachtwoord wordt maar één keer getoond; daarna staat er alleen een hash. Bestaat het adres al (de persoon zit in een andere
+// organisatie), dan wordt alleen het lidmaatschap toegevoegd: de persoon houdt zijn eigen wachtwoord en er komt geen tijdelijk wachtwoord.
 async function createAccount({ user, repo, body, now = new Date() }) {
   requireAdmin(user);
   const email = v.parseAccountEmail(body && body.email);
   const role = body && body.role !== undefined ? v.parseRole(body.role) : 'gebruiker';   // standaard de minste rechten
   if (!perm.canManageRole(user, role)) throw new HttpError(403, 'Je kunt geen account met deze rol aanmaken.');
-  if (await repo.getAccount(email)) throw new HttpError(409, 'Er bestaat al een account met dit e-mailadres.');
-  const tempPassword = P.generateTempPassword();
-  const account = { email, name: String((body && body.name) ?? '').trim().slice(0, 100), role, instanceId: user.instanceId, mustChange: true, createdAt: now.toISOString() };
-  await repo.saveAccount({ ...account, passwordHash: await P.hashPassword(tempPassword) });
-  return { status: 201, jsonBody: { account: publicAccount(account), tempPassword } };
+  if (await repo.getMembership(user.instanceId, email)) throw new HttpError(409, 'Dit e-mailadres is al lid van deze organisatie.');
+  let entity = await repo.getAccount(email), tempPassword = null;
+  if (!entity) {
+    tempPassword = P.generateTempPassword();
+    // role en instanceId in het account zelf zijn alleen nog voor terugdraaien naar de vorige versie; de lidmaatschappen gelden.
+    await repo.saveAccount({ email, name: String((body && body.name) ?? '').trim().slice(0, 100), role, instanceId: user.instanceId, mustChange: true, createdAt: now.toISOString(), passwordHash: await P.hashPassword(tempPassword) });
+    entity = await repo.getAccount(email);
+  }
+  await repo.saveMembership({ orgId: user.instanceId, email, role, createdAt: now.toISOString(), source: 'accountbeheer' });
+  return { status: 201, jsonBody: { account: memberAccount({ role }, entity, user.instanceId), tempPassword, existing: tempPassword === null } };
 }
 
+// Alleen als dit account nergens anders lid is. Anders zou een beheerder van de ene organisatie via een nieuw wachtwoord in een andere
+// organisatie kunnen komen. De persoon wijzigt dan zelf zijn wachtwoord.
 async function resetAccount({ user, repo, params }) {
-  const entity = await manageTarget(user, repo, params.email);
+  const { entity } = await manageTarget(user, repo, params.email);
   const email = entity.rowKey;
+  if ((await repo.listMembershipsOf(email)).some((m) => m.orgId !== user.instanceId)) {
+    throw new HttpError(403, 'Dit account hoort ook bij een andere organisatie; alleen de gebruiker zelf kan het wachtwoord wijzigen.');
+  }
   const tempPassword = P.generateTempPassword();
   await repo.saveAccount({ ...toAccount(entity), passwordHash: await P.hashPassword(tempPassword), mustChange: true, totpSecret: '', totpPending: '', totpLastStep: 0, recoveryCodes: '[]' }); // ook 2FA terugzetten: telefoon kwijt is een gewone reden voor een reset
   await repo.deleteSessionsOf(email);
@@ -375,19 +405,23 @@ async function resetAccount({ user, repo, params }) {
 }
 
 async function setAccountRole({ user, repo, params, body }) {
-  const entity = await manageTarget(user, repo, params.email);
+  const { member, entity } = await manageTarget(user, repo, params.email);
   const role = v.parseRole(body && body.role);
   if (!perm.canManageRole(user, role)) throw new HttpError(403, 'Je kunt deze rol niet toekennen.');
-  await repo.saveAccount({ ...toAccount(entity), role });
-  await repo.deleteSessionsOf(entity.rowKey);   // rechten veranderen: opnieuw inloggen
-  return { status: 200, jsonBody: publicAccount({ ...toAccount(entity), role }) };
+  await repo.saveMembership({ orgId: user.instanceId, email: member.email, role, createdAt: member.createdAt, source: member.source });
+  return { status: 200, jsonBody: memberAccount({ role }, entity, user.instanceId) };   // de rol geldt bij het eerstvolgende verzoek
 }
 
+// Verwijdert het lidmaatschap. Het account zelf verdwijnt pas als de persoon nergens meer lid is.
 async function deleteAccount({ user, repo, params }) {
-  const entity = await manageTarget(user, repo, params.email);
-  await repo.deleteSessionsOf(entity.rowKey);
-  await repo.deleteAccount(entity.rowKey);
-  await repo.clearThrottle(throttleKey(entity.rowKey));
+  const { entity } = await manageTarget(user, repo, params.email);
+  const email = entity.rowKey;
+  await repo.deleteMembership(user.instanceId, email);
+  if (!(await repo.listMembershipsOf(email)).length) {
+    await repo.deleteSessionsOf(email);
+    await repo.deleteAccount(email);
+    await repo.clearThrottle(throttleKey(email));
+  }
   return { status: 204 };
 }
 

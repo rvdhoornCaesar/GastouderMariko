@@ -13,9 +13,9 @@ on:
         options: [test, production]
         default: test
       action:
-        description: backup = nieuwe back-up, list = overzicht, restore = terugzetten
+        description: backup = nieuwe back-up, list = overzicht, restore = terugzetten, plan-organisaties = voorbeeld van de overstap naar organisaties (alleen lezen)
         type: choice
-        options: [backup, list, restore]
+        options: [backup, list, restore, plan-organisaties]
         default: backup
       label:
         description: Omschrijving bij een nieuwe back-up (bijvoorbeeld "voor migratie")
@@ -74,6 +74,7 @@ jobs:
           APPLY: ${{ inputs.apply }}
           REPLACE: ${{ inputs.replace }}
           ENVIRONMENT: ${{ inputs.environment }}
+          ALLOWED_USERS: ${{ vars.ALLOWED_USERS }}
         run: |
           set -euo pipefail
           account=$(az storage account list -g "$RESOURCE_GROUP" --query "[?starts_with(name,'gastouder')].name | [0]" -o tsv)

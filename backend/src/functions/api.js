@@ -3,6 +3,7 @@ const { authorizeMicrosoft, authorizeSession } = require('../auth');
 const { HttpError } = require('../errors');
 const { createRepo } = require('../repo');
 const handlers = require('../handlers');
+const { ensureSeeded } = require('../organisations');
 
 let repo;
 const getRepo = () => (repo ||= createRepo(process.env.TABLES_CONNECTION || process.env.AzureWebJobsStorage));
@@ -20,10 +21,11 @@ function route(name, methods, path, handler, { auth = 'both', allowMustChange = 
     handler: async (request, context) => {
       try {
         const db = getRepo();
+        await ensureSeeded(db, process.env);   // eerste keer na de overstap naar organisaties: lidmaatschappen vullen uit de oude gegevens (daarna niets meer)
         const unsafe = !['GET', 'HEAD'].includes(request.method);
         let user = null;
         if (mode === 'ms') user = await authorizeMicrosoft(request.headers, db);
-        else if (mode === 'session') user = await authorizeSession(request.headers, request.method, db);
+        else if (mode === 'session') user = await authorizeSession(request.headers, request.method, db, new Date(), process.env);
         else if (unsafe && !request.headers.get('x-requested-with')) throw new HttpError(403, 'Ongeldig verzoek.');
         if (user && user.mustChange && !allowMustChange) throw new HttpError(403, 'Je moet eerst je wachtwoord wijzigen.', { code: 'password_change_required' });
         let body;
@@ -33,10 +35,11 @@ function route(name, methods, path, handler, { auth = 'both', allowMustChange = 
             try { body = JSON.parse(text); } catch { throw new HttpError(400, 'Ongeldige JSON.'); }
           }
         }
-        // Vanaf hier ziet de handler alleen nog de gegevens van de administratie van de ingelogde gebruiker.
+        // Vanaf hier ziet de handler alleen nog de gegevens van de actieve organisatie van de ingelogde gebruiker. Heeft die er geen (alleen
+        // platformbeheer), dan is de repo zonder administratie: gedeelde tabellen wel, kinderen, uren en instellingen nooit.
         let scoped = db;
         if (user) {
-          try { scoped = db.forInstance(user.instanceId); } catch { throw new HttpError(403, 'Geen toegang.'); }
+          try { scoped = db.forInstance(user.instanceId === undefined ? undefined : user.instanceId); } catch { throw new HttpError(403, 'Geen toegang.'); }
         }
         return await handler({ user, repo: scoped, env: process.env, params: request.params, query: Object.fromEntries(request.query), body, headers: request.headers });
       } catch (e) {

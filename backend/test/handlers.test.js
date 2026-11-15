@@ -12,7 +12,7 @@ const { CODE_ADMINS } = require('../src/auth');
 // Draait tegen een echte Azurite (lokale Table Storage-emulator).
 let azurite, repo, dir;
 const env = { ALLOWED_USERS: 'mariko@voorbeeld.nl' };
-const fixedUser = { email: 'mariko@voorbeeld.nl', fixed: true, role: 'admin' };
+const fixedUser = { email: 'mariko@voorbeeld.nl', fixed: true, platformAdmin: true, role: 'beheerder', instanceId: 'main' };
 const K = (k) => ({ start: '2026-01-01', end: '2026-12-31', ...k });
 const call = (fn, extra = {}) => fn({ user: fixedUser, repo, env, params: {}, query: {}, ...extra });
 
@@ -29,6 +29,7 @@ test.before(async () => {
   azurite = spawn(process.execPath, [require.resolve('azurite/dist/src/table/main.js'), '--silent', '--location', dir, '--tablePort', '10112', '--skipApiVersionCheck'], { stdio: 'inherit' });
   await waitForPort(10112);
   repo = createRepo(`DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;TableEndpoint=http://127.0.0.1:10112/devstoreaccount1;`);
+  await repo.saveOrganisation({ id: 'main', name: 'Gastouder Mariko', createdAt: '2026-01-01' });
 });
 test.after(() => { azurite.kill(); fs.rmSync(dir, { recursive: true, force: true }); });
 
@@ -152,7 +153,7 @@ test('gebruikers: toevoegen, normaliseren, vaste gebruikers niet dubbel', async 
 });
 
 test('gebruikers: een toegevoegde gebruiker kan zichzelf niet verwijderen', async () => {
-  const partner = { email: 'partner@voorbeeld.nl', fixed: false, role: 'beheerder' };
+  const partner = { email: 'partner@voorbeeld.nl', fixed: false, role: 'beheerder', instanceId: 'main' };
   await assert.rejects(h.putUsers({ user: partner, repo, env, body: { users: [] } }), { status: 400, message: 'Je kunt jezelf niet verwijderen.' });
   // anderen verwijderen of zichzelf behouden mag wel
   const ok = await h.putUsers({ user: partner, repo, env, body: { users: ['partner@voorbeeld.nl', 'extra@voorbeeld.nl'] } });
@@ -299,7 +300,7 @@ test('begindatum gastouder: instellen, wissen, validatie; uren ervoor worden gen
 });
 
 // --- Lokale accounts ---
-const admin = { email: 'mariko@voorbeeld.nl', kind: 'microsoft', fixed: true, role: 'admin', instanceId: 'main' };
+const admin = { email: 'mariko@voorbeeld.nl', kind: 'microsoft', fixed: true, platformAdmin: true, role: 'beheerder', instanceId: 'main' };   // beheerder van main en platformbeheerder
 const PW = 'koekjes-tomaat-fiets-42';
 const hdr = (cookie) => ({ get: (n) => (n === 'cookie' ? cookie : null) });
 const cookieOf = (res) => `${res.cookies[0].name}=${res.cookies[0].value}`;
@@ -508,17 +509,20 @@ test('beheerder ziet de gebruikerslijsten en technische info', async () => {
 test('account aanmaken met rol (standaard gebruiker) en rol wijzigen', async () => {
   const a = (await h.createAccount({ user: admin, repo, body: { email: 'rol1@voorbeeld.nl' } })).jsonBody;
   assert.equal(a.account.role, 'gebruiker');
+  assert.equal(a.existing, false);
   const b = (await h.createAccount({ user: admin, repo, body: { email: 'rol2@voorbeeld.nl', role: 'beheerder' } })).jsonBody;
   assert.equal(b.account.role, 'beheerder');
   await assert.rejects(h.createAccount({ user: admin, repo, body: { email: 'rol3@voorbeeld.nl', role: 'god' } }), { status: 400 });
+  await assert.rejects(h.createAccount({ user: admin, repo, body: { email: 'rol3@voorbeeld.nl', role: 'admin' } }), { status: 400 });   // admin is geen rol in een organisatie
 
   const login = await h.login({ repo, env: tenv, body: { email: 'rol1@voorbeeld.nl', password: a.tempPassword } });
   const sess = await authorizeSession(hdr(cookieOf(login)), 'GET', repo);
   assert.equal(sess.role, 'gebruiker');
+  assert.equal(sess.instanceId, 'main');
   await assert.rejects(h.setAccountRole({ user: { ...admin, role: 'gebruiker' }, repo, params: { email: 'rol1@voorbeeld.nl' }, body: { role: 'beheerder' } }), { status: 403 });
   const r = await h.setAccountRole({ user: admin, repo, params: { email: 'rol1%40voorbeeld.nl' }, body: { role: 'beheerder' } });
   assert.equal(r.jsonBody.role, 'beheerder');
-  await assert.rejects(authorizeSession(hdr(cookieOf(login)), 'GET', repo), { status: 401 });   // sessies beëindigd
+  assert.equal((await authorizeSession(hdr(cookieOf(login)), 'GET', repo)).role, 'beheerder');   // geldt meteen, zonder opnieuw inloggen
   await assert.rejects(h.setAccountRole({ user: admin, repo, params: { email: 'rol1@voorbeeld.nl' }, body: { role: 'x' } }), { status: 400 });
   await assert.rejects(h.setAccountRole({ user: admin, repo, params: { email: 'nietbestaand@voorbeeld.nl' }, body: { role: 'gebruiker' } }), { status: 404 });
 });
@@ -530,49 +534,72 @@ test('me geeft rol en rechten', async () => {
   assert.ok(!r.permissions.includes('settings:write'));
 });
 
-// --- Beheerder beheert lokale accounts, binnen zijn eigen rol ---
+// --- Beheerder beheert lokale accounts, binnen de eigen organisatie ---
 const beheerder = { email: 'beh@voorbeeld.nl', kind: 'local', role: 'beheerder', instanceId: 'main' };
 
-test('beheerder maakt gebruikers en beheerders aan, nooit admins', async () => {
+test('beheerder maakt gebruikers en beheerders aan, geen andere rollen', async () => {
   const g = await h.createAccount({ user: beheerder, repo, body: { email: 'bg1@voorbeeld.nl', role: 'gebruiker' } });
   assert.equal(g.status, 201);
   assert.equal((await h.createAccount({ user: beheerder, repo, body: { email: 'bg2@voorbeeld.nl', role: 'beheerder' } })).status, 201);
-  await assert.rejects(h.createAccount({ user: beheerder, repo, body: { email: 'bg3@voorbeeld.nl', role: 'admin' } }), { status: 403 });
+  await assert.rejects(h.createAccount({ user: beheerder, repo, body: { email: 'bg3@voorbeeld.nl', role: 'admin' } }), { status: 400 });
   assert.equal(await repo.getAccount('bg3@voorbeeld.nl'), null);
+  assert.equal((await repo.getMembership('main', 'bg1@voorbeeld.nl')).role, 'gebruiker');
   assert.equal((await repo.getAccount('bg1@voorbeeld.nl')).instanceId, 'main');
+  await assert.rejects(h.createAccount({ user: beheerder, repo, body: { email: 'bg1@voorbeeld.nl' } }), { status: 409 });   // al lid
 });
 
-test('beheerder kan een admin-account niet resetten, wijzigen of verwijderen', async () => {
-  const a = (await h.createAccount({ user: admin, repo, body: { email: 'adm1@voorbeeld.nl', role: 'admin' } })).jsonBody;
-  const p = { email: 'adm1@voorbeeld.nl' };
-  await assert.rejects(h.resetAccount({ user: beheerder, repo, params: p }), { status: 403 });
+test('een beheerder beheert zijn eigen lidmaatschap niet', async () => {
+  await h.createAccount({ user: admin, repo, body: { email: beheerder.email, role: 'beheerder' } });
+  const p = { email: beheerder.email };
   await assert.rejects(h.setAccountRole({ user: beheerder, repo, params: p, body: { role: 'gebruiker' } }), { status: 403 });
   await assert.rejects(h.deleteAccount({ user: beheerder, repo, params: p }), { status: 403 });
-  // het wachtwoord van het admin-account werkt nog en de rol is onveranderd
-  assert.equal((await h.login({ repo, env: tenv, body: { email: 'adm1@voorbeeld.nl', password: a.tempPassword } })).status, 200);
-  assert.equal((await repo.getAccount('adm1@voorbeeld.nl')).role, 'admin');
-});
-
-test('beheerder kan zichzelf niet verheffen of verwijderen, en geen admin toekennen', async () => {
-  await h.createAccount({ user: admin, repo, body: { email: beheerder.email, role: 'beheerder' } });
-  await assert.rejects(h.setAccountRole({ user: beheerder, repo, params: { email: beheerder.email }, body: { role: 'admin' } }), { status: 403 });
-  await assert.rejects(h.deleteAccount({ user: beheerder, repo, params: { email: beheerder.email } }), { status: 403 });
-  await assert.rejects(h.resetAccount({ user: beheerder, repo, params: { email: beheerder.email } }), { status: 403 });
-  const g = (await h.createAccount({ user: beheerder, repo, body: { email: 'bg4@voorbeeld.nl' } })).jsonBody;
-  await assert.rejects(h.setAccountRole({ user: beheerder, repo, params: { email: 'bg4@voorbeeld.nl' }, body: { role: 'admin' } }), { status: 403 });
-  assert.equal((await h.setAccountRole({ user: beheerder, repo, params: { email: 'bg4@voorbeeld.nl' }, body: { role: 'beheerder' } })).status, 200);
+  await assert.rejects(h.resetAccount({ user: beheerder, repo, params: p }), { status: 403 });
+  assert.equal((await repo.getMembership('main', beheerder.email)).role, 'beheerder');
+  // een andere beheerder beheren mag wel
+  await h.createAccount({ user: beheerder, repo, body: { email: 'bg4@voorbeeld.nl', role: 'beheerder' } });
+  assert.equal((await h.setAccountRole({ user: beheerder, repo, params: { email: 'bg4@voorbeeld.nl' }, body: { role: 'gebruiker' } })).status, 200);
   assert.equal((await h.resetAccount({ user: beheerder, repo, params: { email: 'bg4@voorbeeld.nl' } })).status, 200);
-  assert.equal((await h.deleteAccount({ user: beheerder, repo, params: { email: 'bg4@voorbeeld.nl' } })).status, 204);
-  assert.ok(g.tempPassword);
 });
 
-test('lijst markeert wat beheerbaar is en toont geen accounts van een andere instantie', async () => {
-  await repo.saveAccount({ email: 'andere@voorbeeld.nl', role: 'gebruiker', instanceId: 'andere', passwordHash: 'x', createdAt: new Date().toISOString() });
+test('de lijst toont alleen de leden van de eigen organisatie, met wat beheerbaar is', async () => {
+  await repo.saveOrganisation({ id: 'andere', name: 'Andere organisatie', createdAt: '2026-01-01' });
+  await repo.saveAccount({ email: 'vreemd@voorbeeld.nl', role: 'gebruiker', instanceId: 'andere', passwordHash: 'x', createdAt: '2026-01-01' });
+  await repo.saveMembership({ orgId: 'andere', email: 'vreemd@voorbeeld.nl', role: 'gebruiker' });
   const list = (await h.listAccounts({ user: beheerder, repo })).jsonBody;
-  assert.ok(!list.some((a) => a.email === 'andere@voorbeeld.nl'));
-  assert.equal(list.find((a) => a.email === 'adm1@voorbeeld.nl').manageable, false);
+  assert.ok(!list.some((a) => a.email === 'vreemd@voorbeeld.nl'));
   assert.equal(list.find((a) => a.email === beheerder.email).manageable, false);
   assert.equal(list.find((a) => a.email === 'bg1@voorbeeld.nl').manageable, true);
-  await assert.rejects(h.deleteAccount({ user: beheerder, repo, params: { email: 'andere@voorbeeld.nl' } }), { status: 403 });
-  assert.ok((await h.listAccounts({ user: admin, repo })).jsonBody.find((a) => a.email === 'adm1@voorbeeld.nl').manageable);
+  assert.ok(list.every((a) => !('passwordHash' in a)));
+  // een account van een andere organisatie is in deze organisatie niet te beheren
+  for (const fn of [h.resetAccount, h.deleteAccount, h.setAccountRole]) {
+    await assert.rejects(fn({ user: beheerder, repo, params: { email: 'vreemd@voorbeeld.nl' }, body: { role: 'beheerder' } }), { status: 404 });
+  }
+  assert.ok(await repo.getAccount('vreemd@voorbeeld.nl'));
 });
+
+test('iemand die al een account heeft wordt alleen lid: geen tijdelijk wachtwoord, eigen wachtwoord blijft', async () => {
+  await repo.saveAccount({ email: 'elders@voorbeeld.nl', role: 'gebruiker', instanceId: 'andere', passwordHash: await P.hashPassword(PW), createdAt: '2026-01-01' });
+  await repo.saveMembership({ orgId: 'andere', email: 'elders@voorbeeld.nl', role: 'gebruiker' });
+  const add = (await h.createAccount({ user: beheerder, repo, body: { email: 'elders@voorbeeld.nl', role: 'gebruiker' } })).jsonBody;
+  assert.equal(add.existing, true);
+  assert.equal(add.tempPassword, null);
+  assert.equal((await h.login({ repo, env: tenv, body: { email: 'elders@voorbeeld.nl', password: PW } })).status, 200);   // eigen wachtwoord werkt nog
+  assert.deepEqual((await repo.listMembershipsOf('elders@voorbeeld.nl')).map((m) => m.orgId).sort(), ['andere', 'main']);
+});
+
+test('een wachtwoord resetten kan alleen als het account nergens anders lid is', async () => {
+  // elders@ is lid van main en andere: de beheerder van main mag niet resetten (anders neemt hij het account over)
+  await assert.rejects(h.resetAccount({ user: beheerder, repo, params: { email: 'elders@voorbeeld.nl' } }), { status: 403, message: /ook bij een andere organisatie/ });
+  assert.equal((await h.login({ repo, env: tenv, body: { email: 'elders@voorbeeld.nl', password: PW } })).status, 200);   // ongewijzigd
+});
+
+test('verwijderen haalt het lidmaatschap weg; het account pas als er geen lidmaatschap meer is', async () => {
+  assert.equal((await h.deleteAccount({ user: beheerder, repo, params: { email: 'elders@voorbeeld.nl' } })).status, 204);
+  assert.equal(await repo.getMembership('main', 'elders@voorbeeld.nl'), null);
+  assert.ok(await repo.getAccount('elders@voorbeeld.nl'));   // nog lid van andere
+  const sess = await authorizeSession(hdr(cookieOf(await h.login({ repo, env: tenv, body: { email: 'elders@voorbeeld.nl', password: PW } }))), 'GET', repo, new Date(), env);
+  assert.equal(sess.instanceId, 'andere');   // hij komt nu alleen nog in zijn andere organisatie
+  assert.equal((await h.deleteAccount({ user: beheerder, repo, params: { email: 'bg1@voorbeeld.nl' } })).status, 204);
+  assert.equal(await repo.getAccount('bg1@voorbeeld.nl'), null);   // geen lidmaatschap meer: account weg
+});
+
