@@ -160,6 +160,17 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
       if (!INSTANCE_ID.test(id)) return;
       try { await (await table('organisations')).deleteEntity('organisations', id); } catch (e) { if (e.statusCode !== 404) throw e; }
     },
+    // Gastouderbureaus: één gedeelde lijst voor alle administraties (beheerd door platformbeheerders), in dezelfde tabel als de organisaties maar
+    // onder een eigen PartitionKey. Een bureau wordt nooit verwijderd, alleen op niet-actief gezet, zodat contracten ernaar kunnen blijven verwijzen.
+    async listAgencies() {
+      return (await collect((await table('organisations')).listEntities({ queryOptions: { filter: `PartitionKey eq 'agencies'` } })))
+        .map((r) => ({ id: r.rowKey, name: r.name, active: r.active !== false }))
+        .sort((a, b) => a.name.localeCompare(b.name, 'nl') || a.id.localeCompare(b.id));
+    },
+    async saveAgency(a) {
+      if (!/^[a-z0-9]{6,20}$/.test(a.id)) throw new Error('Ongeldig bureau.');
+      await (await table('organisations')).upsertEntity({ partitionKey: 'agencies', rowKey: a.id, name: a.name, active: a.active !== false }, 'Replace');
+    },
     async getMembership(orgId, email) {
       if (!INSTANCE_ID.test(orgId) || !keySafe(email)) return null;
       try { return memberOf(await (await table('memberships')).getEntity(orgId, email)); } catch (e) { if (e.statusCode === 404) return null; throw e; }
@@ -187,6 +198,8 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     setRates: (list) => setSetting('rates', list),
     getStartDate: () => getSetting('startDate', null),
     setStartDate: (d) => setSetting('startDate', d),
+    getAgencyIds: () => getSetting('agencyIds'),
+    setAgencyIds: (list) => setSetting('agencyIds', list),
     getSickDays: () => getSetting('sickDays'),
     setSickDays: (list) => setSetting('sickDays', list),
     getVacations: () => getSetting('vacations'),

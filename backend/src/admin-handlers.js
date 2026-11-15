@@ -51,6 +51,32 @@ async function addManager(repo, org, emailRaw, login, now) {
 }
 const parseLogin = (v_) => (v_ === 'lokaal' ? 'lokaal' : 'microsoft');
 
+const mine = async (repo) => { const ids = new Set(await repo.getAgencyIds()); return (await repo.listAgencies()).filter((x) => ids.has(x.id)); };
+// Gastouderbureaus (gedeelde lijst). Nooit verwijderen: een niet-actief bureau is niet meer te kiezen, maar bestaande contracten houden hun verwijzing.
+async function createAgency({ user, repo, body }) {
+  requirePlatform(user);
+  const name = v.parseAgencyName(body && body.name);
+  if ((await repo.listAgencies()).some((a) => a.name.toLowerCase() === name.toLowerCase())) throw new HttpError(409, 'Dit gastouderbureau staat al in de lijst.');
+  const agency = { id: crypto.randomBytes(6).toString('hex'), name, active: true };
+  await repo.saveAgency(agency);
+  return { status: 201, jsonBody: agency };
+}
+
+async function updateAgency({ user, repo, params, body }) {
+  requirePlatform(user);
+  const list = await repo.listAgencies(), a = list.find((x) => x.id === String(params.id || ''));
+  if (!a) throw new HttpError(404, 'Gastouderbureau niet gevonden.');
+  const next = { ...a };
+  if (body && body.name !== undefined) next.name = v.parseAgencyName(body.name);
+  if (body && body.active !== undefined) {
+    if (typeof body.active !== 'boolean') throw new HttpError(400, 'Ongeldige waarde voor actief.');
+    next.active = body.active;
+  }
+  if (list.some((x) => x.id !== a.id && x.name.toLowerCase() === next.name.toLowerCase())) throw new HttpError(409, 'Dit gastouderbureau staat al in de lijst.');
+  await repo.saveAgency(next);
+  return { status: 200, jsonBody: next };
+}
+
 async function listOrganisations({ user, repo }) {
   requirePlatform(user);
   const out = [];
@@ -130,10 +156,10 @@ async function exportData({ user, repo, now = new Date() }) {
   const payload = {
     format: 'gastouderuren-export-1', exportedAt: now.toISOString(), organisation: { id: user.instanceId, name: org ? org.name : user.instanceId },
     children: await repo.listChildren(), entries: await repo.listAllEntries(),
-    settings: { rates: await repo.getRates(), opening: await repo.getOpening(), startDate: await repo.getStartDate(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), ownChildren: await repo.getOwnChildren() },
+    settings: { rates: await repo.getRates(), opening: await repo.getOpening(), startDate: await repo.getStartDate(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), agencyIds: await repo.getAgencyIds(), agencies: await mine(repo), ownChildren: await repo.getOwnChildren() },
     members,
   };
   return { status: 200, jsonBody: payload, headers: { 'content-disposition': `attachment; filename="export-${user.instanceId}-${now.toISOString().slice(0, 10)}.json"` } };
 }
 
-module.exports = { RETENTION_DAYS, listOrganisations, createOrganisation, renameOrganisation, addOrganisationManager, deleteOrganisation, restoreOrganisation, purgeOrganisation, exportData };
+module.exports = { createAgency, updateAgency, RETENTION_DAYS, listOrganisations, createOrganisation, renameOrganisation, addOrganisationManager, deleteOrganisation, restoreOrganisation, purgeOrganisation, exportData };

@@ -70,7 +70,9 @@ function parseContracts(list, newId) {
     const id = k.id && ID.test(k.id) && !seen.has(k.id) ? k.id : newId();
     seen.add(id);
     // Optioneel (standaard uit): worden vakanties van het kind doorbetaald?
-    return { id, number, rate, monthlyHours, start, end, schedule: parseSchedule(k.schedule), paidHolidays: k.paidHolidays === true };
+    // Optioneel: het gastouderbureau van dit contract (id uit de lijst van platformbeheer; of dat bureau bij deze gastouder past, controleert de handler).
+    const agencyId = typeof k.agencyId === 'string' && ID.test(k.agencyId) ? k.agencyId : null;
+    return { id, number, rate, monthlyHours, start, end, schedule: parseSchedule(k.schedule), paidHolidays: k.paidHolidays === true, agencyId };
   });
 }
 
@@ -213,6 +215,19 @@ function parseAccountEmail(v) {
 }
 
 // Naam van een organisatie: gewone tekst, 1 tot 100 tekens.
+function parseAgencyName(v) {
+  const n = String(v ?? '').replace(/\s+/g, ' ').trim();
+  if (!n || n.length > 100 || /[\u0000-\u001f\u007f-\u009f<>]/.test(n)) throw bad('Geef een naam van 1 tot 100 tekens.');
+  return n;
+}
+
+function parseAgencyIds(list) {
+  if (!Array.isArray(list) || list.length > 100) throw bad('Ongeldige gastouderbureaus.');
+  const out = [...new Set(list)];
+  if (out.some((id) => typeof id !== 'string' || !ID.test(id))) throw bad('Ongeldige gastouderbureaus.');
+  return out;
+}
+
 function parseOrgName(v) {
   const n = String(v ?? '').replace(/\s+/g, ' ').trim();
   if (!n || n.length > 100 || /[\u0000-\u001f\u007f-\u009f<>]/.test(n)) throw bad('Geef een naam van 1 tot 100 tekens.');
@@ -225,4 +240,4 @@ function parseRole(v) {
   return r;
 }
 
-module.exports = { parseSickDay, parseOrgName, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
+module.exports = { parseSickDay, parseOrgName, parseAgencyName, parseAgencyIds, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };

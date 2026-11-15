@@ -407,6 +407,12 @@
   <!-- INSTELLINGEN -->
   <section id="tab-instellingen" hidden>
     <div class="card">
+      <h2>Gastouderbureau</h2>
+      <p class="hint">Bij welke gastouderbureaus ben je aangesloten? Per contract kies je daarna (bij Kinderen) welk bureau erbij hoort. De lijst met bureaus wordt door de platformbeheerder bijgehouden; ontbreekt jouw bureau, vraag dan om het toe te voegen.</p>
+      <div id="agencyPick"></div>
+      <div class="err" id="agencyErr"></div>
+    </div>
+    <div class="card">
       <h2>Algemeen uurtarief</h2>
       <p class="hint">Geldt voor contracten zonder eigen tarief, volgens de datum van de registratie. “Tot en met” is de laatste dag dat het tarief geldt (bijv. 1-1 t/m 31-12); laat het leeg als de periode doorloopt. De periode van het huidige jaar staat vet.</p>
       <div id="rateList"></div>
@@ -546,6 +552,16 @@
       <p class="hint">Een organisatie is een losse administratie met eigen kinderen, uren, instellingen en gebruikers. Als platformbeheerder zie je hier alleen de organisaties zelf, nooit de gegevens erin; daarvoor moet je lid zijn van die organisatie.</p>
       <div id="orgList"></div>
       <div id="orgTemp" class="card" hidden style="margin-top:10px"></div>
+    </div>
+    <div class="card">
+      <h2>Gastouderbureaus</h2>
+      <p class="hint">De gedeelde lijst met gastouderbureaus. Gastouders geven bij Instellingen aan bij welke ze zijn aangesloten, en kiezen per contract een bureau. Een bureau verwijderen kan niet (contracten verwijzen ernaar); je kunt het wel op niet-actief zetten, dan is het niet meer te kiezen.</p>
+      <div id="agencyList"></div>
+      <form class="grid2" id="agencyForm" style="margin-top:10px">
+        <div class="wide"><label for="agencyNew">Gastouderbureau toevoegen</label><input type="text" id="agencyNew" maxlength="100" required></div>
+        <div class="wide"><button class="btn secondary">Toevoegen</button></div>
+      </form>
+      <div class="err" id="agencyAdminErr"></div>
     </div>
     <form class="card" id="orgForm">
       <h2>Organisatie toevoegen</h2>
@@ -1772,11 +1788,12 @@
         <input type="time" data-c="${i}" data-day="${di}" data-t="from" value="${d.from ?? ''}" ${d.open ? '' : 'disabled'}>
         <input type="time" data-c="${i}" data-day="${di}" data-t="to" value="${d.to ?? ''}" ${d.open ? '' : 'disabled'}></div>`).join('');
     return `<details class="contract-card" data-ci="${i}" ${open ? 'open' : ''}>
-      <summary><strong>Contract ${i + 1}</strong>${k.start || k.end ? ` <span class="sub">${esc(contractPeriod(k))}</span>` : ''}${contractEnded(k) ? ' <span class="tag">afgelopen</span>' : ''}</summary>
+      <summary><strong>Contract ${i + 1}</strong>${k.start || k.end ? ` <span class="sub">${esc(contractPeriod(k))}</span>` : ''}${k.agencyId && agencyName(k.agencyId) ? ` <span class="sub">· ${esc(agencyName(k.agencyId))}</span>` : ''}${contractEnded(k) ? ' <span class="tag">afgelopen</span>' : ''}</summary>
       <div class="grid2" style="margin-top: 10px">
       ${f('start', 'Startdatum', 'type="date"', k.start)}
       ${f('end', 'T/m datum', 'type="date"', k.end)}
       ${f('number', 'Contractnummer (optioneel)', '', k.number)}
+      <div><label>Gastouderbureau (optioneel)</label><select data-c="${i}" data-f="agencyId"><option value="">(geen)</option>${(state.settings.agencies || []).filter((a) => (state.settings.agencyIds || []).includes(a.id) || a.id === k.agencyId).map((a) => `<option value="${esc(a.id)}" ${a.id === k.agencyId ? 'selected' : ''}>${esc(a.name)}${a.active ? '' : ' (niet actief)'}</option>`).join('')}</select></div>
       ${f('rate', '€ / uur (optioneel)', 'type="number" step="0.01" min="0" placeholder="algemeen"', k.rate)}
       ${f('monthlyHours', 'Vast aantal uren / maand (optioneel)', 'type="number" step="0.25" min="0" placeholder="geen"', k.monthlyHours, 'wide')}
       <div class="wide"><label class="chk"><input type="checkbox" data-c="${i}" data-f="paidHolidays" ${ps.checked ? 'checked' : ''} ${ps.disabled ? 'disabled' : ''}> Vakanties doorbetalen</label>
@@ -2021,6 +2038,7 @@
     if (document.activeElement !== $('startDate')) $('startDate').value = state.settings.startDate || '';
     renderOwnChildren();
     renderVacations();
+    renderAgencies();
     renderAccounts();
     $('runtimeInfo').textContent = state.settings.runtime ? `Technische info: de API draait op Node ${state.settings.runtime.replace(/^v/, '')}.` : '';
     const { rates, users, fixedUsers, me } = state.settings;
@@ -2036,6 +2054,35 @@
   }
 
   // Slaat een instelling op; fouten komen onder het formulier te staan.
+  // --- Gastouderbureaus: kiezen bij Instellingen (aangesloten bij) en de lijst beheren bij Admin ---
+  const agencyName = (id) => { const a = (state.settings.agencies || []).find((x) => x.id === id); return a ? a.name + (a.active ? '' : ' (niet actief)') : ''; };
+  function renderAgencies() {
+    const all = state.settings.agencies || [], mine = new Set(state.settings.agencyIds || []);
+    const shown = all.filter((a) => a.active || mine.has(a.id));
+    $('agencyPick').innerHTML = shown.length ? shown.map((a) => `<label class="chk" style="display:block;margin:6px 0"><input type="checkbox" data-agency="${esc(a.id)}" ${mine.has(a.id) ? 'checked' : ''}> ${esc(a.name)}${a.active ? '' : ' <span class="tag">niet actief</span>'}</label>`).join('') : '<div class="empty">Er zijn nog geen gastouderbureaus in de lijst.</div>';
+    if (!can('orgs:manage')) return;
+    $('agencyList').innerHTML = all.length ? all.map((a) => `<div class="entry"><div class="who">${esc(a.name)}${a.active ? '' : ' <span class="tag">niet actief</span>'}</div>
+      <div style="display:flex;gap:6px"><button class="btn secondary small" data-agrename="${esc(a.id)}">Naam wijzigen</button>
+      <button class="btn secondary small" data-agtoggle="${esc(a.id)}">${a.active ? 'Niet actief maken' : 'Weer actief maken'}</button></div></div>`).join('') : '<div class="empty">Nog geen gastouderbureaus.</div>';
+  }
+  $('agencyPick').addEventListener('change', async (ev) => {
+    if (!ev.target.dataset.agency) return;
+    const ids = [...$('agencyPick').querySelectorAll('input[data-agency]:checked')].map((x) => x.dataset.agency);
+    if (!(await saveSetting($('agencyErr'), 'agencies', { agencyIds: ids }, (r) => { state.settings.agencyIds = r.agencyIds; }))) renderAgencies();
+  });
+  $('agencyForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault(); $('agencyAdminErr').textContent = '';
+    try { await api('POST', 'agencies', { name: $('agencyNew').value }); ev.target.reset(); await reloadSettings(); } catch (e) { if (!e.noAccess) $('agencyAdminErr').textContent = e.message; }
+  });
+  $('agencyList').addEventListener('click', async (ev) => {
+    const d = ev.target.dataset, a = (id) => (state.settings.agencies || []).find((x) => x.id === id);
+    let call = null;
+    if (d.agrename) { const name = prompt('Nieuwe naam van het gastouderbureau:', a(d.agrename).name); if (name) call = () => api('PUT', `agencies/${d.agrename}`, { name }); }
+    else if (d.agtoggle) call = () => api('PUT', `agencies/${d.agtoggle}`, { active: !a(d.agtoggle).active });
+    if (call) { $('agencyAdminErr').textContent = ''; try { await call(); await reloadSettings(); } catch (e) { if (!e.noAccess) $('agencyAdminErr').textContent = e.message; } }
+  });
+  async function reloadSettings() { const st = await guard(() => api('GET', 'settings')); if (st) { state.settings = st; render(); } }
+
   async function saveSetting(errEl, path, body, apply) {
     errEl.textContent = '';
     try {
