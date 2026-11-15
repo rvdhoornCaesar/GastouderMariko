@@ -726,3 +726,17 @@ test('instellingen bevatten de datum van de eerste registratie', async () => {
   assert.equal((await call(h.getSettings)).jsonBody.firstEntry, first);
   assert.ok(first, 'er zijn registraties in deze testreeks');
 });
+
+test('foto van een kind: klein JPEG, optioneel, blijft staan als je niets meestuurt', async () => {
+  const jpeg = 'data:image/jpeg;base64,' + Buffer.from('kleine foto').toString('base64');
+  await assert.rejects(call(h.createChild, { body: { firstName: 'Foto', photo: 'data:text/html;base64,PHNjcmlwdD4=' } }), (e) => e.status === 400);
+  await assert.rejects(call(h.createChild, { body: { firstName: 'Foto', photo: 'https://voorbeeld.nl/x.jpg' } }), (e) => e.status === 400);
+  await assert.rejects(call(h.createChild, { body: { firstName: 'Foto', photo: 'data:image/jpeg;base64,' + 'A'.repeat(30000) } }), (e) => e.status === 400);
+  const kid = (await call(h.createChild, { body: { firstName: 'Foto', photo: jpeg, contracts: [K({})] } })).jsonBody;
+  assert.equal(kid.photo, jpeg);
+  assert.equal((await call(h.listChildren)).jsonBody.find((c) => c.id === kid.id).photo, jpeg);
+  // zonder photo in het verzoek blijft de foto; met null gaat hij weg
+  assert.equal((await call(h.updateChild, { params: { id: kid.id }, body: { firstName: 'Foto', contracts: kid.contracts } })).jsonBody.photo, jpeg);
+  assert.equal((await call(h.updateChild, { params: { id: kid.id }, body: { firstName: 'Foto', contracts: kid.contracts, photo: null } })).jsonBody.photo, null);
+  assert.equal((await call(h.createChild, { body: { firstName: 'Zonderfoto' } })).jsonBody.photo, null);
+});

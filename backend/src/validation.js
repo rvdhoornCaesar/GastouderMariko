@@ -88,6 +88,16 @@ function parseHolidays(list, newId) {
   }).sort((a, b) => a.from.localeCompare(b.from));
 }
 
+// Foto van een kind: een klein JPEG-plaatje als data-URL (de browser verkleint het eerst). Een tabelrij kan maximaal 64 KB per veld bevatten.
+const PHOTO = /^data:image\/jpeg;base64,[A-Za-z0-9+/]+={0,2}$/;
+const MAX_PHOTO = 30000;
+function parsePhoto(v_) {
+  if (v_ === undefined) return undefined;   // niet meegestuurd: de bestaande foto blijft
+  if (v_ === null || v_ === '') return null;
+  if (typeof v_ !== 'string' || v_.length > MAX_PHOTO || !PHOTO.test(v_)) throw bad('Ongeldige foto. Kies een afbeelding (JPEG, PNG of WebP); die wordt automatisch verkleind.');
+  return v_;
+}
+
 function parseChild(body, newId) {
   const b = body || {};
   const firstName = text(b.firstName ?? b.name, 100);
@@ -100,7 +110,7 @@ function parseChild(body, newId) {
   }
   const parents = [0, 1].map((i) => text(Array.isArray(b.parents) ? b.parents[i] : '', 100));
   return {
-    firstName, lastName, name: [firstName, lastName].filter(Boolean).join(' '), birthDate, parents,
+    firstName, lastName, name: [firstName, lastName].filter(Boolean).join(' '), birthDate, parents, photo: parsePhoto(b.photo),
     contracts: parseContracts(b.contracts, newId), holidays: parseHolidays(b.holidays, newId),
   };
 }

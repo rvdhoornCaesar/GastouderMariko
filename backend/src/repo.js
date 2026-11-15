@@ -43,7 +43,7 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     const lastName = r.lastName ?? '';
     return {
       id: r.rowKey, name: [firstName, lastName].filter(Boolean).join(' '), firstName, lastName,
-      birthDate: r.birthDate || null, parents: r.parents ? JSON.parse(r.parents) : ['', ''],
+      birthDate: r.birthDate || null, photo: r.photo || null, parents: r.parents ? JSON.parse(r.parents) : ['', ''],
       contracts: JSON.parse(r.contracts || '[]'), holidays: JSON.parse(r.holidays || '[]'),
     };
   };
@@ -227,7 +227,7 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
       const t = await table('children');
       await t.upsertEntity({
         partitionKey: scope.id, rowKey: child.id, name: child.name, firstName: child.firstName, lastName: child.lastName,
-        birthDate: child.birthDate || '', parents: JSON.stringify(child.parents),
+        birthDate: child.birthDate || '', photo: child.photo || '', parents: JSON.stringify(child.parents),
         contracts: JSON.stringify(child.contracts), holidays: JSON.stringify(child.holidays),
       }, 'Replace');
     },
