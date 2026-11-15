@@ -719,3 +719,10 @@ test('import van de Excel-planning: alleen platformbeheer, voorbeeld zonder opsl
   assert.equal((await repo.listChildren()).length, before + 3);
   assert.equal((await repo.listAllEntries()).filter((e) => e.contractId === imp.contracts[0].id).length, 2);
 });
+
+test('instellingen bevatten de datum van de eerste registratie', async () => {
+  const all = await repo.listAllEntries();
+  const first = all.map((e) => e.date).sort()[0] || null;
+  assert.equal((await call(h.getSettings)).jsonBody.firstEntry, first);
+  assert.ok(first, 'er zijn registraties in deze testreeks');
+});
