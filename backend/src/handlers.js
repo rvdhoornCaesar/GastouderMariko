@@ -129,7 +129,7 @@ async function getSettings({ user, repo, env }) {
   perm.require(user, 'settings:read');
   const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
   const manage = perm.can(user, 'settings:write');   // wie mag toegang regelen, ziet de gebruikerslijsten en de technische info
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), agencies: await repo.listAgencies(), agencyIds: await repo.getAgencyIds(), startDate: await repo.getStartDate(), runtime: manage ? process.version : undefined } };
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), agencies: await repo.listAgencies(), agencyIds: await repo.getAgencyIds(), startDate: await repo.getStartDate(), firstEntry: await repo.firstEntryDate(), runtime: manage ? process.version : undefined } };
 }
 
 async function putRates({ user, repo, body }) {

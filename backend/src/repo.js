@@ -248,6 +248,13 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     async deleteEntry(id) {
       await (await table('entries')).deleteEntity(scope.id, id);
     },
+    // Datum van de eerste registratie van deze administratie (of null): de rijen staan op volgorde van RowKey, dus de eerste pagina van 1 is de oudste.
+    async firstEntryDate() {
+      const t = await table('entries');
+      const page = await t.listEntities({ queryOptions: { filter: `PartitionKey eq '${scope.id}'` } }).byPage({ maxPageSize: 1 }).next();
+      const first = page.value && own(page.value).map(toEntry)[0];
+      return first ? first.date : null;
+    },
     // Alle uren van deze administratie (voor een export).
     listAllEntries() {
       return listEntries('');
