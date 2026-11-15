@@ -1,11 +1,16 @@
 const { TableClient } = require('@azure/data-tables');
 
-// Azure Table Storage. Alle gegevens van een omgeving worden gedeeld door alle toegestane gebruikers
-// (PartitionKey is altijd 'main'). Uren hebben RowKey "JJJJ-MM-DD_xxxx", zodat een maand een simpele range-query is.
-const PK = 'main';
+// Azure Table Storage. De gegevens van een administratie (kinderen, uren en instellingen) staan onder de PartitionKey van die
+// administratie; de eerste administratie heet 'main'. Een repo is aan precies één administratie gebonden: createRepo(verbinding, id)
+// of repo.forInstance(id). Elke query en elke directe lezing gaat via die ene sleutel, dus een administratie kan niet bij de gegevens
+// van een andere. De id wordt nooit uit een verzoek gehaald maar uit de ingelogde gebruiker (zie functions/api.js).
+// Accounts, sessies, inlogpogingen en Microsoft-identiteiten zijn bewust gedeeld (globaal) en staan onder eigen vaste sleutels.
+// Uren hebben RowKey "JJJJ-MM-DD_xxxx", zodat een maand een simpele range-query is.
+const INSTANCE_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;   // ook veilig om in een OData-filter te zetten
 
-function createRepo(connectionString) {
-  const tables = {};
+function createRepo(connectionString, instanceId = 'main', tables = {}) {
+  if (typeof instanceId !== 'string' || !INSTANCE_ID.test(instanceId)) throw new Error('Ongeldige administratie.');
+  const PK = instanceId;
   const table = (name) => {
     if (!tables[name]) {
       const client = TableClient.fromConnectionString(connectionString, name, { allowInsecureConnection: /UseDevelopmentStorage|127\.0\.0\.1|localhost/.test(connectionString) });
@@ -17,6 +22,12 @@ function createRepo(connectionString) {
     const out = [];
     for await (const row of iter) out.push(row);
     return out;
+  };
+
+  // Tweede slot naast het filter: een rij van een andere administratie komt nooit door, wat er ook met de query gebeurt.
+  const own = (rows) => {
+    if (rows.some((r) => r.partitionKey !== PK)) throw new Error('Rij van een andere administratie gevonden.');
+    return rows;
   };
 
   // Oudere kinderen hebben alleen 'name': dat wordt de voornaam.
@@ -33,7 +44,7 @@ function createRepo(connectionString) {
 
   const listEntries = async (filter) => {
     const t = await table('entries');
-    const rows = await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${PK}'${filter}` } }));
+    const rows = own(await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${PK}'${filter}` } })));
     return rows.map(toEntry);
   };
 
@@ -53,6 +64,11 @@ function createRepo(connectionString) {
   };
 
   return {
+    instanceId,
+    // Dezelfde verbinding en tabelclients, gebonden aan een andere administratie.
+    // Zonder id (undefined) komt er géén repo en dus ook niet stilletjes de eerste administratie: id ?? null breekt de standaardwaarde.
+    forInstance: (id) => createRepo(connectionString, id ?? null, tables),
+
     // Lokale accounts (e-mailadres als sleutel), sessies (sleutel = hash van de sessiesleutel) en inlogpogingen (sleutel = hash van het e-mailadres).
     // 'role' en 'instanceId' liggen nu al vast, zodat er later rollen en meerdere gastouders (instanties) bij kunnen.
     async getAccount(email) {
@@ -132,7 +148,7 @@ function createRepo(connectionString) {
 
     async listChildren() {
       const t = await table('children');
-      const rows = await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${PK}'` } }));
+      const rows = own(await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${PK}'` } })));
       return rows.map(toChild).sort((a, b) => a.name.localeCompare(b.name, 'nl'));
     },
     async getChild(id) {
