@@ -15,9 +15,19 @@ async function listChildren({ user, repo }) {
   return { status: 200, jsonBody: await repo.listChildren() };
 }
 
+// Een contract mag alleen naar een gastouderbureau verwijzen waarbij deze gastouder is aangesloten (Instellingen); een bestaande verwijzing mag blijven.
+async function checkAgencies(repo, contracts, existing) {
+  const used = contracts.map((k) => k.agencyId).filter(Boolean);
+  if (!used.length) return;
+  const allowed = new Set(await repo.getAgencyIds());
+  (existing ? existing.contracts : []).forEach((k) => { if (k.agencyId) allowed.add(k.agencyId); });
+  if (used.some((id) => !allowed.has(id))) throw new HttpError(400, 'Kies een gastouderbureau waarbij de gastouder is aangesloten (zie Instellingen).');
+}
+
 async function createChild({ user, repo, body }) {
   perm.require(user, 'children:write');
   const child = { id: newId(), ...v.parseChild(body, newId) };
+  await checkAgencies(repo, child.contracts, null);
   await repo.saveChild(child);
   return { status: 201, jsonBody: child };
 }
@@ -28,6 +38,7 @@ async function updateChild({ user, repo, params, body }) {
   const existing = await repo.getChild(id);
   if (!existing) throw new HttpError(404, 'Kind niet gevonden.');
   const child = { id, ...v.parseChild(body, newId) };
+  await checkAgencies(repo, child.contracts, existing);
 
   // Verwijderde contracten nemen hun uren mee.
   const kept = new Set(child.contracts.map((k) => k.id));
@@ -118,7 +129,7 @@ async function getSettings({ user, repo, env }) {
   perm.require(user, 'settings:read');
   const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
   const manage = perm.can(user, 'settings:write');   // wie mag toegang regelen, ziet de gebruikerslijsten en de technische info
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), startDate: await repo.getStartDate(), runtime: manage ? process.version : undefined } };
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), agencies: await repo.listAgencies(), agencyIds: await repo.getAgencyIds(), startDate: await repo.getStartDate(), runtime: manage ? process.version : undefined } };
 }
 
 async function putRates({ user, repo, body }) {
@@ -126,6 +137,17 @@ async function putRates({ user, repo, body }) {
   const rates = v.parseRates(body && body.rates, newId);
   await repo.setRates(rates);
   return { status: 200, jsonBody: { rates } };
+}
+
+// Bij welke gastouderbureaus is deze gastouder aangesloten? Alleen bureaus uit de gedeelde lijst; een niet-actief bureau kan alleen blijven staan.
+async function putAgencyIds({ user, repo, body }) {
+  perm.require(user, 'settings:write');
+  const ids = v.parseAgencyIds(body && body.agencyIds);
+  const known = new Map((await repo.listAgencies()).map((a) => [a.id, a]));
+  const current = new Set(await repo.getAgencyIds());
+  if (ids.some((id) => !known.has(id) || (!known.get(id).active && !current.has(id)))) throw new HttpError(400, 'Dat gastouderbureau bestaat niet of is niet meer actief.');
+  await repo.setAgencyIds(ids);
+  return { status: 200, jsonBody: { agencyIds: ids } };
 }
 
 async function putOwnChildren({ user, repo, body }) {
@@ -441,4 +463,4 @@ async function deleteAccount({ user, repo, params }) {
   return { status: 204 };
 }
 
-module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers, putSickDay };
+module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers, putSickDay, putAgencyIds };

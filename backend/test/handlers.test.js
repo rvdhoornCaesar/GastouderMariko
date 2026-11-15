@@ -643,3 +643,33 @@ test('ziek melden mag elke gebruiker die uren invult; platformbeheer zonder lidm
   await assert.rejects(h.putSickDay({ user: platform, repo, env, body: { date: '2026-04-02' } }), { status: 403 });
   await repo.setSickDays([]);
 });
+
+test('gastouderbureaus: platformbeheer maakt de lijst, de gastouder kiest, het contract verwijst', async () => {
+  const admin = require('../src/admin-handlers');
+  const plain = { email: 'mw@voorbeeld.nl', kind: 'local', role: 'beheerder', instanceId: 'main' };   // beheerder, maar geen platformbeheerder
+  await assert.rejects(admin.createAgency({ user: plain, repo, env, params: {}, body: { name: 'X' } }), (e) => e.status === 403);
+  const a = (await call(admin.createAgency, { body: { name: 'Bureau Zon' } })).jsonBody;
+  const b = (await call(admin.createAgency, { body: { name: 'Bureau Maan' } })).jsonBody;
+  await assert.rejects(call(admin.createAgency, { body: { name: 'bureau zon' } }), (e) => e.status === 409);   // dubbel
+  await assert.rejects(call(admin.createAgency, { body: { name: '  ' } }), (e) => e.status === 400);
+  assert.deepEqual((await call(h.getSettings)).jsonBody.agencies.map((x) => x.name), ['Bureau Maan', 'Bureau Zon']);
+  // aansluiten: alleen bestaande bureaus
+  await assert.rejects(call(h.putAgencyIds, { body: { agencyIds: ['bestaatniet1'] } }), (e) => e.status === 400);
+  await assert.rejects(call(h.putAgencyIds, { body: { agencyIds: 'zon' } }), (e) => e.status === 400);
+  assert.deepEqual((await call(h.putAgencyIds, { body: { agencyIds: [a.id, a.id] } })).jsonBody.agencyIds, [a.id]);
+  // een contract mag alleen verwijzen naar een bureau waarbij je bent aangesloten
+  await assert.rejects(call(h.createChild, { body: { firstName: 'Bureaukind', contracts: [K({ agencyId: b.id })] } }), (e) => e.status === 400);
+  const kid = (await call(h.createChild, { body: { firstName: 'Bureaukind', contracts: [K({ agencyId: a.id }), K({})] } })).jsonBody;
+  assert.equal(kid.contracts[0].agencyId, a.id);
+  assert.equal(kid.contracts[1].agencyId, null);
+  // niet-actief: niet meer te kiezen, maar de bestaande verwijzing blijft geldig
+  await call(admin.updateAgency, { params: { id: a.id }, body: { active: false } });
+  assert.equal((await call(h.putAgencyIds, { body: { agencyIds: [a.id] } })).status, 200);   // blijven staan mag
+  await assert.rejects(call(h.putAgencyIds, { body: { agencyIds: [a.id, b.id, 'nietactief1'] } }), (e) => e.status === 400);
+  assert.equal((await call(h.updateChild, { params: { id: kid.id }, body: { firstName: 'Bureaukind', contracts: kid.contracts } })).jsonBody.contracts[0].agencyId, a.id);
+  // hernoemen en weer activeren
+  const renamed = (await call(admin.updateAgency, { params: { id: a.id }, body: { name: 'Bureau Zonnig', active: true } })).jsonBody;
+  assert.deepEqual([renamed.name, renamed.active], ['Bureau Zonnig', true]);
+  await assert.rejects(call(admin.updateAgency, { params: { id: a.id }, body: { name: 'Bureau Maan' } }), (e) => e.status === 409);
+  await assert.rejects(call(admin.updateAgency, { params: { id: 'bestaatniet1' }, body: { active: false } }), (e) => e.status === 404);
+});
