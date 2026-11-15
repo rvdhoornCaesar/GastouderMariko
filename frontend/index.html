@@ -1630,15 +1630,6 @@
 
   // Bedragen per maand en kind: geschreven (w), gepland (p, ook doorbetaalde vakantie) en vast (v).
   const yearMonths = (year) => Array.from({ length: 12 }, (_, i) => `${year}-${pad(i + 1)}`);
-  // Maanden voor de lijngrafiek: vanaf de begindatum van de gastouder, anders vanaf de eerste registratie, t/m december van het gekozen jaar.
-  function lineMonths(year) {
-    const first = gStart() || state.settings.firstEntry || '', end = `${year}-12`;
-    let m = first ? first.slice(0, 7) : `${year}-01`;
-    if (m > `${year}-01`) m = `${year}-01`;
-    const out = [];
-    for (let [y, mo] = m.split('-').map(Number); `${y}-${pad(mo)}` <= end && out.length < 240; mo === 12 ? (y++, mo = 1) : mo++) out.push(`${y}-${pad(mo)}`);
-    return out;
-  }
   async function finData(months) {
     const { factor } = state.settings.opening;
     await Promise.all(months.map((m) => guard(() => ensureMonth(m))));
@@ -1702,78 +1693,110 @@
       <tr><th>Totaal ${year}</th>${kids.map((c) => `<th class="num">${euro(colTot.get(c.id))}</th>`).join('')}<th class="num">${euro(grand)}</th></tr></table>` : `<div class="empty">Geen uren in ${year}.</div>`;
     $('finWarn').textContent = missing ? `Voor sommige uren is geen tarief bekend (het bedrag telt als € 0). ${can('settings:write') ? 'Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.' : 'Vraag een beheerder een tarief toe te voegen.'}` : '';
 
-    // Grafiek
-    // Kolommen: de maanden van het gekozen jaar. Lijn: alles vanaf het begin (alle voorgaande jaren) t/m dit jaar, cumulatief.
-    const chart = fin.mode === 'lijn' ? await finData(lineMonths(year)) : data;
-    if (seq !== finSeq) return;
-    const cm = chart.months, cc = chart.cells;
-    const W = cm.map((_, i) => [...cc[i].values()].reduce((s, c) => s + c.w, 0)), V = cm.map((_, i) => [...cc[i].values()].reduce((s, c) => s + c.v, 0)),
-      P = cm.map((_, i) => [...cc[i].values()].reduce((s, c) => s + c.p, 0)), T = cm.map((_, i) => W[i] + V[i] + P[i]);
-    $('finChartTitle').textContent = fin.mode === 'lijn' ? `Cumulatieve opbrengst, ${MONTHS_LONG[Number(cm[0].slice(5)) - 1]} ${cm[0].slice(0, 4)} t/m ${year}` : `Opbrengst per maand, ${year}`;
-    drawFinChart({ W, V, P, T, year, nowM, months: cm });
+    // Grafiek: kolommen voor het gekozen jaar, of een lijn per jaar om jaren te vergelijken.
+    const sumOf = (ch, key) => ch.months.map((_, i) => [...ch.cells[i].values()].reduce((t, c) => t + c[key], 0));
+    if (fin.mode === 'lijn') {
+      const ys = lineYears(year), all = await finData(ys.flatMap(yearMonths));
+      if (seq !== finSeq) return;
+      const W = sumOf(all, 'w'), V = sumOf(all, 'v'), P = sumOf(all, 'p');
+      const lines = ys.map((y, k) => {
+        const T = Array.from({ length: 12 }, (_, i) => W[k * 12 + i] + V[k * 12 + i] + P[k * 12 + i]), C = [];
+        T.reduce((t, v, i) => (C[i] = t + v), 0);
+        return { year: y, T, C, color: LINE_COLORS[(ys.length - 1 - k) % LINE_COLORS.length], selected: y === year };
+      });
+      $('finChartTitle').textContent = lines.length > 1 ? `Cumulatieve opbrengst per jaar, ${ys[0]} t/m ${year}` : `Cumulatieve opbrengst, ${year}`;
+      drawFinLines({ lines, nowM });
+    } else {
+      const W = sumOf(data, 'w'), V = sumOf(data, 'v'), P = sumOf(data, 'p'), T = W.map((w, i) => w + V[i] + P[i]);
+      $('finChartTitle').textContent = `Opbrengst per maand, ${year}`;
+      drawFinChart({ W, V, P, T, year, nowM, months: data.months });
+    }
   }
 
-  function drawFinChart({ W, V, P, T, year, nowM, months }) {
-    const box = $('finChart'), tip = $('finTip'), column = fin.mode === 'kolom';
-    const C = []; T.reduce((s, v, i) => (C[i] = s + v), 0);
-    const N = months.length, last = N - 1;
-    const VW = 720, VH = 300, L = 58, R = 18, TOP = 22, B = 30, pw = VW - L - R, ph = VH - TOP - B, slot = pw / N;
-    const yMax = niceMax(column ? Math.max(...T) : C[last]), sy = (v) => TOP + ph - (v / yMax) * ph, cx = (i) => L + slot * (i + 0.5);
-    const ticks = [0, 1, 2, 3, 4].map((k) => (yMax * k) / 4);
-    const idxNow = nowM < months[0] ? -1 : nowM > months[last] ? last : months.indexOf(nowM);
-    const monthName = (m, long) => (long ? MONTHS_LONG : MONTHS_SHORT)[Number(m.slice(5)) - 1];
-    const roundTop = (x, y, w, h, r) => { r = Math.min(r, h, w / 2); return `M${x},${y + r}a${r},${r} 0 0 1 ${r},${-r}h${w - 2 * r}a${r},${r} 0 0 1 ${r},${r}v${h - r}h${-w}z`; };
-    let g = `<defs><pattern id="finHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--s3)"/>
-      <rect width="2.4" height="6" fill="var(--card)" opacity=".55"/></pattern></defs>`;
-    ticks.forEach((t) => { g += `<line class="grid" x1="${L}" x2="${VW - R}" y1="${sy(t)}" y2="${sy(t)}"/><text x="${L - 8}" y="${sy(t) + 4}" text-anchor="end">${euroAxis(t, yMax >= 10000)}</text>`; });
-    // Bij veel maanden (meerdere jaren): alleen het jaartal bij elke januari, en een streepje per jaarwisseling.
-    months.forEach((m, i) => {
-      if (N <= 14) g += `<text x="${cx(i)}" y="${VH - 10}" text-anchor="middle"${m === nowM ? ' class="val"' : ''}>${monthName(m)}</text>`;
-      else if (m.endsWith('-01') || i === 0) {
-        const year4 = m.slice(0, 4), skip = N > 60 && Number(year4) % 2;
-        g += `<line class="grid" x1="${cx(i) - slot / 2}" x2="${cx(i) - slot / 2}" y1="${TOP}" y2="${TOP + ph}" stroke-dasharray="2 4"/>`;
-        if (!skip) g += `<text x="${cx(i) - slot / 2 + 3}" y="${VH - 10}" text-anchor="start">${year4}</text>`;
+  // Jaren voor de lijngrafiek: vanaf het jaar van de begindatum van de gastouder (anders van de eerste registratie) t/m het gekozen jaar, maximaal 10.
+  function lineYears(year) {
+    const first = gStart() || state.settings.firstEntry || '';
+    const from = Math.max(first ? Number(first.slice(0, 4)) : year, year - 9);
+    return Array.from({ length: year - Math.min(from, year) + 1 }, (_, i) => Math.min(from, year) + i);
+  }
+  // Het gekozen jaar heeft de eerste kleur, eerdere jaren volgen: zo blijft de kleur van een jaar niet 'schuiven' als je naar een ander jaar gaat.
+  const LINE_COLORS = ['var(--s1)', 'var(--s2)', 'var(--s3)', '#8e5bd6', '#d6a31b', '#d6477c', '#5a6b7b', '#2aa3b5', '#7a9a2e', '#b5651d'];
+  const monthName = (m, long) => (long ? MONTHS_LONG : MONTHS_SHORT)[Number(m.slice(5)) - 1];
+
+  function drawFinLines({ lines, nowM }) {
+    const box = $('finChart'), tip = $('finTip');
+    const VW = 720, VH = 300, L = 58, R = 18, TOP = 22, B = 30, pw = VW - L - R, ph = VH - TOP - B, slot = pw / 12;
+    const yMax = niceMax(Math.max(1, ...lines.map((l) => l.C[11]))), sy = (v) => TOP + ph - (v / yMax) * ph, cx = (i) => L + slot * (i + 0.5);
+    const nowY = Number(nowM.slice(0, 4)), nowI = Number(nowM.slice(5)) - 1;
+    let g = '';
+    [0, 1, 2, 3, 4].map((k) => (yMax * k) / 4).forEach((t) => { g += `<line class="grid" x1="${L}" x2="${VW - R}" y1="${sy(t)}" y2="${sy(t)}"/><text x="${L - 8}" y="${sy(t) + 4}" text-anchor="end">${euroAxis(t, yMax >= 10000)}</text>`; });
+    for (let i = 0; i < 12; i++) g += `<text x="${cx(i)}" y="${VH - 10}" text-anchor="middle"${nowM.slice(5) === pad(i + 1) ? ' class="val"' : ''}>${MONTHS_SHORT[i]}</text>`;
+    const path = (a) => a.map((p, k) => `${k ? 'L' : 'M'}${p[0]},${p[1]}`).join('');
+    // eerdere jaren eerst, het gekozen jaar bovenop
+    [...lines].sort((a, b) => Number(a.selected) - Number(b.selected)).forEach((l) => {
+      const pts = l.C.map((v, i) => [cx(i), sy(v)]), w = l.selected ? 3 : 2, op = l.selected ? 1 : 0.85;
+      const idxNow = l.year < nowY ? 11 : l.year > nowY ? -1 : nowI;   // t/m deze maand doorgetrokken, daarna gestippeld (verwachting)
+      const solid = idxNow >= 0 ? pts.slice(0, idxNow + 1) : [], dashed = pts.slice(Math.max(idxNow, 0));
+      if (dashed.length > 1) g += `<path d="${path(dashed)}" fill="none" stroke="${l.color}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 5" opacity="${op}"/>`;
+      if (solid.length > 1) g += `<path d="${path(solid)}" fill="none" stroke="${l.color}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" opacity="${op}"/>`;
+      if (l.selected) {
+        pts.forEach((p) => { g += `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="${l.color}" stroke="var(--card)" stroke-width="2"/>`; });
+        g += `<text class="val" x="${pts[11][0]}" y="${pts[11][1] - 12}" text-anchor="end">${euro0(l.C[11])}</text>`;
       }
     });
-    const maxI = T.indexOf(Math.max(...T));
-    if (column) {
-      const bw = Math.min(24, Math.max(2, slot - 8));
-      T.forEach((t, i) => {
-        const segs = [['w', W[i], 'var(--s1)'], ['v', V[i], 'var(--s2)'], ['p', P[i], 'url(#finHatch)']].filter((s) => s[1] > 0.005);
-        let lo = 0;
-        segs.forEach(([, val, fill], k) => {
-          const hi = lo + val, top = sy(hi) + (k < segs.length - 1 ? 1 : 0), bot = sy(lo) - (k > 0 ? 1 : 0), h = bot - top;
-          if (h > 0.4) g += k === segs.length - 1 ? `<path d="${roundTop(cx(i) - bw / 2, top, bw, h, 4)}" fill="${fill}"/>` : `<rect x="${cx(i) - bw / 2}" y="${top}" width="${bw}" height="${h}" fill="${fill}"/>`;
-          lo = hi;
-        });
-        if (t > 0.005 && (i === maxI || (idxNow === i && i !== maxI))) g += `<text class="val" x="${cx(i)}" y="${sy(t) - 6}" text-anchor="middle">${euro0(t)}</text>`;
-      });
-    } else {
-      const pts = C.map((v, i) => [cx(i), sy(v)]);
-      const solid = idxNow >= 0 ? pts.slice(0, idxNow + 1) : [], dashed = pts.slice(Math.max(idxNow, 0));
-      const path = (a) => a.map((p, k) => `${k ? 'L' : 'M'}${p[0]},${p[1]}`).join('');
-      if (dashed.length > 1) g += `<path d="${path(dashed)}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 5"/>`;
-      if (solid.length > 1) g += `<path d="${path(solid)}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>`;
-      const rad = N > 36 ? 2.5 : N > 14 ? 3.5 : 5;
-      pts.forEach((p) => { g += `<circle cx="${p[0]}" cy="${p[1]}" r="${rad}" fill="var(--s1)" stroke="var(--card)" stroke-width="${N > 36 ? 1 : 2}"/>`; });
-      g += `<text class="val" x="${pts[last][0]}" y="${pts[last][1] - 12}" text-anchor="end">${euro0(C[last])}</text>`;
-    }
-    months.forEach((m, i) => { g += `<rect class="hit" data-i="${i}" tabindex="0" x="${L + slot * i}" y="${TOP}" width="${slot}" height="${ph}" aria-label="${monthName(m, true)} ${m.slice(0, 4)}: ${euro(T[i])}"/>`; });
+    for (let i = 0; i < 12; i++) g += `<rect class="hit" data-i="${i}" tabindex="0" x="${L + slot * i}" y="${TOP}" width="${slot}" height="${ph}" aria-label="${MONTHS_LONG[i]}: ${lines.map((l) => `${l.year} ${euro(l.C[i])}`).join(', ')}"/>`;
     box.querySelector('svg')?.remove();
-    box.insertAdjacentHTML('afterbegin', `<svg class="fin" viewBox="0 0 ${VW} ${VH}" width="100%" role="img" aria-label="${column ? `Opbrengst per maand in ${year}` : `Cumulatieve opbrengst vanaf ${monthName(months[0], true)} ${months[0].slice(0, 4)} t/m ${year}`}">${g}</svg>`);
-    $('finLegend').innerHTML = column
-      ? `<span><span class="sw" style="background:var(--s1)"></span>Geschreven</span><span><span class="sw" style="background:var(--s2)"></span>Vast per maand</span><span><span class="sw" style="background:repeating-linear-gradient(45deg,var(--s3) 0 3px,var(--card) 3px 5px)"></span>Gepland</span>`
-      : `<span>Cumulatief vanaf ${monthName(months[0], true)} ${months[0].slice(0, 4)} (begindatum of eerste registratie): elke maand is het totaal t/m die maand. Doorgetrokken lijn = t/m deze maand, gestippeld = verwachting (gepland).</span>`;
-
-    // Hover en toetsenbord: één tooltip per maand
-    const row = (key, label, val) => `<div class="tr"><span>${key ? `<span class="key" style="background:${key}"></span>` : ''}${label}</span><b>${euro(val)}</b></div>`;
+    box.insertAdjacentHTML('afterbegin', `<svg class="fin" viewBox="0 0 ${VW} ${VH}" width="100%" role="img" aria-label="Cumulatieve opbrengst per jaar, ${lines[0].year} t/m ${lines[lines.length - 1].year}">${g}</svg>`);
+    $('finLegend').innerHTML = [...lines].reverse().map((l) => `<span><span class="sw" style="background:${l.color}"></span><strong>${l.year}</strong> ${euro0(l.C[11])}</span>`).join('')
+      + '<span>Elke lijn is een jaar: het totaal van januari t/m die maand. Doorgetrokken = t/m deze maand, gestippeld = verwachting (gepland).</span>';
+    const row = (key, label, val) => `<div class="tr"><span><span class="key" style="background:${key}"></span>${label}</span><b>${euro(val)}</b></div>`;
     const show = (i, x, y) => {
-      tip.innerHTML = `<div class="tt">${monthName(months[i], true)} ${months[i].slice(0, 4)}</div>` + (column
-        ? row('var(--s1)', 'Geschreven', W[i]) + row('var(--s2)', 'Vast', V[i]) + row('var(--s3)', 'Gepland', P[i]) + row('', '<span class="muted">Totaal</span>', T[i])
-        : row('var(--s1)', 'Cumulatief', C[i]) + row('', '<span class="muted">Deze maand</span>', T[i]));
+      tip.innerHTML = `<div class="tt">t/m ${MONTHS_LONG[i]}</div>` + [...lines].reverse().map((l) => row(l.color, String(l.year), l.C[i])).join('');
       tip.hidden = false;
       const bw = box.clientWidth, tw = tip.offsetWidth, th = tip.offsetHeight;
       tip.style.left = `${Math.max(0, Math.min(bw - tw, x + 12))}px`; tip.style.top = `${Math.max(0, y - th - 8)}px`;
+    };
+    box.querySelectorAll('.hit').forEach((r) => {
+      const i = Number(r.dataset.i);
+      r.addEventListener('pointermove', (ev) => { const b = box.getBoundingClientRect(); show(i, ev.clientX - b.left, ev.clientY - b.top); });
+      r.addEventListener('focus', () => { const b = box.getBoundingClientRect(), q = r.getBoundingClientRect(); show(i, q.left - b.left + q.width / 2, q.top - b.top + 40); });
+      r.addEventListener('pointerleave', () => { tip.hidden = true; });
+      r.addEventListener('blur', () => { tip.hidden = true; });
+    });
+  }
+
+  function drawFinChart({ W, V, P, T, year, nowM, months }) {
+    const box = $('finChart'), tip = $('finTip');
+    const N = months.length, VW = 720, VH = 300, L = 58, R = 18, TOP = 22, B = 30, pw = VW - L - R, ph = VH - TOP - B, slot = pw / N;
+    const yMax = niceMax(Math.max(...T)), sy = (v) => TOP + ph - (v / yMax) * ph, cx = (i) => L + slot * (i + 0.5);
+    const idxNow = year < Number(nowM.slice(0, 4)) ? N - 1 : year > Number(nowM.slice(0, 4)) ? -1 : Number(nowM.slice(5)) - 1;
+    const roundTop = (x, y, w, h, r) => { r = Math.min(r, h, w / 2); return `M${x},${y + r}a${r},${r} 0 0 1 ${r},${-r}h${w - 2 * r}a${r},${r} 0 0 1 ${r},${r}v${h - r}h${-w}z`; };
+    let g = `<defs><pattern id="finHatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="6" height="6" fill="var(--s3)"/>
+      <rect width="2.4" height="6" fill="var(--card)" opacity=".55"/></pattern></defs>`;
+    [0, 1, 2, 3, 4].map((k) => (yMax * k) / 4).forEach((t) => { g += `<line class="grid" x1="${L}" x2="${VW - R}" y1="${sy(t)}" y2="${sy(t)}"/><text x="${L - 8}" y="${sy(t) + 4}" text-anchor="end">${euroAxis(t, yMax >= 10000)}</text>`; });
+    months.forEach((m, i) => { g += `<text x="${cx(i)}" y="${VH - 10}" text-anchor="middle"${m === nowM ? ' class="val"' : ''}>${monthName(m)}</text>`; });
+    const maxI = T.indexOf(Math.max(...T)), bw = Math.min(24, slot - 8);
+    T.forEach((t, i) => {
+      const segs = [['w', W[i], 'var(--s1)'], ['v', V[i], 'var(--s2)'], ['p', P[i], 'url(#finHatch)']].filter((s) => s[1] > 0.005);
+      let lo = 0;
+      segs.forEach(([, val, fill], k) => {
+        const hi = lo + val, top = sy(hi) + (k < segs.length - 1 ? 1 : 0), bot = sy(lo) - (k > 0 ? 1 : 0), h = bot - top;
+        if (h > 0.4) g += k === segs.length - 1 ? `<path d="${roundTop(cx(i) - bw / 2, top, bw, h, 4)}" fill="${fill}"/>` : `<rect x="${cx(i) - bw / 2}" y="${top}" width="${bw}" height="${h}" fill="${fill}"/>`;
+        lo = hi;
+      });
+      if (t > 0.005 && (i === maxI || (idxNow === i && i !== maxI))) g += `<text class="val" x="${cx(i)}" y="${sy(t) - 6}" text-anchor="middle">${euro0(t)}</text>`;
+    });
+    months.forEach((m, i) => { g += `<rect class="hit" data-i="${i}" tabindex="0" x="${L + slot * i}" y="${TOP}" width="${slot}" height="${ph}" aria-label="${monthName(m, true)} ${m.slice(0, 4)}: ${euro(T[i])}"/>`; });
+    box.querySelector('svg')?.remove();
+    box.insertAdjacentHTML('afterbegin', `<svg class="fin" viewBox="0 0 ${VW} ${VH}" width="100%" role="img" aria-label="Opbrengst per maand in ${year}">${g}</svg>`);
+    $('finLegend').innerHTML = `<span><span class="sw" style="background:var(--s1)"></span>Geschreven</span><span><span class="sw" style="background:var(--s2)"></span>Vast per maand</span><span><span class="sw" style="background:repeating-linear-gradient(45deg,var(--s3) 0 2px,var(--card) 2px 5px)"></span>Gepland</span>`;
+
+    const row = (key, label, val) => `<div class="tr"><span>${key ? `<span class="key" style="background:${key}"></span>` : ''}${label}</span><b>${euro(val)}</b></div>`;
+    const show = (i, x, y) => {
+      tip.innerHTML = `<div class="tt">${monthName(months[i], true)} ${months[i].slice(0, 4)}</div>` + row('var(--s1)', 'Geschreven', W[i]) + row('var(--s2)', 'Vast', V[i]) + row('var(--s3)', 'Gepland', P[i]) + row('', '<span class="muted">Totaal</span>', T[i]);
+      tip.hidden = false;
+      const bw2 = box.clientWidth, tw = tip.offsetWidth, th = tip.offsetHeight;
+      tip.style.left = `${Math.max(0, Math.min(bw2 - tw, x + 12))}px`; tip.style.top = `${Math.max(0, y - th - 8)}px`;
     };
     box.querySelectorAll('.hit').forEach((r) => {
       const i = Number(r.dataset.i);
