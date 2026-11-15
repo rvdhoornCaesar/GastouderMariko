@@ -799,17 +799,22 @@
   };
   // Verlaat je het veld met een half of leeg jaar, dan terug naar de laatste geldige dag.
   $('day').addEventListener('blur', () => { const v = $('day').value; if (!completeDate(v) && lastDay) { $('day').value = lastDay; renderDay(); } });
-  // Standaard staat het eerste kind geselecteerd waarvoor die dag nog geen uren zijn ingevuld (met een contract dat op die dag loopt).
+  // Welk kind staat standaard geselecteerd? In deze volgorde, telkens het eerste in de lijst:
+  //  1. een kind dat die dag standaard uren heeft (vaste tijden van een lopend contract, niet op vakantie) en waarvoor nog niets is ingevuld;
+  //  2. anders een kind waarvoor die dag nog niets is ingevuld (met een contract dat op die dag loopt);
+  //  3. anders gewoon het eerste kind.
   // Kies je zelf een kind, dan blijft dat staan tot je van dag wisselt of uren toevoegt.
   let contractTouched = false;
   function defaultContract(day) {
+    const all = contracts();
     const done = new Set(state.entries.filter((e) => e.date === day).map((e) => findContract(e.contractId)).filter(Boolean).map((x) => x.child.id));
-    const open = contracts().filter((x) => !done.has(x.child.id));
     const active = (x) => (x.contract.start && x.contract.end ? x.contract.start <= day && day <= x.contract.end : true);
-    const pick = open.find(active);
-    if (pick) return pick.contract.id;
-    // Iedereen met een lopend contract heeft al uren: de keuze laten staan. Heeft niemand een lopend contract, dan het eerste kind.
-    return !contracts().some(active) && open[0] ? open[0].contract.id : null;
+    const onHoliday = (x) => (x.child.holidays || []).some((h) => h.from <= day && day <= h.to);
+    const open = all.filter((x) => !done.has(x.child.id) && active(x));
+    const planned = open.find((x) => scheduleFor(x.contract, day) && !onHoliday(x));
+    if (planned) return planned.contract.id;
+    if (open[0]) return open[0].contract.id;
+    return all[0] ? all[0].contract.id : null;
   }
   $('contract').addEventListener('change', () => { contractTouched = true; updateEntryHints(true); });
 
