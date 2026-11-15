@@ -6,6 +6,7 @@
 <title>Gastouder Uren</title>
 <style>
   :root {
+    color-scheme: light dark;   /* anders blijft het kalenderknopje van een datumveld zwart op donker, en dus onzichtbaar */
     --bg: #fdf8f3; --card: #fff; --ink: #2b2b2b; --muted: #777; --line: #e8ddd0;
     --accent: #e07a5f; --accent-ink: #fff; --ok: #3d9970; --danger: #c0392b;
   }
@@ -37,7 +38,8 @@
   button.btn.small { padding: 5px 10px; font-size: .85rem; }
   button.link { background: none; border: 0; color: var(--danger); cursor: pointer; font: inherit; padding: 4px; }
   .datebar { display: flex; gap: 8px; align-items: center; margin-bottom: 14px; }
-  .datebar input { flex: 1; text-align: center; }
+  .datebar input { flex: 1; min-width: 0; text-align: center; }
+  .datebar .btn { flex: none; padding-left: 10px; padding-right: 10px; }
   .entry { display: flex; justify-content: space-between; align-items: center; gap: 10px;
     padding: 10px 0; border-bottom: 1px solid var(--line); }
   .entry:last-child { border-bottom: 0; }
@@ -785,7 +787,18 @@
   }
   $('prevOpen').onclick = () => jumpOpen(-1);
   $('nextOpen').onclick = () => jumpOpen(1);
-  $('day').onchange = () => { if ($('day').value && beforeStart($('day').value)) $('day').value = gStart(); renderDay(true); };
+  // Tijdens het typen van het jaar geeft de browser bij elke toets een geldige datum (0002, 0020, 0202, 2026). Daar reageren we pas op als
+  // het jaar compleet is; anders sprong het veld bij een begindatum terug naar die datum zodra je '20' had getypt.
+  const completeDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) && Number(v.slice(0, 4)) >= 1900;
+  let lastDay = '';
+  $('day').onchange = () => {
+    const v = $('day').value;
+    if (v && !completeDate(v)) return;
+    if (v && beforeStart(v)) $('day').value = gStart();
+    renderDay(true);
+  };
+  // Verlaat je het veld met een half of leeg jaar, dan terug naar de laatste geldige dag.
+  $('day').addEventListener('blur', () => { const v = $('day').value; if (!completeDate(v) && lastDay) { $('day').value = lastDay; renderDay(); } });
   // Standaard staat het eerste kind geselecteerd waarvoor die dag nog geen uren zijn ingevuld (met een contract dat op die dag loopt).
   // Kies je zelf een kind, dan blijft dat staan tot je van dag wisselt of uren toevoegt.
   let contractTouched = false;
@@ -823,10 +836,12 @@
   $('end').addEventListener('input', updateEntryCap);
 
   async function renderDay(prefill) {
+    if ($('day').value && !completeDate($('day').value)) return;   // het jaar wordt nog getypt
     if ($('day').value && beforeStart($('day').value)) $('day').value = gStart();
     updateNavLimits();
     const day = $('day').value;
     if (!day) return;
+    lastDay = day;
     const seq = ++daySeq;
     await guard(() => ensureMonth(day.slice(0, 7)));
     if (seq !== daySeq) return;
