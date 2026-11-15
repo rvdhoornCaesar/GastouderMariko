@@ -10,7 +10,7 @@ const { HttpError } = require('./errors');
 const GEBRUIKER = ['entries:read', 'entries:write', 'children:read', 'settings:read'];
 const BEHEERDER = [...GEBRUIKER, 'children:write', 'settings:write', 'accounts:manage', 'data:export'];
 const PERMISSIONS = { gebruiker: GEBRUIKER, beheerder: BEHEERDER };
-const PLATFORM = ['admin:view', 'orgs:manage'];
+const PLATFORM = ['admin:view', 'orgs:manage', 'import:run'];
 const ROLES = Object.keys(PERMISSIONS);
 
 const permissionsOf = (role) => PERMISSIONS[role] || [];   // onbekende rol: geen enkel recht

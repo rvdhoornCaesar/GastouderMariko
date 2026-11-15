@@ -3,6 +3,7 @@ const { HttpError } = require('./errors');
 const v = require('./validation');
 const perm = require('./permissions');
 const P = require('./passwords');
+const { parsePlanning, runImport } = require('./import-planning');
 
 // Platformbeheer: organisaties aanmaken en beheren. Wie platformbeheerder is ziet hier alleen organisaties (naam, aantallen), nooit de
 // gegevens erin: daarvoor moet je lid zijn. Verwijderen gaat in twee stappen: eerst "verwijderd" (leden raken direct hun toegang kwijt, de
@@ -75,6 +76,17 @@ async function updateAgency({ user, repo, params, body }) {
   if (list.some((x) => x.id !== a.id && x.name.toLowerCase() === next.name.toLowerCase())) throw new HttpError(409, 'Dit gastouderbureau staat al in de lijst.');
   await repo.saveAgency(next);
   return { status: 200, jsonBody: next };
+}
+
+// Eenmalige import van historische gegevens uit het Excel-planningsbestand (zie import-planning.js). Werkt in de organisatie waarin je nu zit
+// (je moet er lid-beheerder van zijn). Zonder apply: alleen een voorbeeld, er wordt niets opgeslagen.
+async function importPlanning({ user, repo, body }) {
+  perm.require(user, 'import:run');
+  perm.require(user, 'children:write');
+  perm.require(user, 'entries:write');
+  if (!body || typeof body.file !== 'string' || !body.file.length || body.file.length > 34 * 1024 * 1024) throw new HttpError(400, 'Kies een Excel-bestand (.xlsx) van maximaal 25 MB.');
+  const parsed = parsePlanning(Buffer.from(body.file, 'base64'));
+  return { status: 200, jsonBody: await runImport({ repo, parsed, apply: body.apply === true }) };
 }
 
 async function listOrganisations({ user, repo }) {
@@ -162,4 +174,4 @@ async function exportData({ user, repo, now = new Date() }) {
   return { status: 200, jsonBody: payload, headers: { 'content-disposition': `attachment; filename="export-${user.instanceId}-${now.toISOString().slice(0, 10)}.json"` } };
 }
 
-module.exports = { createAgency, updateAgency, RETENTION_DAYS, listOrganisations, createOrganisation, renameOrganisation, addOrganisationManager, deleteOrganisation, restoreOrganisation, purgeOrganisation, exportData };
+module.exports = { importPlanning, createAgency, updateAgency, RETENTION_DAYS, listOrganisations, createOrganisation, renameOrganisation, addOrganisationManager, deleteOrganisation, restoreOrganisation, purgeOrganisation, exportData };
