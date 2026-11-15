@@ -869,7 +869,9 @@
     let html = '';
     if (x && start && end && toMin(end) > toMin(start)) {
       const a = toMin(start), b = toMin(end);
-      html = capacityIssues(date, { contractId: x.contract.id, start, end }).filter((i) => i.from < b && i.to > a).map(capacityLine).join('');
+      const issues = capacityIssues(date, { contractId: x.contract.id, start, end }).filter((i) => i.from < b && i.to > a);
+      // Dit is een voorbeeld van wat er gebeurt als je dit kind toevoegt; er is nog niets opgeslagen.
+      html = issues.length ? `<div class="hint"><strong>Als je ${esc(x.child.name)} toevoegt (${hm(a)}–${hm(b)}):</strong></div>${issues.map(capacityLine).join('')}` : '';
     }
     $('entryCap').innerHTML = html;
   }
