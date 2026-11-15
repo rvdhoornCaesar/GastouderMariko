@@ -6,11 +6,15 @@ const { TableClient } = require('@azure/data-tables');
 // van een andere. De id wordt nooit uit een verzoek gehaald maar uit de ingelogde gebruiker (zie functions/api.js).
 // Accounts, sessies, inlogpogingen en Microsoft-identiteiten zijn bewust gedeeld (globaal) en staan onder eigen vaste sleutels.
 // Uren hebben RowKey "JJJJ-MM-DD_xxxx", zodat een maand een simpele range-query is.
+// Een e-mailadres dat als RowKey kan dienen (Table Storage weigert / \\ # ? en besturingstekens).
+const keySafe = (v) => typeof v === 'string' && v.length > 0 && v.length <= 200 && !/[\\/#?\u0000-\u001f\u007f-\u009f]/.test(v);
 const INSTANCE_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;   // ook veilig om in een OData-filter te zetten
 
+// instanceId null = geen administratie: alleen de gedeelde tabellen (accounts, organisaties, lidmaatschappen, ...) zijn bruikbaar en elke
+// poging om kinderen, uren of instellingen te lezen faalt. Dat is de repo voor een gebruiker die alleen platformbeheer doet.
 function createRepo(connectionString, instanceId = 'main', tables = {}) {
-  if (typeof instanceId !== 'string' || !INSTANCE_ID.test(instanceId)) throw new Error('Ongeldige administratie.');
-  const PK = instanceId;
+  if (instanceId !== null && (typeof instanceId !== 'string' || !INSTANCE_ID.test(instanceId))) throw new Error('Ongeldige administratie.');
+  const scope = { get id() { if (instanceId === null) throw new Error('Geen administratie gekozen.'); return instanceId; } };
   const table = (name) => {
     if (!tables[name]) {
       const client = TableClient.fromConnectionString(connectionString, name, { allowInsecureConnection: /UseDevelopmentStorage|127\.0\.0\.1|localhost/.test(connectionString) });
@@ -24,9 +28,12 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     return out;
   };
 
+  const orgOf = (r) => ({ id: r.rowKey, name: r.name, status: r.status || 'active', createdAt: r.createdAt || '', deletedAt: r.deletedAt || '' });
+  const memberOf = (r) => ({ orgId: r.partitionKey, email: r.rowKey, role: r.role, createdAt: r.createdAt || '', source: r.source || '' });
+
   // Tweede slot naast het filter: een rij van een andere administratie komt nooit door, wat er ook met de query gebeurt.
   const own = (rows) => {
-    if (rows.some((r) => r.partitionKey !== PK)) throw new Error('Rij van een andere administratie gevonden.');
+    if (rows.some((r) => r.partitionKey !== scope.id)) throw new Error('Rij van een andere administratie gevonden.');
     return rows;
   };
 
@@ -44,7 +51,7 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
 
   const listEntries = async (filter) => {
     const t = await table('entries');
-    const rows = own(await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${PK}'${filter}` } })));
+    const rows = own(await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${scope.id}'${filter}` } })));
     return rows.map(toEntry);
   };
 
@@ -52,7 +59,7 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
   const getSetting = async (key, fallback = []) => {
     const t = await table('settings');
     try {
-      return JSON.parse((await t.getEntity(PK, key)).value);
+      return JSON.parse((await t.getEntity(scope.id, key)).value);
     } catch (e) {
       if (e.statusCode === 404) return fallback;
       throw e;
@@ -60,14 +67,14 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
   };
   const setSetting = async (key, list) => {
     const t = await table('settings');
-    await t.upsertEntity({ partitionKey: PK, rowKey: key, value: JSON.stringify(list) }, 'Replace');
+    await t.upsertEntity({ partitionKey: scope.id, rowKey: key, value: JSON.stringify(list) }, 'Replace');
   };
 
   return {
     instanceId,
     // Dezelfde verbinding en tabelclients, gebonden aan een andere administratie.
-    // Zonder id (undefined) komt er géén repo en dus ook niet stilletjes de eerste administratie: id ?? null breekt de standaardwaarde.
-    forInstance: (id) => createRepo(connectionString, id ?? null, tables),
+    // Zonder id (undefined) komt er géén repo en dus ook niet stilletjes de eerste administratie; null is bewust 'geen administratie'.
+    forInstance: (id) => createRepo(connectionString, id === undefined ? 'ongeldig!' : id, tables),
 
     // Lokale accounts (e-mailadres als sleutel), sessies (sleutel = hash van de sessiesleutel) en inlogpogingen (sleutel = hash van het e-mailadres).
     // 'role' en 'instanceId' liggen nu al vast, zodat er later rollen en meerdere gastouders (instanties) bij kunnen.
@@ -87,11 +94,14 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     async saveAccount(a) {
       const t = await table('accounts');
       await t.upsertEntity({
-        partitionKey: 'accounts', rowKey: a.email, name: a.name || '', role: a.role, instanceId: a.instanceId,
+        partitionKey: 'accounts', rowKey: a.email, name: a.name || '', role: a.role, instanceId: a.instanceId, platformAdmin: !!a.platformAdmin,
         passwordHash: a.passwordHash, mustChange: !!a.mustChange, createdAt: a.createdAt, lastLogin: a.lastLogin || '',
         // Tweestapsverificatie: geheim versleuteld, herstelcodes als hashes (JSON-lijst)
         totpSecret: a.totpSecret || '', totpPending: a.totpPending || '', totpLastStep: a.totpLastStep || 0, recoveryCodes: a.recoveryCodes || '[]',
       }, 'Replace');
+    },
+    async setAccountPlatformAdmin(email, flag) {
+      await (await table('accounts')).updateEntity({ partitionKey: 'accounts', rowKey: email, platformAdmin: !!flag }, 'Merge');
     },
     async deleteAccount(email) {
       try { await (await table('accounts')).deleteEntity('accounts', email); } catch (e) { if (e.statusCode !== 404) throw e; }
@@ -133,6 +143,40 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
       await (await table('identities')).upsertEntity({ partitionKey: 'identities', rowKey: key, email }, 'Replace');
     },
 
+    // Organisaties (administraties) en lidmaatschappen: wie bij welke organisatie hoort en met welke rol. Gedeeld, niet per administratie.
+    // Een lidmaatschap staat onder PartitionKey = id van de organisatie en RowKey = e-mailadres.
+    async getOrganisation(id) {
+      try { return orgOf(await (await table('organisations')).getEntity('organisations', id)); } catch (e) { if (e.statusCode === 404) return null; throw e; }
+    },
+    async listOrganisations() {
+      return (await collect((await table('organisations')).listEntities({ queryOptions: { filter: `PartitionKey eq 'organisations'` } }))).map(orgOf)
+        .sort((a, b) => a.name.localeCompare(b.name, 'nl') || a.id.localeCompare(b.id));
+    },
+    async saveOrganisation(o) {
+      if (!INSTANCE_ID.test(o.id)) throw new Error('Ongeldige administratie.');
+      await (await table('organisations')).upsertEntity({ partitionKey: 'organisations', rowKey: o.id, name: o.name, status: o.status || 'active', createdAt: o.createdAt || '', deletedAt: o.deletedAt || '' }, 'Replace');
+    },
+    async getMembership(orgId, email) {
+      if (!INSTANCE_ID.test(orgId) || !keySafe(email)) return null;
+      try { return memberOf(await (await table('memberships')).getEntity(orgId, email)); } catch (e) { if (e.statusCode === 404) return null; throw e; }
+    },
+    async listMembersOf(orgId) {
+      if (!INSTANCE_ID.test(orgId)) return [];
+      return (await collect((await table('memberships')).listEntities({ queryOptions: { filter: `PartitionKey eq '${orgId}'` } }))).map(memberOf).sort((a, b) => a.email.localeCompare(b.email));
+    },
+    async listMembershipsOf(email) {
+      if (!keySafe(email)) return [];
+      return (await collect((await table('memberships')).listEntities({ queryOptions: { filter: `RowKey eq '${email.replace(/'/g, "''")}'` } }))).map(memberOf);
+    },
+    async saveMembership(m) {
+      if (!INSTANCE_ID.test(m.orgId) || !keySafe(m.email)) throw new Error('Ongeldig lidmaatschap.');
+      await (await table('memberships')).upsertEntity({ partitionKey: m.orgId, rowKey: m.email, role: m.role, createdAt: m.createdAt || '', source: m.source || '' }, 'Replace');
+    },
+    async deleteMembership(orgId, email) {
+      if (!INSTANCE_ID.test(orgId) || !keySafe(email)) return;
+      try { await (await table('memberships')).deleteEntity(orgId, email); } catch (e) { if (e.statusCode !== 404) throw e; }
+    },
+
     getUsers: () => getSetting('users'),
     setUsers: (list) => setSetting('users', list),
     getRates: () => getSetting('rates'),
@@ -148,13 +192,13 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
 
     async listChildren() {
       const t = await table('children');
-      const rows = own(await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${PK}'` } })));
+      const rows = own(await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${scope.id}'` } })));
       return rows.map(toChild).sort((a, b) => a.name.localeCompare(b.name, 'nl'));
     },
     async getChild(id) {
       const t = await table('children');
       try {
-        return toChild(await t.getEntity(PK, id));
+        return toChild(await t.getEntity(scope.id, id));
       } catch (e) {
         if (e.statusCode === 404) return null;
         throw e;
@@ -163,13 +207,13 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     async saveChild(child) {
       const t = await table('children');
       await t.upsertEntity({
-        partitionKey: PK, rowKey: child.id, name: child.name, firstName: child.firstName, lastName: child.lastName,
+        partitionKey: scope.id, rowKey: child.id, name: child.name, firstName: child.firstName, lastName: child.lastName,
         birthDate: child.birthDate || '', parents: JSON.stringify(child.parents),
         contracts: JSON.stringify(child.contracts), holidays: JSON.stringify(child.holidays),
       }, 'Replace');
     },
     async deleteChild(id) {
-      await (await table('children')).deleteEntity(PK, id);
+      await (await table('children')).deleteEntity(scope.id, id);
     },
     // '-' en '.' liggen naast elkaar in ASCII, dus dit selecteert precies één maand.
     listEntriesOfMonth(month) {
@@ -177,20 +221,20 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     },
     async saveEntry(e) {
       const t = await table('entries');
-      await t.upsertEntity({ partitionKey: PK, rowKey: e.id, contractId: e.contractId, start: e.start, end: e.end, note: e.note }, 'Replace');
+      await t.upsertEntity({ partitionKey: scope.id, rowKey: e.id, contractId: e.contractId, start: e.start, end: e.end, note: e.note }, 'Replace');
     },
     async getEntry(id) {
-      try { return toEntry(await (await table('entries')).getEntity(PK, id)); } catch (e) { if (e.statusCode === 404) return null; throw e; }
+      try { return toEntry(await (await table('entries')).getEntity(scope.id, id)); } catch (e) { if (e.statusCode === 404) return null; throw e; }
     },
     async deleteEntry(id) {
-      await (await table('entries')).deleteEntity(PK, id);
+      await (await table('entries')).deleteEntity(scope.id, id);
     },
     async deleteEntriesOfContracts(contractIds) {
       const t = await table('entries');
       const ids = new Set(contractIds);
-      for (const e of await listEntries('')) if (ids.has(e.contractId)) await t.deleteEntity(PK, e.id);
+      for (const e of await listEntries('')) if (ids.has(e.contractId)) await t.deleteEntity(scope.id, e.id);
     },
   };
 }
 
-module.exports = { createRepo };
+module.exports = { createRepo, keySafe };

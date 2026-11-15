@@ -1,19 +1,8 @@
 const { HttpError } = require('./errors');
 const { hashToken } = require('./passwords');
 
-// E-mailadressen uit de app-setting ALLOWED_USERS: de vaste gebruikers (beheerders).
-// Zij kunnen nooit buitengesloten worden; extra gebruikers worden in de app beheerd (zie repo.getUsers).
-// Onzichtbare tekens (spatie met nulbreedte, harde spatie, BOM) komen mee bij plakken uit mail of Teams; trim() haalt ze deels niet weg.
-const clean = (v) => String(v).replace(/[\u200B-\u200D\u2060\uFEFF\u00A0]/g, '').trim().toLowerCase();
-
-// Vaste beheerders die in de code staan, naast ALLOWED_USERS. Zo blijven ze admin, ook als de omgevingsvariabele wordt overschreven.
-// Wijzigen kan alleen met een codewijziging en een deploy.
-const CODE_ADMINS = ['r.hoorn@caesar.nl'];
-
-function fixedUsers(env = process.env) {
-  const fromEnv = (env.ALLOWED_USERS || '').split(',').map((s) => clean(s)).filter(Boolean);
-  return [...new Set([...CODE_ADMINS, ...fromEnv])];
-}
+const { fixedUsers, CODE_ADMINS } = require('./admins');
+const { requestedOrganisation, resolveContext } = require('./organisations');
 
 const COOKIE = 'gu_session';
 const SESSION_DAYS = 7;
@@ -73,17 +62,16 @@ async function rememberIdentity(user, repo) {
   if (repo.setIdentity) await repo.setIdentity(key, user.email);
 }
 
-// Elk Microsoft-account kan inloggen; alleen vaste en toegevoegde gebruikers mogen erbij.
+// Elk Microsoft-account kan inloggen; toegang heb je als je lid bent van een organisatie (of platformbeheerder bent). De organisatie komt uit
+// de header x-organisatie en moet er een zijn waar je lid van bent; zie organisations.js.
 async function authorizeMicrosoft(headers, repo, env = process.env) {
   let user = parsePrincipal(headers);
   if (user.masked) user = await resolveMasked(user, repo);
-  const fixed = fixedUsers(env).includes(user.email);
-  if (!fixed && !(await repo.getUsers()).includes(user.email)) throw new HttpError(403, 'Geen toegang.', { user: user.email, diag: user.diag });
+  const platformAdmin = fixedUsers(env).includes(user.email);
+  const ctx = await resolveContext({ repo, email: user.email, requested: requestedOrganisation(headers), platformAdmin, denied: { user: user.email, diag: user.diag } });
   await rememberIdentity(user, repo);
-  // instanceId: nu één instantie, maar al wel vastgelegd.
-  // Vaste gebruikers (ALLOWED_USERS) zijn admin; in de app toegevoegde Microsoft-gebruikers zijn beheerder.
   const { diag, userId, masked, ...rest } = user;
-  return { ...rest, kind: 'microsoft', fixed, role: fixed ? 'admin' : 'beheerder', instanceId: 'main', mustChange: false };
+  return { ...rest, kind: 'microsoft', fixed: platformAdmin, platformAdmin, ...ctx, mustChange: false };
 }
 
 function sessionToken(headers) {
@@ -96,7 +84,7 @@ function sessionToken(headers) {
 }
 
 // Sessie via cookie. Wijzigende verzoeken moeten ook de header x-requested-with meesturen (naast SameSite=Strict op het cookie).
-async function authorizeSession(headers, method, repo, now = new Date()) {
+async function authorizeSession(headers, method, repo, now = new Date(), env = process.env) {
   const token = sessionToken(headers);
   if (!token) throw new HttpError(401, 'Niet ingelogd.');
   if (!['GET', 'HEAD'].includes(method) && !headers.get('x-requested-with')) throw new HttpError(403, 'Ongeldig verzoek.');
@@ -109,9 +97,11 @@ async function authorizeSession(headers, method, repo, now = new Date()) {
   }
   const account = await repo.getAccount(session.email);
   if (!account) throw new HttpError(401, 'Niet ingelogd.');
+  const platformAdmin = fixedUsers(env).includes(account.rowKey) || !!account.platformAdmin;
+  const ctx = await resolveContext({ repo, email: account.rowKey, requested: requestedOrganisation(headers), platformAdmin });
   return {
-    kind: 'local', email: account.rowKey, name: account.name || account.rowKey, fixed: false,
-    role: account.role, instanceId: account.instanceId, mustChange: !!account.mustChange, totp: !!account.totpSecret, sessionHash: hash,
+    kind: 'local', email: account.rowKey, name: account.name || account.rowKey, fixed: false, platformAdmin, ...ctx,
+    mustChange: !!account.mustChange, totp: !!account.totpSecret, sessionHash: hash,
   };
 }
 

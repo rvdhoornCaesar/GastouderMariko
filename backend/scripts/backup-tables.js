@@ -3,7 +3,11 @@
 //   node scripts/backup-tables.js backup [--label tekst]
 //   node scripts/backup-tables.js list
 //   node scripts/backup-tables.js restore --id <id> [--apply] [--replace]
+//   node scripts/backup-tables.js plan-organisaties   (alleen lezen: wat de overstap naar organisaties zou doen; ALLOWED_USERS uit de omgeving)
 const { backup, restore, listBackups } = require('./backup');
+const { createRepo } = require('../src/repo');
+const { planSeed } = require('../src/organisations');
+const masked = (e) => e.replace(/^(.{1,2})[^@]*@/, '$1***@');   // adressen niet volledig in een log
 
 const [cmd, ...rest] = process.argv.slice(2);
 const flag = (n) => rest.includes(`--${n}`);
@@ -25,7 +29,17 @@ const conn = process.env.TABLES_CONNECTION;
     const res = await restore({ conn, id: value('id'), apply: flag('apply'), replace: flag('replace') });
     console.log(res.applied ? `Teruggezet uit ${res.id}. De stand van daarvoor staat in back-up ${res.safetyBackup}.` : `Proefrun voor ${res.id}: er is niets veranderd. Voeg --apply toe om terug te zetten.`);
     res.summary.forEach((s) => console.log(`  ${s.name}: ${s.add} toe te voegen, ${s.change} te wijzigen, ${s.same} gelijk, ${s.extra} extra in de huidige tabel${s.remove ? ` (worden verwijderd)` : ''}`));
+  } else if (cmd === 'plan-organisaties') {
+    const repo = createRepo(conn);
+    if (await repo.getOrganisation('main')) { console.log('De organisatie "main" bestaat al: de overstap is al gedaan en er wordt niets meer gevuld.'); return; }
+    const plan = await planSeed(repo, process.env);
+    console.log(`Er wordt een organisatie "${plan.organisation.name}" (id ${plan.organisation.id}) aangemaakt met ${plan.members.length} leden. Er wordt niets geschreven door dit voorbeeld.`);
+    const count = (r) => plan.members.filter((m) => m.role === r).length;
+    console.log(`  beheerder: ${count('beheerder')}, gebruiker: ${count('gebruiker')}`);
+    plan.members.forEach((m) => console.log(`  ${masked(m.email)}  ${m.role}  (${m.source})`));
+    console.log(`Lokale accounts die platformbeheerder blijven: ${plan.platformFlags.length}${plan.platformFlags.length ? ` (${plan.platformFlags.map(masked).join(', ')})` : ''}`);
+    plan.skipped.forEach((x) => console.log(`  overgeslagen: ${masked(x.email)} (${x.reason})`));
   } else {
-    throw new Error('Onbekende opdracht. Gebruik backup, list of restore.');
+    throw new Error('Onbekende opdracht. Gebruik backup, list, restore of plan-organisaties.');
   }
 })().catch((e) => { console.error(`Mislukt: ${e.message}`); process.exit(1); });

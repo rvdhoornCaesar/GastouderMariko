@@ -36,7 +36,7 @@ test.before(async () => {
 test.after(() => { azurite.kill(); fs.rmSync(dir, { recursive: true, force: true }); });
 
 test('een administratie-id moet veilig zijn om als sleutel en in een filter te gebruiken', () => {
-  for (const bad of ['', 'Main', 'a b', "x' or PartitionKey ne 'x", '../main', 'a/b', 'a#b', 'a?b', '-a', 'x'.repeat(41), null, undefined, 7]) {
+  for (const bad of ['', 'Main', 'a b', "x' or PartitionKey ne 'x", '../main', 'a/b', 'a#b', 'a?b', '-a', 'x'.repeat(41), undefined, 7]) {
     assert.throws(() => base.forInstance(bad), /Ongeldige administratie/, String(bad));
   }
   assert.equal(createRepo(CONN).instanceId, 'main');   // zonder id: de eerste administratie, zoals voorheen
@@ -134,4 +134,16 @@ test('handlers: een beheerder werkt alleen in zijn eigen administratie', async (
 
 test('een gebruiker zonder geldige administratie krijgt geen repo', () => {
   assert.throws(() => base.forInstance(undefined), /Ongeldige administratie/);
+});
+
+test('geen administratie (null): wel de gedeelde tabellen, nooit kinderen, uren of instellingen', async () => {
+  const none = base.forInstance(null);
+  assert.equal(none.instanceId, null);
+  await assert.rejects(none.listChildren(), /Geen administratie gekozen/);
+  await assert.rejects(none.getChild('k1'), /Geen administratie gekozen/);
+  await assert.rejects(none.listEntriesOfMonth('2026-03'), /Geen administratie gekozen/);
+  await assert.rejects(none.saveEntry({ id: '2026-03-04_x', contractId: 'c', start: '08:00', end: '09:00', note: '' }), /Geen administratie gekozen/);
+  await assert.rejects(none.getRates(), /Geen administratie gekozen/);
+  await assert.rejects(none.setUsers([]), /Geen administratie gekozen/);
+  assert.equal((await none.getAccount('iemand@x.nl')).instanceId, 'main');   // gedeeld: wel bereikbaar
 });
