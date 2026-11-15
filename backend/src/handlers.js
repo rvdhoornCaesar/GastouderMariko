@@ -118,7 +118,7 @@ async function getSettings({ user, repo, env }) {
   perm.require(user, 'settings:read');
   const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
   const manage = perm.can(user, 'settings:write');   // wie mag toegang regelen, ziet de gebruikerslijsten en de technische info
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), startDate: await repo.getStartDate(), runtime: manage ? process.version : undefined } };
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), startDate: await repo.getStartDate(), runtime: manage ? process.version : undefined } };
 }
 
 async function putRates({ user, repo, body }) {
@@ -133,6 +133,22 @@ async function putOwnChildren({ user, repo, body }) {
   const ownChildren = v.parseOwnChildren(body && body.ownChildren, newId);
   await repo.setOwnChildren(ownChildren);
   return { status: 200, jsonBody: { ownChildren } };
+}
+
+// De gastouder ziek melden voor één dag (of dat ongedaan maken). Dat mag iedereen die uren invult, dus ook een gebruiker.
+const MAX_SICK_DAYS = 1000;   // de lijst staat in één rij (maximaal 32.000 tekens)
+async function putSickDay({ user, repo, body }) {
+  perm.require(user, 'entries:write');
+  const { date, sick } = v.parseSickDay(body);
+  const startDate = await repo.getStartDate();
+  if (sick && startDate && date < startDate) throw new HttpError(400, 'Vóór de begindatum van de gastouder kun je niet ziek melden.');
+  const current = await repo.getSickDays();
+  const set = new Set(current);
+  if (sick) set.add(date); else set.delete(date);
+  if (set.size > MAX_SICK_DAYS) throw new HttpError(400, `Er kunnen maximaal ${MAX_SICK_DAYS} ziekmeldingen worden bewaard.`);
+  const sickDays = [...set].sort();
+  if (sickDays.length !== current.length || sickDays.some((d, i) => d !== current[i])) await repo.setSickDays(sickDays);
+  return { status: 200, jsonBody: { sickDays } };
 }
 
 async function putStartDate({ user, repo, body }) {
@@ -425,4 +441,4 @@ async function deleteAccount({ user, repo, params }) {
   return { status: 204 };
 }
 
-module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers };
+module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers, putSickDay };

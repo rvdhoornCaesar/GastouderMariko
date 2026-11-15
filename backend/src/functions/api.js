@@ -71,6 +71,7 @@ route('putOwnChildren', ['PUT'], 'settings/own-children', handlers.putOwnChildre
 route('putStartDate', ['PUT'], 'settings/start-date', handlers.putStartDate);
 route('putVacations', ['PUT'], 'settings/vacations', handlers.putVacations);
 route('putOpening', ['PUT'], 'settings/opening', handlers.putOpening);
+route('putSickDay', ['PUT'], 'sick-days', handlers.putSickDay);
 route('putUsers', ['PUT'], 'settings/users', handlers.putUsers);
 
 // Inloggen met een lokaal account

@@ -133,6 +133,9 @@
   .month .day.other { opacity: .5; }
   .month .day.closed { background: color-mix(in srgb, var(--muted) 12%, var(--card)); }
   .month .day.closed .n { color: var(--muted); }
+  .sickbar { display: flex; gap: 10px; align-items: center; justify-content: flex-end; margin-top: 10px; flex-wrap: wrap; }
+  .tag.sick { background: color-mix(in srgb, var(--danger) 16%, var(--card)); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, var(--line)); }
+  .month .day.sick { background: repeating-linear-gradient(135deg, var(--card) 0 7px, color-mix(in srgb, var(--danger) 13%, var(--card)) 7px 14px); }
   .month .day.vac { background: repeating-linear-gradient(45deg, var(--card) 0 7px, color-mix(in srgb, var(--muted) 16%, var(--card)) 7px 14px); }
   .month .day.today { border-color: var(--accent); border-width: 2px; }
   .month .day .n { font-size: .75rem; color: var(--muted); }
@@ -267,6 +270,7 @@
       <h2 class="dayhead"><span id="dayTitle">Vandaag</span><span class="hours" id="dayTotal" title="Totaal deze dag">0:00</span></h2>
       <div id="dayEntries"></div>
       <div class="warn" id="dayCap"></div>
+      <div class="sickbar noprint"><span class="tag sick" id="sickInfo" hidden>Gastouder ziek gemeld</span><button class="btn secondary small" id="sickBtn" type="button">Gastouder ziek melden</button></div>
     </div>
 
     <form class="card" id="entryForm" aria-label="Uren toevoegen">
@@ -698,13 +702,18 @@
   const beforeStart = (date) => !!gStart() && date < gStart();
   const maxDate = (a, b) => (a > b ? a : b);
   // Vakantie van de gastouder zelf (Instellingen): dan is er geen opvang.
-  const vacationOf = (date) => (state.settings.vacations || []).find((h) => h.from <= date && date <= h.to) || null;
+  // Ziek gemeld (knop bij Uren invullen): een dag zonder opvang, net als een vakantie. Daarom telt hij overal mee als 'vakantie' (geen geplande
+  // uren, dag gesloten, waarschuwing bij uren); alleen de tekst en kleur zeggen 'ziek'. Een echte vakantie gaat voor.
+  const sickOf = (date) => (state.settings.sickDays || []).includes(date);
+  const vacationOf = (date) => (state.settings.vacations || []).find((h) => h.from <= date && date <= h.to) || (sickOf(date) ? { from: date, to: date, note: '', sick: true } : null);
+  const absentWord = (v) => (v && v.sick ? 'ziek' : 'vakantie');
+  const absentText = (v) => (v && v.sick ? 'Gastouder ziek' : `Vakantie gastouder${v && v.note ? `: ${v.note}` : ''}`);
   // Vaste gesloten dag: een weekdag die bij Instellingen (openingstijden) niet open staat. Vakantie en begindatum gaan voor.
   const closedWeekday = (date) => { const o = (state.settings.opening.days || [])[(new Date(date + 'T12:00').getDay() + 6) % 7]; return !!(o && !o.open); };
   const vacTag = (date) => {
     if (beforeStart(date)) return '<span class="tag">voor begindatum</span>';
     const h = vacationOf(date);
-    return h ? `<span class="tag">vakantie${h.note ? ': ' + esc(h.note) : ''}</span>` : closedWeekday(date) ? '<span class="tag">gesloten</span>' : '';
+    return h ? `<span class="tag${h.sick ? ' sick' : ''}">${absentWord(h)}${h.note ? ': ' + esc(h.note) : ''}</span>` : closedWeekday(date) ? '<span class="tag">gesloten</span>' : '';
   };
   // Te veel kinderen tegelijk: totaal maximaal 6, waarvan maximaal 5 jonger dan 4 jaar, 4 jonger dan 2 jaar en 2 jonger dan 1 jaar.
   // Eigen kinderen tot 8 jaar tellen mee en zijn de hele dag aanwezig; één kind telt één keer, ook met meerdere registraties.
@@ -782,6 +791,13 @@
   }));
 
   // --- uren tab ---
+  // De gastouder ziek melden voor de gekozen dag (of dat ongedaan maken).
+  $('sickBtn').onclick = async () => {
+    const date = $('day').value;
+    if (!date) return;
+    const r = await guard(() => api('PUT', 'sick-days', { date, sick: !sickOf(date) }));
+    if (r) { state.settings.sickDays = r.sickDays; render(); }
+  };
   // Knoppen en datumvelden houden de begindatum aan: ervoor kun je niet navigeren.
   function updateNavLimits() {
     const g = gStart(), day = $('day').value, month = $('month').value;
@@ -840,7 +856,7 @@
   // Waarschuwing bij een datum buiten het contract; bij wisselen van dag of contract ook de vaste tijden invullen.
   function updateEntryHints(prefill) {
     const x = findContract($('contract').value), date = $('day').value;
-    $('entryWarn').textContent = [x ? contractWarning(x.contract, date) : '', vacationOf(date) ? `Let op: de gastouder heeft vakantie op ${nlDate(date)}.` : ''].filter(Boolean).join(' ');
+    $('entryWarn').textContent = [x ? contractWarning(x.contract, date) : '', vacationOf(date) ? `Let op: de gastouder ${vacationOf(date).sick ? 'is ziek gemeld' : 'heeft vakantie'} op ${nlDate(date)}.` : ''].filter(Boolean).join(' ');
     const d = prefill && x && scheduleFor(x.contract, date);
     if (d) { $('start').value = d.from; $('end').value = d.to; }
     updateEntryCap();
@@ -868,6 +884,10 @@
     const seq = ++daySeq;
     await guard(() => ensureMonth(day.slice(0, 7)));
     if (seq !== daySeq) return;
+    const sick = sickOf(day);
+    $('sickInfo').hidden = !sick;
+    $('sickBtn').textContent = sick ? 'Ziekmelding ongedaan maken' : 'Gastouder ziek melden';
+    $('sickBtn').disabled = !sick && beforeStart(day);
     $('dayTitle').textContent = new Date(day + 'T12:00').toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
     // Op naam van het kind (alfabetisch), daarna op begintijd; een nieuwe registratie komt dus op de juiste plek te staan.
     const childName = (e) => { const x = findContract(e.contractId); return x ? x.child.name : '\uffff'; };
@@ -893,7 +913,7 @@
   function entryRow(e, withDate) {
     const x = findContract(e.contractId), multi = x && x.child.contracts.length > 1;
     const name = x ? x.child.name + (multi ? ` · ${contractPeriod(x.contract)}` : '') : '(verwijderd contract)';
-    const flags = (x && contractWarning(x.contract, e.date) ? '<span class="flag">⚠ buiten contract</span>' : '') + (vacationOf(e.date) ? '<span class="flag">⚠ vakantie gastouder</span>' : '');
+    const flags = (x && contractWarning(x.contract, e.date) ? '<span class="flag">⚠ buiten contract</span>' : '') + (vacationOf(e.date) ? `<span class="flag">⚠ ${vacationOf(e.date).sick ? 'gastouder ziek' : 'vakantie gastouder'}</span>` : '');
     return `<div class="entry c"><div class="main"><span class="who">${withDate ? esc(nlDate(e.date)) + ' · ' : ''}${esc(name)}</span><span class="meta">${e.start}–${e.end}</span>${e.note ? `<span class="meta note" title="${esc(e.note)}">${esc(e.note)}</span>` : ''}${flags}</div>
       <div class="act"><span class="hours">${fmt(entryMin(e))}</span><button class="link neutral noprint" data-edit="${e.id}" title="Bewerken" aria-label="Bewerken">✎</button><button class="link noprint" data-del="${e.id}" title="Verwijderen" aria-label="Verwijderen">✕</button></div></div>`;
   }
@@ -1066,6 +1086,8 @@
          ${outsideContract ? `<div class="warn">${outsideContract} registratie${outsideContract === 1 ? '' : 's'} ${outsideContract === 1 ? 'valt' : 'vallen'} buiten de contractperiode.</div>` : ''}
          ${capDays.length ? `<div class="warn">Op ${capDays.length} dag${capDays.length === 1 ? '' : 'en'} zijn er te veel kinderen tegelijk (${capDays.map(nlDate).join(', ')}). Zie de dag in het tabblad Uren invullen.</div>` : ''}`
       : '<div class="empty">Geen uren in deze maand.</div>';
+    const sickInMonth = (state.settings.sickDays || []).filter((d) => d.startsWith(m) && !beforeStart(d));
+    $('summary').innerHTML += sickInMonth.length ? `<p class="hint" style="margin:10px 0 0"><span class="tag sick">ziek</span> Gastouder ziek gemeld op ${sickInMonth.length} dag${sickInMonth.length === 1 ? '' : 'en'}: ${sickInMonth.map(nlDate).join(', ')}.</p>` : '';
     $('monthEntries').innerHTML = (list.length ? list.map((e) => entryRow(e, true)).join('') : '<div class="empty">Geen registraties.</div>')
       + (holidayEntries.length ? `<h3 class="subhead">Doorbetaalde vakantiedagen</h3>${holidayEntries.map(holidayRow).join('')}` : '');
     renderTake();
@@ -1248,7 +1270,7 @@
   const warnIco = (d) => (isOver(d) ? `<span class="warnico" role="img" aria-label="Te veel kinderen" title="Te veel kinderen: ${overText(d)}">⚠️</span>` : '');
   const availClass = (d) => (d.closed ? 'av-closed' : d.free.older <= 0 || isOver(d) ? 'av-full' : d.free.older === 1 ? 'av-low' : 'av-ok');
   const freeNum = (n) => (n < 0 ? `${n}` : String(n));
-  const availText = (d) => (d.closed ? (d.pre ? 'voor begindatum' : d.vac ? 'vakantie' : 'gesloten') : d.free.older < 0 ? `${-d.free.older} te veel` : isOver(d) ? 'te veel jonge' : d.free.older === 0 ? 'vol' : `${d.free.older} vrij`);
+  const availText = (d) => (d.closed ? (d.pre ? 'voor begindatum' : d.vac ? absentWord(d.vac) : 'gesloten') : d.free.older < 0 ? `${-d.free.older} te veel` : isOver(d) ? 'te veel jonge' : d.free.older === 0 ? 'vol' : `${d.free.older} vrij`);
   // Extra regel voor jonge kinderen als daar minder plek voor is dan voor oudere kinderen.
   const youngNote = (f) => [f.toddler < f.older && `2–3 jr: ${Math.max(0, f.toddler)}`, f.one < f.toddler && `1 jr: ${Math.max(0, f.one)}`, f.baby < f.one && `baby: ${Math.max(0, f.baby)}`]
     .filter(Boolean).join(' · ');
@@ -1278,9 +1300,9 @@
     $('calTitle').textContent = view === 'week' ? `Week ${isoWeek(dates[0])} · ${nlLong(dates[0], { day: 'numeric', month: 'short' })} t/m ${nlLong(dates[6], { day: 'numeric', month: 'short', year: 'numeric' })}`
       : view === 'maand' ? nlLong(d, { month: 'long', year: 'numeric' }) : String(d.getFullYear());
     $('calLegend').innerHTML = vrij
-      ? `<span><span class="badge av-ok">2+ vrij</span></span><span><span class="badge av-low">1 vrij</span></span><span><span class="badge av-full">vol</span></span><span><span class="badge av-closed">gesloten / vakantie</span></span>
+      ? `<span><span class="badge av-ok">2+ vrij</span></span><span><span class="badge av-low">1 vrij</span></span><span><span class="badge av-full">vol</span></span><span><span class="badge av-closed">gesloten / vakantie / ziek</span></span>
          <span style="flex-basis:100%">Vrij = plekken over op het drukste moment van de dag (maximaal ${CAP.total} kinderen tegelijk, eigen kinderen onder 8 jaar meegeteld), op basis van geschreven en geplande uren. Vaste uren per maand hebben geen tijden en tellen niet mee.</span>`
-      : `<span><span class="chip written">Noor 9:00</span> geschreven (ingevuld)</span><span><span class="chip planned">Noor 9:00</span> gepland (vaste tijden)</span><span><span class="tag">gesloten</span> geen opvang volgens de openingstijden · <span class="tag">vakantie</span> vakantie van de gastouder</span>`
+      : `<span><span class="chip written">Noor 9:00</span> geschreven (ingevuld)</span><span><span class="chip planned">Noor 9:00</span> gepland (vaste tijden)</span><span><span class="tag">gesloten</span> geen opvang volgens de openingstijden · <span class="tag">vakantie</span> vakantie van de gastouder · <span class="tag sick">ziek</span> gastouder ziek gemeld</span>`
         + (cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '');
     await Promise.all(months.map((m) => guard(() => ensureMonth(m))));
     if (seq !== calSeq) return;
@@ -1303,12 +1325,12 @@
               <div class="meta">${sg.kids.map((c) => `${dot(c, date)}${esc(firstName(c))}${ageSuffix(c, date)}`).join(', ')}</div>
               ${youngNote(sg.free) ? `<div class="meta">Plek voor jonge kinderen: ${youngNote(sg.free)}</div>` : ''}</div>
               <span class="badge ${sg.free.older <= 0 ? 'av-full' : sg.free.older === 1 ? 'av-low' : 'av-ok'}">${sg.free.older <= 0 ? (sg.free.older < 0 ? `${-sg.free.older} te veel` : 'vol') : `${sg.free.older} vrij`}</span></div>`).join('')
-            : `<div class="meta">${f.closed ? (f.pre ? 'Voor de begindatum van de gastouder' : f.vac ? `Vakantie gastouder${f.vac.note ? `: ${esc(f.vac.note)}` : ''}` : 'Gesloten') : 'Geen kinderen'}${f.closed ? '' : youngNote(f.free) ? ` · ${youngNote(f.free)}` : ''}</div>`}</div>`;
+            : `<div class="meta">${f.closed ? (f.pre ? 'Voor de begindatum van de gastouder' : f.vac ? esc(absentText(f.vac)) : 'Gesloten') : 'Geen kinderen'}${f.closed ? '' : youngNote(f.free) ? ` · ${youngNote(f.free)}` : ''}</div>`}</div>`;
         }
         return `<div class="card" style="${border}">
           <h2 style="display:flex;justify-content:space-between"><span>${esc(nlLong(dt, { weekday: 'long', day: 'numeric', month: 'long' }))} ${warnIco(fd)} ${vacTag(date)}</span><span class="hours">${hrs(tot)}</span></h2>
           ${groups.length ? groups.map((g) => `<div class="entry${g.kind === 'planned' ? ' planned' : ''}"><div><div class="who">${dot(g.child, date)}${esc(firstName(g.child))} ${kindTag(g)}</div>
-            <div class="meta">${spanText(g)}${ageSuffix(g.child, date)}</div></div><span class="hours">${fmt(g.min)}</span></div>`).join('') : `<div class="meta">${beforeStart(date) ? 'Voor de begindatum van de gastouder' : vacationOf(date) ? 'Vakantie gastouder' : closedWeekday(date) ? 'Gesloten' : 'Geen kinderen'}</div>`}</div>`;
+            <div class="meta">${spanText(g)}${ageSuffix(g.child, date)}</div></div><span class="hours">${fmt(g.min)}</span></div>`).join('') : `<div class="meta">${beforeStart(date) ? 'Voor de begindatum van de gastouder' : vacationOf(date) ? esc(absentText(vacationOf(date))) : closedWeekday(date) ? 'Gesloten' : 'Geen kinderen'}</div>`}</div>`;
       }).join('');
       if (!vrij) {
         const rows = sumChildren(all);
@@ -1323,7 +1345,7 @@
         let wkMin = 0;
         for (let i = 0; i < 7; i++) {
           const dt = dates[w * 7 + i], date = iso(dt), items = dayMap.get(date), groups = groupDay(items), mine = date.startsWith(mainM);
-          const cls = `day${mine && !beforeStart(date) ? '' : ' other'}${date === today ? ' today' : ''}${vacationOf(date) ? ' vac' : closedWeekday(date) ? ' closed' : ''}`, fd = dayFree(date, items);
+          const cls = `day${mine && !beforeStart(date) ? '' : ' other'}${date === today ? ' today' : ''}${vacationOf(date) ? (vacationOf(date).sick ? ' sick' : ' vac') : closedWeekday(date) ? ' closed' : ''}`, fd = dayFree(date, items);
           if (mine && isOver(fd)) overDays.push(date);
           if (vrij) {
             const f = fd;
@@ -1334,7 +1356,7 @@
           }
           wkMin += groups.reduce((s, g) => s + g.min, 0);
           if (mine) inMonth.push(...groups);
-          html += `<div class="${cls}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()} ${warnIco(fd)}</div>${vacationOf(date) ? '<small>vakantie</small>' : closedWeekday(date) && !beforeStart(date) ? '<small>gesloten</small>' : ''}
+          html += `<div class="${cls}" data-goto="${date}" title="Open deze week"><div class="n">${dt.getDate()} ${warnIco(fd)}</div>${vacationOf(date) ? `<small>${absentWord(vacationOf(date))}</small>` : closedWeekday(date) && !beforeStart(date) ? '<small>gesloten</small>' : ''}
             ${groups.map((g) => `<span class="chip ${g.kind}"${cStyle(g.child, date)} title="${esc(firstName(g.child))} ${spanText(g)}${g.holiday ? ' (doorbetaalde vakantie)' : ''}"><strong>${esc(firstName(g.child))}</strong> ${fmt(g.min)}<small>${cal.age && g.child.birthDate ? ageShort(g.child, date) + ' · ' : ''}${spanText(g)}</small></span>`).join('')}</div>`;
         }
         html += `<div class="wk">${vrij ? '' : `${hrs(wkMin)}<small>wk ${isoWeek(dates[w * 7])}</small>`}</div>`;
@@ -1346,7 +1368,7 @@
           <tr><td><span class="badge av-ok">2+ vrij</span></td><td class="num">${tally.ok} dagen</td></tr>
           <tr><td><span class="badge av-low">1 vrij</span></td><td class="num">${tally.low} dagen</td></tr>
           <tr><td><span class="badge av-full">vol</span></td><td class="num">${tally.full} dagen</td></tr>
-          <tr><td><span class="badge av-closed">gesloten / vakantie</span></td><td class="num">${tally.closed} dagen</td></tr></table>
+          <tr><td><span class="badge av-closed">gesloten / vakantie / ziek</span></td><td class="num">${tally.closed} dagen</td></tr></table>
           ${overWarn}<p class="hint" style="margin:10px 0 0">Tik op een dag om de week te openen.</p></div>`;
       } else {
         const rows = withVast(sumChildren(inMonth), vast.get(mainM) || new Map());
@@ -1528,7 +1550,7 @@
     const verdict = !checkedAny ? '<span class="badge av-closed">niets te controleren</span> Geen dagen in de gekozen periode.'
       : failing.length ? `<span class="badge av-full">past niet overal</span> Past niet (altijd) op: ${failing.join(', ')}.` : '<span class="badge av-ok">past</span> Past op alle gevraagde dagen en tijden.';
     $('pResult').innerHTML = `<div class="card"><h2>Uitkomst voor ${esc(child.firstName || child.name)}${existing ? ' (aangepast rooster)' : ''}</h2><p style="margin:0 0 8px">${verdict}</p>
-      <p class="hint" style="margin:0">Gecontroleerd: ${nlDate(from)} t/m ${nlDate(horizon)}${end ? '' : ` (geen einddatum opgegeven; tot de laatste einddatum van een bestaand contract, minimaal 8 weken)`}${start < today ? ' (vanaf vandaag; eerdere dagen zijn al geweest)' : ''}${gStart() && start < gStart() ? ' (vanaf de begindatum van de gastouder)' : ''}${skipped ? `, ${skipped} dag${skipped === 1 ? '' : 'en'} overgeslagen wegens vakantie van het kind` : ''}${skippedVac ? `, ${skippedVac} dag${skippedVac === 1 ? '' : 'en'} overgeslagen wegens vakantie van de gastouder` : ''}.
+      <p class="hint" style="margin:0">Gecontroleerd: ${nlDate(from)} t/m ${nlDate(horizon)}${end ? '' : ` (geen einddatum opgegeven; tot de laatste einddatum van een bestaand contract, minimaal 8 weken)`}${start < today ? ' (vanaf vandaag; eerdere dagen zijn al geweest)' : ''}${gStart() && start < gStart() ? ' (vanaf de begindatum van de gastouder)' : ''}${skipped ? `, ${skipped} dag${skipped === 1 ? '' : 'en'} overgeslagen wegens vakantie van het kind` : ''}${skippedVac ? `, ${skippedVac} dag${skippedVac === 1 ? '' : 'en'} overgeslagen wegens vakantie of ziekte van de gastouder` : ''}.
       Meegeteld: geschreven en geplande uren van de andere kinderen, en je eigen kinderen onder 8 jaar. Vaste uren per maand hebben geen tijden en tellen niet mee.</p></div>${cards}`;
   }
   $('pRun').onclick = runPast;

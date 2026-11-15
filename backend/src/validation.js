@@ -186,6 +186,12 @@ function parseStartDate(value) {
   if (value === null || value === '') return null;
   return requiredDate(value, 'Ongeldige begindatum.');
 }
+// Een dag dat de gastouder ziek is (of niet meer): { date, sick }. 'sick' is standaard waar.
+function parseSickDay(body) {
+  const date = requiredDate(body && body.date, 'Ongeldige datum.');
+  if (body && body.sick !== undefined && typeof body.sick !== 'boolean') throw bad('Ongeldige waarde voor ziek.');
+  return { date, sick: !(body && body.sick === false) };
+}
 function parseOwnChildren(list, newId) {
   if (!Array.isArray(list) || list.length > 20) throw bad('Ongeldige lijst met eigen kinderen.');
   const today = new Date().toISOString().slice(0, 10);
@@ -219,4 +225,4 @@ function parseRole(v) {
   return r;
 }
 
-module.exports = { parseOrgName, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
+module.exports = { parseSickDay, parseOrgName, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
