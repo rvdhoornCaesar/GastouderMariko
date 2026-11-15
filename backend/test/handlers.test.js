@@ -677,47 +677,63 @@ test('gastouderbureaus: platformbeheer maakt de lijst, de gastouder kiest, het c
 test('import van de Excel-planning: alleen platformbeheer, voorbeeld zonder opslaan, daarna toevoegen en niet dubbel', async () => {
   const admin = require('../src/admin-handlers');
   const { xlsx, serial, time } = require('./xlsx-helper');
-  const file = xlsx({
-    Kinderen: { B2: 'Kinderen', C2: 'Geboortedatum', F2: 'Achternaam', G2: 'Contract nummer', H2: 'Vaste tijden',
-      B3: 'Vrij', B4: 'Imp', C4: serial('2022-03-22'), F4: 'Eerste', G4: '2024.00160', H4: '08:30-17:00', B5: 'Tweede', F5: 'Kind', B6: 'Zonder', C6: 7, D6: { f: 'IF(1,2)', v: 3 } },
+  const kinderen = { B2: 'Kinderen', C2: 'Geboortedatum', F2: 'Achternaam', G2: 'Contract nummer', H2: 'Vaste tijden',
+    B3: 'Vrij', B4: 'Imp', C4: serial('2022-03-22'), F4: 'Eerste', G4: '2024.00160', H4: '08:30-17:00', B5: 'Tweede', F5: 'Kind', B6: 'Zonder', C6: 7, D6: { f: 'IF(1,2)', v: 3 } };
+  const planning = {
     2025: { A1: serial('2025-01-01'),
       B4: serial('2025-01-06'), E4: serial('2025-01-07'), B5: 'Imp', C5: time('08:30'), D5: time('17:00'), B6: 'Tweede', C6: time('09:00'), D6: time('12:15'),
       B7: 'Onbekend', C7: time('09:00'), D7: time('10:00'), B8: 'Week', C8: 3, E5: 'Vrij', E6: 'Imp', F6: time('10:00'), G6: time('09:00'),
       B12: serial('2025-01-13'), B13: 'Imp', C13: time('10:00'), D13: time('11:00'), E12: serial('2024-12-31'), E13: 'Imp', F13: time('08:00'), G13: time('09:00') },
-    'Over de jaren': { A1: 'x' },
-  });
+    2026: { A1: serial('2026-01-01'), B4: serial('2026-02-02'), B5: 'Imp', C5: time('08:00'), D5: time('12:00'), B6: 'Tweede', C6: time('08:00'), D6: time('09:30') },
+  };
+  const file = xlsx({ Kinderen: kinderen, ...planning, '2025 uren': { A1: 'x' }, 'Over de jaren': { A1: 'x' } });
   const user = fixedUser, plain = { ...fixedUser, platformAdmin: false };
   const b64 = file.toString('base64');
   await assert.rejects(admin.importPlanning({ user: plain, repo, env, params: {}, body: { file: b64 } }), (e) => e.status === 403);
   await assert.rejects(call(admin.importPlanning, { body: { file: Buffer.from('geen zip').toString('base64') } }), (e) => e.status === 400);
   await assert.rejects(call(admin.importPlanning, { body: {} }), (e) => e.status === 400);
+  await assert.rejects(call(admin.importPlanning, { body: { file: b64, years: [2031] } }), (e) => e.status === 400);
 
   const before = (await repo.listChildren()).length;
-  const preview = (await call(admin.importPlanning, { body: { file: b64 } })).jsonBody;
+  // zonder keuze: beide jaren in het voorbeeld, de lijst met beschikbare jaren erbij (alleen bladen met alleen een jaartal)
+  const all = (await call(admin.importPlanning, { body: { file: b64 } })).jsonBody;
+  assert.deepEqual(all.availableYears, [2025, 2026]);
+  // alleen 2025 kiezen
+  const preview = (await call(admin.importPlanning, { body: { file: b64, years: [2025] } })).jsonBody;
   assert.equal(preview.applied, false);
-  assert.equal(preview.year, 2025);
-  assert.deepEqual(preview.children.map((c) => [c.name, c.child, c.entries]), [['Imp Eerste', 'nieuw', 2], ['Tweede Kind', 'nieuw', 1], ['Zonder', 'nieuw', 0]]);
+  assert.deepEqual(preview.selectedYears, [2025]);
+  assert.deepEqual(preview.children.map((c) => [c.name, c.child, c.years.map((y) => [y.year, y.contract, y.entries])]), [['Imp Eerste', 'nieuw', [[2025, 'nieuw', 2]]], ['Tweede Kind', 'nieuw', [[2025, 'nieuw', 1]]], ['Zonder', 'nieuw', []]]);
   assert.equal(preview.entries.minutes, 8.5 * 60 + 3.25 * 60 + 60);   // 08:30–17:00, 09:00–12:15 en 10:00–11:00
   assert.equal(preview.entries.outside, 1);                       // 31-12-2024 valt buiten het jaar
   assert.ok(preview.warnings.some((w) => /Onbekend/.test(w)) && preview.warnings.some((w) => /eindtijd/.test(w)));
   assert.equal((await repo.listChildren()).length, before);       // voorbeeld slaat niets op
 
-  const done = (await call(admin.importPlanning, { body: { file: b64, apply: true } })).jsonBody;
+  const done = (await call(admin.importPlanning, { body: { file: b64, years: [2025], apply: true } })).jsonBody;
   assert.equal(done.applied, true);
   const kids = await repo.listChildren(), imp = kids.find((c) => c.name === 'Imp Eerste');
   assert.equal(kids.length, before + 3);
   assert.equal(imp.birthDate, '2022-03-22');
-  assert.equal(imp.contracts.length, 1);
+  assert.equal(imp.contracts.length, 1);   // alleen 2025: er is geen contract voor 2026 gemaakt
   assert.deepEqual([imp.contracts[0].start, imp.contracts[0].end, imp.contracts[0].number, imp.contracts[0].rate, imp.contracts[0].schedule], ['2025-01-01', '2025-12-31', '2024.00160', null, null]);
   assert.equal(kids.find((c) => c.name === 'Zonder').birthDate, null);   // een getal is geen geboortedatum
+  assert.equal(kids.find((c) => c.name === 'Zonder').contracts.length, 0);   // geen uren in de gekozen jaren: kind zonder contract
   const entries = (await repo.listAllEntries()).filter((e) => e.contractId === imp.contracts[0].id).map((e) => `${e.date} ${e.start}-${e.end}`).sort();
   assert.deepEqual(entries, ['2025-01-06 08:30-17:00', '2025-01-13 10:00-11:00']);
 
   // nog een keer: niets erbij
-  const again = (await call(admin.importPlanning, { body: { file: b64, apply: true } })).jsonBody;
-  assert.deepEqual(again.children.map((c) => [c.child, c.contract, c.entries, c.duplicates]), [['bestaat al', 'bestaand', 0, 2], ['bestaat al', 'bestaand', 0, 1], ['bestaat al', 'bestaand', 0, 0]]);
+  const again = (await call(admin.importPlanning, { body: { file: b64, years: [2025], apply: true } })).jsonBody;
+  assert.deepEqual(again.children.map((c) => [c.child, c.years.map((y) => [y.contract, y.entries, y.duplicates])]), [['bestaat al', [['bestaand', 0, 2]]], ['bestaat al', [['bestaand', 0, 1]]], ['bestaat al', []]]);
   assert.equal((await repo.listChildren()).length, before + 3);
   assert.equal((await repo.listAllEntries()).filter((e) => e.contractId === imp.contracts[0].id).length, 2);
+
+  // daarna ook 2026 (beide jaren gekozen): bestaande kinderen krijgen er een tweede contract bij, 2025 verandert niet
+  const both = (await call(admin.importPlanning, { body: { file: b64, years: [2025, 2026], apply: true } })).jsonBody;
+  assert.equal(both.entries.add, 2);
+  assert.equal(both.entries.duplicate, 3);
+  const imp2 = (await repo.listChildren()).find((c) => c.name === 'Imp Eerste');
+  assert.deepEqual(imp2.contracts.map((c) => [c.start, c.end]), [['2025-01-01', '2025-12-31'], ['2026-01-01', '2026-12-31']]);
+  assert.equal(imp2.contracts[0].id, imp.contracts[0].id);
+  assert.equal((await repo.listAllEntries()).filter((e) => e.contractId === imp2.contracts[1].id).length, 1);
 });
 
 test('instellingen bevatten de datum van de eerste registratie', async () => {
