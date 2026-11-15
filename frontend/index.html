@@ -654,6 +654,9 @@
   const fmt = (min) => `${Math.floor(min / 60)}:${pad(min % 60)}`;
   const entryMin = (e) => toMin(e.end) - toMin(e.start);
   const contracts = () => state.children.flatMap((c) => c.contracts.map((k) => ({ child: c, contract: k })));
+  // Contracten die op een dag lopen: wie er nog niet of niet meer is, hoort niet in de keuzelijst. Een contract zonder periode (oude gegevens) loopt altijd.
+  const runsOn = (x, day) => (x.contract.start && x.contract.end ? x.contract.start <= day && day <= x.contract.end : true);
+  const contractsOn = (day) => contracts().filter((x) => runsOn(x, day));
   const findContract = (id) => contracts().find((x) => x.contract.id === id);
   // Een contract heeft geen naam: de periode (en het nummer, als het er is) herkent het.
   const contractPeriod = (k) => (k.start && k.end ? `${nlDate(k.start)} t/m ${nlDate(k.end)}` : k.name || 'contract');
@@ -806,15 +809,14 @@
   // Kies je zelf een kind, dan blijft dat staan tot je van dag wisselt of uren toevoegt.
   let contractTouched = false;
   function defaultContract(day) {
-    const all = contracts();
+    const list = contractsOn(day);
     const done = new Set(state.entries.filter((e) => e.date === day).map((e) => findContract(e.contractId)).filter(Boolean).map((x) => x.child.id));
-    const active = (x) => (x.contract.start && x.contract.end ? x.contract.start <= day && day <= x.contract.end : true);
     const onHoliday = (x) => (x.child.holidays || []).some((h) => h.from <= day && day <= h.to);
-    const open = all.filter((x) => !done.has(x.child.id) && active(x));
+    const open = list.filter((x) => !done.has(x.child.id));
     const planned = open.find((x) => scheduleFor(x.contract, day) && !onHoliday(x));
     if (planned) return planned.contract.id;
     if (open[0]) return open[0].contract.id;
-    return all[0] ? all[0].contract.id : null;
+    return list[0] ? list[0].contract.id : null;
   }
   $('contract').addEventListener('change', () => { contractTouched = true; updateEntryHints(true); });
 
@@ -858,9 +860,12 @@
     $('dayTotal').textContent = fmt(list.reduce((s, e) => s + entryMin(e), 0));
 
     const sel = $('contract'), prev = sel.value;
-    sel.innerHTML = contracts().length
-      ? contracts().map((x) => `<option value="${x.contract.id}">${esc(shortLabel(x))}</option>`).join('')
-      : `<option value="">${can('children:write') ? 'Voeg eerst een kind + contract toe (tab Kinderen)' : 'Er is nog geen kind of contract. Vraag een beheerder dit toe te voegen.'}</option>`;
+    const running = contractsOn(day);
+    sel.innerHTML = running.length
+      ? running.map((x) => `<option value="${x.contract.id}">${esc(shortLabel(x))}</option>`).join('')
+      : contracts().length
+        ? '<option value="">Op deze dag loopt er geen contract</option>'
+        : `<option value="">${can('children:write') ? 'Voeg eerst een kind + contract toe (tab Kinderen)' : 'Er is nog geen kind of contract. Vraag een beheerder dit toe te voegen.'}</option>`;
     if (prefill === true) contractTouched = false;
     const pick = contractTouched ? null : defaultContract(day);
     if (pick) sel.value = pick; else if (prev) sel.value = prev;
@@ -879,7 +884,7 @@
   // Bewerken: de regel wordt een formulier (kind/contract, tijden, opmerking). De datum blijft staan.
   let editingId = null;
   function editRow(e) {
-    const opts = contracts().map((x) => `<option value="${x.contract.id}"${x.contract.id === e.contractId ? ' selected' : ''}>${esc(shortLabel(x))}</option>`).join('');
+    const opts = contracts().filter((x) => runsOn(x, e.date) || x.contract.id === e.contractId).map((x) => `<option value="${x.contract.id}"${x.contract.id === e.contractId ? ' selected' : ''}>${esc(shortLabel(x))}</option>`).join('');
     return `<div class="entry edit" data-editrow="${e.id}"><select class="ed-contract" aria-label="Kind / contract">${opts}</select>
       <input type="time" class="ed-start" value="${e.start}" aria-label="Van"><input type="time" class="ed-end" value="${e.end}" aria-label="Tot">
       <input type="text" class="ed-note" value="${esc(e.note || '')}" maxlength="200" placeholder="Opmerking" aria-label="Opmerking">
