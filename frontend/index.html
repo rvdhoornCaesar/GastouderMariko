@@ -740,15 +740,16 @@
       const ages = [...present, ...own];
       const counts = { total: ages.length, u4: ages.filter((m) => m !== null && m < 48).length,
         u2: ages.filter((m) => m !== null && m < 24).length, u1: ages.filter((m) => m !== null && m < 12).length };
+      const ownCounts = { total: own.length, u4: own.filter((m) => m < 48).length, u2: own.filter((m) => m < 24).length, u1: own.filter((m) => m < 12).length };
       Object.keys(CAP).filter((k) => counts[k] > CAP[k]).forEach((k) => {
         const last = issues.find((x) => x.kind === k && x.to === t);
-        if (last) { last.to = next; last.count = Math.max(last.count, counts[k]); } else issues.push({ kind: k, from: t, to: next, count: counts[k] });
+        if (last) { last.to = next; last.count = Math.max(last.count, counts[k]); last.own = ownCounts[k]; } else issues.push({ kind: k, from: t, to: next, count: counts[k], own: ownCounts[k] });
       });
     }
     return issues;
   }
   const CAP_LABEL = { total: 'kinderen tegelijk', u4: 'kinderen jonger dan 4 jaar tegelijk', u2: 'kinderen jonger dan 2 jaar tegelijk', u1: 'kinderen jonger dan 1 jaar tegelijk' };
-  const capacityLine = (i) => `<div>Let op: ${i.count} ${CAP_LABEL[i.kind]} (maximaal ${CAP[i.kind]}, eigen kinderen meegeteld) van ${hm(i.from)} tot ${hm(i.to)}.</div>`;
+  const capacityLine = (i) => `<div>Let op: ${i.count} ${CAP_LABEL[i.kind]} (maximaal ${CAP[i.kind]}; ${i.count - i.own} gastkind${i.count - i.own === 1 ? '' : 'eren'} + ${i.own} eigen kind${i.own === 1 ? '' : 'eren'}) van ${hm(i.from)} tot ${hm(i.to)}.</div>`;
 
   // Doorbetaalde vakanties: een contract met vaste tijden (zonder vaste uren) en 'Vakanties doorbetalen' telt de uren van de vaste
   // tijden mee op elke vakantiedag van het kind binnen de contractperiode, tenzij er die dag al uren zijn ingevuld.
