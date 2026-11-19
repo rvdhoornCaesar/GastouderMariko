@@ -17,5 +17,8 @@
   ],
   "platform": {
     "apiRuntime": "node:22"
+  },
+  "mimeTypes": {
+    ".webmanifest": "application/manifest+json"
   }
 }
