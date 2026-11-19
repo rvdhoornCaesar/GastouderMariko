@@ -73,6 +73,8 @@ route('putVacations', ['PUT'], 'settings/vacations', handlers.putVacations);
 route('putOpening', ['PUT'], 'settings/opening', handlers.putOpening);
 route('putSickDay', ['PUT'], 'sick-days', handlers.putSickDay);
 route('putAgencyLinks', ['PUT'], 'settings/agencies', handlers.putAgencyLinks);
+route('putCareTypes', ['PUT'], 'settings/care-types', handlers.putCareTypes);
+route('putAgencyRates', ['PUT'], 'settings/agency-rates', handlers.putAgencyRates);
 route('importPlanning', ['POST'], 'import/planning', handlers.importPlanning);
 route('createAgency', ['POST'], 'agencies', handlers.createAgency);
 route('updateAgency', ['PUT'], 'agencies/{id}', handlers.updateAgency);

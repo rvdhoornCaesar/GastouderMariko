@@ -28,7 +28,9 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     return out;
   };
 
-  const orgOf = (r) => ({ id: r.rowKey, name: r.name, status: r.status || 'active', createdAt: r.createdAt || '', deletedAt: r.deletedAt || '' });
+  const orgOf = (r) => ({ id: r.rowKey, name: r.name, status: r.status || 'active', createdAt: r.createdAt || '', deletedAt: r.deletedAt || '', needsAgency: r.needsAgency === true });
+  // Soorten opvang van een bureau (komma-gescheiden in de tabel); oude bureaus zonder veld doen gastouderopvang.
+  const agencyTypes = (v) => { const t = String(v || 'gastouder').split(',').filter((x) => x === 'gastouder' || x === 'bso'); return t.length ? t : ['gastouder']; };
   const memberOf = (r) => ({ orgId: r.partitionKey, email: r.rowKey, role: r.role, createdAt: r.createdAt || '', source: r.source || '' });
 
   // Tweede slot naast het filter: een rij van een andere administratie komt nooit door, wat er ook met de query gebeurt.
@@ -154,7 +156,7 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     },
     async saveOrganisation(o) {
       if (!INSTANCE_ID.test(o.id)) throw new Error('Ongeldige administratie.');
-      await (await table('organisations')).upsertEntity({ partitionKey: 'organisations', rowKey: o.id, name: o.name, status: o.status || 'active', createdAt: o.createdAt || '', deletedAt: o.deletedAt || '' }, 'Replace');
+      await (await table('organisations')).upsertEntity({ partitionKey: 'organisations', rowKey: o.id, name: o.name, status: o.status || 'active', createdAt: o.createdAt || '', deletedAt: o.deletedAt || '', needsAgency: o.needsAgency === true }, 'Replace');
     },
     async deleteOrganisation(id) {
       if (!INSTANCE_ID.test(id)) return;
@@ -164,12 +166,12 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     // onder een eigen PartitionKey. Een bureau wordt nooit verwijderd, alleen op niet-actief gezet, zodat contracten ernaar kunnen blijven verwijzen.
     async listAgencies() {
       return (await collect((await table('organisations')).listEntities({ queryOptions: { filter: `PartitionKey eq 'agencies'` } })))
-        .map((r) => ({ id: r.rowKey, name: r.name, active: r.active !== false }))
+        .map((r) => ({ id: r.rowKey, name: r.name, active: r.active !== false, types: agencyTypes(r.types) }))
         .sort((a, b) => a.name.localeCompare(b.name, 'nl') || a.id.localeCompare(b.id));
     },
     async saveAgency(a) {
       if (!/^[a-z0-9]{6,20}$/.test(a.id)) throw new Error('Ongeldig bureau.');
-      await (await table('organisations')).upsertEntity({ partitionKey: 'agencies', rowKey: a.id, name: a.name, active: a.active !== false }, 'Replace');
+      await (await table('organisations')).upsertEntity({ partitionKey: 'agencies', rowKey: a.id, name: a.name, active: a.active !== false, types: agencyTypes(a.types).join(',') }, 'Replace');
     },
     async getMembership(orgId, email) {
       if (!INSTANCE_ID.test(orgId) || !keySafe(email)) return null;
@@ -206,6 +208,11 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
       return links || (await getSetting('agencyIds')).map((agencyId) => ({ agencyId, from: null, to: null }));
     },
     setAgencyLinks: (list) => setSetting('agencyLinks', list),
+    // Soorten opvang die de gastouder zelf heeft gekozen (null = nog niet gekozen: dan gelden alle soorten van haar bureaus) en de tarieven per bureau.
+    getCareTypes: () => getSetting('careTypes', null),
+    setCareTypes: (list) => setSetting('careTypes', list),
+    getAgencyRates: () => getSetting('agencyRates'),
+    setAgencyRates: (list) => setSetting('agencyRates', list),
     getSickDays: () => getSetting('sickDays'),
     setSickDays: (list) => setSetting('sickDays', list),
     getVacations: () => getSetting('vacations'),

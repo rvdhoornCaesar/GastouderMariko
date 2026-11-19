@@ -72,7 +72,9 @@ function parseContracts(list, newId) {
     // Optioneel (standaard uit): worden vakanties van het kind doorbetaald?
     // Optioneel: het gastouderbureau van dit contract (id uit de lijst van platformbeheer; of dat bureau bij deze gastouder past, controleert de handler).
     const agencyId = typeof k.agencyId === 'string' && ID.test(k.agencyId) ? k.agencyId : null;
-    return { id, number, rate, monthlyHours, start, end, schedule: parseSchedule(k.schedule), paidHolidays: k.paidHolidays === true, agencyId };
+    // Soort opvang van het contract: gastouder (standaard) of bso. Een kind heeft per periode één soort: wisselt het, dan komt er een nieuw contract.
+    const type = CARE_TYPES.includes(k.type) ? k.type : 'gastouder';
+    return { id, number, rate, monthlyHours, start, end, schedule: parseSchedule(k.schedule), paidHolidays: k.paidHolidays === true, agencyId, type };
   });
 }
 
@@ -148,12 +150,35 @@ function parseRates(list, newId) {
     const to = r.to === null || r.to === undefined || r.to === '' ? null : r.to;
     if (to !== null && !validDate(to)) throw bad('Ongeldige einddatum.');
     if (to !== null && to < r.from) throw bad('De einddatum ligt voor de begindatum.');
-    return { id: r.id && ID.test(r.id) ? r.id : newId(), from: r.from, to, rate: parseRate(r.rate) };
+    return { id: r.id && ID.test(r.id) ? r.id : newId(), type: CARE_TYPES.includes(r.type) ? r.type : 'gastouder', from: r.from, to, rate: parseRate(r.rate) };
   }).sort((a, b) => a.from.localeCompare(b.from));
-  for (let i = 1; i < rates.length; i++) {
-    const prev = rates[i - 1];
-    if (prev.to === null || prev.to >= rates[i].from) throw bad(`De periodes vanaf ${prev.from} en ${rates[i].from} overlappen.`);
+  noOverlap(rates, (r) => r.type);   // per soort opvang mogen de periodes niet overlappen
+  return rates;
+}
+
+// Periodes (gesorteerd op begindatum) mogen per groep niet overlappen.
+function noOverlap(rates, groupOf) {
+  const last = new Map();
+  for (const r of rates) {
+    const g = groupOf(r), prev = last.get(g);
+    if (prev && (prev.to === null || prev.to >= r.from)) throw bad(`De periodes vanaf ${prev.from} en ${r.from} overlappen.`);
+    last.set(g, r);
   }
+}
+
+// Tarieven per gastouderbureau en soort opvang, met periodes zoals het algemene tarief.
+function parseAgencyRates(list, newId) {
+  if (!Array.isArray(list) || list.length > 200) throw bad('Ongeldige tarieven.');
+  const rates = list.map((r) => {
+    if (!r || typeof r.agencyId !== 'string' || !ID.test(r.agencyId)) throw bad('Ongeldig gastouderbureau.');
+    if (!CARE_TYPES.includes(r.type)) throw bad('Ongeldige soort opvang.');
+    if (!validDate(r.from)) throw bad('Ongeldige begindatum.');
+    const to = r.to === null || r.to === undefined || r.to === '' ? null : r.to;
+    if (to !== null && !validDate(to)) throw bad('Ongeldige einddatum.');
+    if (to !== null && to < r.from) throw bad('De einddatum ligt voor de begindatum.');
+    return { id: r.id && ID.test(r.id) ? r.id : newId(), agencyId: r.agencyId, type: r.type, from: r.from, to, rate: parseRate(r.rate) };
+  }).sort((a, b) => a.from.localeCompare(b.from));
+  noOverlap(rates, (r) => `${r.agencyId}|${r.type}`);
   return rates;
 }
 
@@ -231,6 +256,13 @@ function parseAgencyName(v) {
   return n;
 }
 
+// Soorten opvang: gastouder en bso. Een bureau en een gastouder doen er één of beide van.
+const CARE_TYPES = ['gastouder', 'bso'];
+function parseTypes(list, what = 'soorten opvang') {
+  if (!Array.isArray(list) || !list.length || list.some((t) => !CARE_TYPES.includes(t))) throw bad(`Kies minstens één van de ${what}: gastouder of bso.`);
+  return CARE_TYPES.filter((t) => list.includes(t));
+}
+
 function parseAgencyIds(list) {
   if (!Array.isArray(list) || list.length > 100) throw bad('Ongeldige gastouderbureaus.');
   const out = [...new Set(list)];
@@ -262,4 +294,4 @@ function parseRole(v) {
   return r;
 }
 
-module.exports = { parseSickDay, parseOrgName, parseAgencyName, parseAgencyIds, parseAgencyLinks, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
+module.exports = { parseSickDay, parseOrgName, parseAgencyName, parseAgencyIds, parseAgencyLinks, parseTypes, parseAgencyRates, CARE_TYPES, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };

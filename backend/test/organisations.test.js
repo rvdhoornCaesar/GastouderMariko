@@ -30,7 +30,7 @@ test('organisaties: opslaan, lezen, lijst gesorteerd op naam, ongeldige id gewei
   assert.equal(await repo.getOrganisation('main'), null);
   await repo.saveOrganisation({ id: 'main', name: 'Gastouder Mariko', createdAt: '2026-11-15' });
   await repo.saveOrganisation({ id: 'abc-123', name: 'Anders', createdAt: '2026-11-16' });
-  assert.deepEqual(await repo.getOrganisation('main'), { id: 'main', name: 'Gastouder Mariko', status: 'active', createdAt: '2026-11-15', deletedAt: '' });
+  assert.deepEqual(await repo.getOrganisation('main'), { id: 'main', name: 'Gastouder Mariko', status: 'active', createdAt: '2026-11-15', deletedAt: '', needsAgency: false });
   assert.deepEqual((await repo.listOrganisations()).map((o) => o.id), ['abc-123', 'main']);
   await assert.rejects(repo.saveOrganisation({ id: 'Foute Id', name: 'x' }), /Ongeldige administratie/);
 });

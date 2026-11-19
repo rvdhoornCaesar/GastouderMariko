@@ -3,7 +3,8 @@ const { fixedUsers, sessionToken, sessionCookie, expiredCookie, SESSION_DAYS } =
 const P = require('./passwords');
 const T = require('./totp');
 const perm = require('./permissions');
-const { LIMIT, overLimit } = require('./agency-links');
+const { LIMIT } = require('./agency-links');
+const { careInfo, warningsOf, typesOf } = require('./care-types');
 const v = require('./validation');
 
 const newId = () => Math.random().toString(36).slice(2, 10).padEnd(8, '0');
@@ -17,16 +18,28 @@ async function listChildren({ user, repo }) {
 }
 
 // Een contract mag alleen naar een gastouderbureau verwijzen waarbij deze gastouder is aangesloten (Instellingen); een bestaande verwijzing mag blijven.
+// Het gastouderbureau en de soort opvang (gastouder of bso) van een contract: alleen wat voor deze gastouder beschikbaar is. Wat al bij een bestaand
+// contract stond mag blijven, ook als het inmiddels niet meer beschikbaar is.
+async function careState(repo) {
+  const links = await repo.getAgencyLinks(), agencies = await repo.listAgencies();
+  return { links, agencies, ...careInfo(links, agencies, await repo.getCareTypes()) };
+}
 async function checkAgencies(repo, contracts, existing) {
-  const used = contracts.map((k) => k.agencyId).filter(Boolean);
-  if (!used.length) return;
-  const allowed = new Set(await repo.getAgencyIds());
-  (existing ? existing.contracts : []).forEach((k) => { if (k.agencyId) allowed.add(k.agencyId); });
-  if (used.some((id) => !allowed.has(id))) throw new HttpError(400, 'Kies een gastouderbureau waarbij de gastouder is aangesloten (zie Instellingen).');
+  const state = await careState(repo);
+  const before = new Map((existing ? existing.contracts : []).map((k) => [k.id, k]));
+  const byId = new Map(state.agencies.map((a) => [a.id, a]));
+  const linked = new Set(state.links.map((l) => l.agencyId));
+  for (const k of contracts) {
+    const old = before.get(k.id);
+    if (k.agencyId && !linked.has(k.agencyId) && !(old && old.agencyId === k.agencyId)) throw new HttpError(400, 'Kies een gastouderbureau waarbij de gastouder is aangesloten (zie Instellingen).');
+    if (!(old && (old.type || 'gastouder') === k.type) && !state.enabledTypes.includes(k.type)) throw new HttpError(400, `Opvang van het type ${k.type} is niet beschikbaar: geen van je gastouderbureaus doet dat, of je hebt het uitgezet bij Instellingen.`);
+    if (k.agencyId && !(old && old.agencyId === k.agencyId && (old.type || 'gastouder') === k.type) && !typesOf(byId.get(k.agencyId)).includes(k.type)) throw new HttpError(400, `Dit gastouderbureau doet geen ${k.type}. Kies een ander bureau of een andere soort opvang.`);
+  }
 }
 
 async function createChild({ user, repo, body }) {
   perm.require(user, 'children:write');
+  if (await agencyRequired(repo, user)) throw new HttpError(400, 'Kies eerst je gastouderbureau(s) bij Instellingen; daarna kun je kinderen toevoegen.');
   const child = { id: newId(), ...v.parseChild(body, newId) };
   child.photo = child.photo ?? null;
   await checkAgencies(repo, child.contracts, null);
@@ -132,14 +145,58 @@ async function getSettings({ user, repo, env }) {
   perm.require(user, 'settings:read');
   const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
   const manage = perm.can(user, 'settings:write');   // wie mag toegang regelen, ziet de gebruikerslijsten en de technische info
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), agencies: await repo.listAgencies(), agencyIds: await repo.getAgencyIds(), agencyLinks: await repo.getAgencyLinks(), agencyWarnings: overLimit(await repo.getAgencyLinks()), agencyLimit: LIMIT, startDate: await repo.getStartDate(), firstEntry: await repo.firstEntryDate(), runtime: manage ? process.version : undefined } };
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), ...(await careSettings(repo, user)), startDate: await repo.getStartDate(), firstEntry: await repo.firstEntryDate(), runtime: manage ? process.version : undefined } };
 }
 
+// Nieuwe organisaties moeten eerst een gastouderbureau kiezen (onboarding) voordat er kinderen bij kunnen. Bestaande organisaties zijn daarvan vrijgesteld.
+async function agencyRequired(repo, user) {
+  const org = user && user.instanceId ? await repo.getOrganisation(user.instanceId) : null;
+  return !!(org && org.needsAgency && !(await repo.getAgencyLinks()).length);
+}
+
+// Algemene tarieven per soort opvang: alleen voor soorten die beschikbaar zijn (een bestaand tarief mag blijven).
 async function putRates({ user, repo, body }) {
   perm.require(user, 'settings:write');
   const rates = v.parseRates(body && body.rates, newId);
+  const { enabledTypes } = await careState(repo);
+  const old = new Map((await repo.getRates()).map((r) => [r.id, r]));
+  const bad = rates.find((r) => !enabledTypes.includes(r.type) && !(old.get(r.id) && (old.get(r.id).type || 'gastouder') === r.type));
+  if (bad) throw new HttpError(400, `Opvang van het type ${bad.type} is niet beschikbaar: geen van je gastouderbureaus doet dat, of je hebt het uitgezet bij Instellingen.`);
   await repo.setRates(rates);
   return { status: 200, jsonBody: { rates } };
+}
+
+// Soorten opvang die de gastouder doet (aanvinken); alleen soorten die minstens één van haar gastouderbureaus doet.
+async function putCareTypes({ user, repo, body }) {
+  perm.require(user, 'settings:write');
+  const types = v.parseTypes(body && body.careTypes);
+  const state = await careState(repo);
+  if (types.some((t) => !state.availableTypes.includes(t))) throw new HttpError(400, 'Geen van je gastouderbureaus doet die soort opvang.');
+  await repo.setCareTypes(types);
+  return { status: 200, jsonBody: await careSettings(repo) };
+}
+
+// Tarieven per gastouderbureau (en soort): alleen voor bureaus waarbij de gastouder is aangesloten, soorten die dat bureau doet en die beschikbaar zijn.
+async function putAgencyRates({ user, repo, body }) {
+  perm.require(user, 'settings:write');
+  const rates = v.parseAgencyRates(body && body.agencyRates, newId);
+  const state = await careState(repo), byId = new Map(state.agencies.map((a) => [a.id, a])), linked = new Set(state.links.map((l) => l.agencyId));
+  const old = new Map((await repo.getAgencyRates()).map((r) => [r.id, r]));
+  for (const r of rates) {
+    const unchanged = old.get(r.id) && old.get(r.id).agencyId === r.agencyId && old.get(r.id).type === r.type;
+    if (!linked.has(r.agencyId) && !unchanged) throw new HttpError(400, 'Kies een gastouderbureau waarbij de gastouder is aangesloten.');
+    if (!typesOf(byId.get(r.agencyId)).includes(r.type) && !unchanged) throw new HttpError(400, `Dit gastouderbureau doet geen ${r.type}.`);
+    if (!state.enabledTypes.includes(r.type) && !unchanged) throw new HttpError(400, `Opvang van het type ${r.type} is niet beschikbaar.`);
+  }
+  await repo.setAgencyRates(rates);
+  return { status: 200, jsonBody: { agencyRates: rates } };
+}
+
+// Alles over soorten opvang en aansluitingen voor in de instellingen.
+async function careSettings(repo, user) {
+  const s = await careState(repo);
+  return { agencies: s.agencies, agencyIds: await repo.getAgencyIds(), agencyLinks: s.links, agencyWarnings: warningsOf(s.links, s.agencies), agencyLimit: LIMIT,
+    careTypes: s.careTypes, availableTypes: s.availableTypes, enabledTypes: s.enabledTypes, agencyRates: await repo.getAgencyRates(), agencyRequired: await agencyRequired(repo, user) };
 }
 
 // Bij welke gastouderbureaus is deze gastouder aangesloten? Alleen bureaus uit de gedeelde lijst; een niet-actief bureau kan alleen blijven staan.
@@ -154,7 +211,7 @@ async function putAgencyLinks({ user, repo, body }) {
   await repo.setAgencyLinks(links);
   const agencyIds = [...new Set(links.map((l) => l.agencyId))];
   await repo.setAgencyIds(agencyIds);   // contracten mogen kiezen uit alle bureaus waarbij de gastouder (ooit) is aangesloten
-  return { status: 200, jsonBody: { agencyLinks: links, agencyIds, agencyWarnings: overLimit(links), agencyLimit: LIMIT } };
+  return { status: 200, jsonBody: await careSettings(repo, user) };
 }
 
 async function putOwnChildren({ user, repo, body }) {
@@ -470,4 +527,4 @@ async function deleteAccount({ user, repo, params }) {
   return { status: 204 };
 }
 
-module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers, putSickDay, putAgencyLinks };
+module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers, putSickDay, putAgencyLinks, putCareTypes, putAgencyRates };

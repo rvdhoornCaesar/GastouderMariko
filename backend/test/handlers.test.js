@@ -830,7 +830,7 @@ test('aansluiting bij gastouderbureaus met periodes en de waarschuwing bij meer 
   assert.deepEqual(r.agencyIds.sort(), [a, b].sort());
   // een derde die overlapt: waarschuwing voor precies de overlap (ook als B afloopt en D erbij komt, zolang het er drie zijn)
   r = (await put([{ agencyId: a, from: '2027-01-01', to: null }, { agencyId: b, from: '2027-01-01', to: '2027-12-31' }, { agencyId: c, from: '2027-10-01', to: '2028-03-31' }, { agencyId: d, from: '2028-01-01', to: null }])).jsonBody;
-  assert.deepEqual(r.agencyWarnings, [{ from: '2027-10-01', to: '2028-03-31', count: 3 }]);   // A, B en C; daarna A, C en D: aaneengesloten, steeds drie
+  assert.deepEqual(r.agencyWarnings, [{ from: '2027-10-01', to: '2028-03-31', count: 3, type: 'gastouder' }]);   // A, B en C; daarna A, C en D: aaneengesloten, steeds drie
   assert.equal(r.agencyLimit.max, 2);
   assert.deepEqual((await call(h.getSettings)).jsonBody.agencyWarnings, r.agencyWarnings);
   assert.equal((await call(h.getSettings)).jsonBody.agencyLinks.length, 4);
@@ -845,4 +845,72 @@ test('aansluiting bij gastouderbureaus met periodes en de waarschuwing bij meer 
   assert.deepEqual((await call(h.getSettings)).jsonBody.agencyLinks, [{ agencyId: a, from: null, to: null }]);
   // een contract mag nog steeds alleen verwijzen naar een bureau waarbij je (ooit) bent aangesloten
   await assert.rejects(call(h.createChild, { body: { firstName: 'Bureaukind2', contracts: [K({ agencyId: d })] } }), (e) => e.status === 400);
+});
+
+test('soorten opvang: bureaus doen gastouder en/of bso, de gastouder kiest, contracten en tarieven volgen', async () => {
+  const admin = require('../src/admin-handlers');
+  const mk = async (name, types) => (await call(admin.createAgency, { body: { name, types } })).jsonBody;
+  const go = await mk('Soort Alleen GO', ['gastouder']), bso = await mk('Soort Alleen BSO', ['bso']), both = await mk('Soort Beide', ['gastouder', 'bso']);
+  assert.deepEqual([go.types, bso.types, both.types], [['gastouder'], ['bso'], ['gastouder', 'bso']]);
+  assert.deepEqual((await call(admin.createAgency, { body: { name: 'Soort Zonder' } })).jsonBody.types, ['gastouder']);   // standaard gastouder
+  await assert.rejects(call(admin.createAgency, { body: { name: 'Soort Fout', types: [] } }), (e) => e.status === 400);
+  await assert.rejects(call(admin.createAgency, { body: { name: 'Soort Fout2', types: ['opa'] } }), (e) => e.status === 400);
+  const links = (l) => call(h.putAgencyLinks, { body: { links: l } });
+  const cur = async () => (await call(h.getSettings)).jsonBody;
+  const k = (extra) => K({ start: '2030-01-01', end: '2030-12-31', ...extra });
+  // alleen een gastouder-bureau: bso niet beschikbaar
+  await links([{ agencyId: go.id }]);
+  let st = await cur();
+  assert.deepEqual([st.availableTypes, st.enabledTypes], [['gastouder'], ['gastouder']]);
+  await assert.rejects(call(h.createChild, { body: { firstName: 'SoortKind', contracts: [k({ type: 'bso' })] } }), (e) => e.status === 400 && /bso/.test(e.message));
+  await assert.rejects(call(h.putCareTypes, { body: { careTypes: ['bso'] } }), (e) => e.status === 400);
+  await assert.rejects(call(h.putRates, { body: { rates: [{ from: '2030-01-01', rate: 5, type: 'bso' }] } }), (e) => e.status === 400);
+  // een bureau dat beide doet: bso beschikbaar, standaard zijn beide actief; per soort een eigen algemeen tarief
+  await links([{ agencyId: go.id }, { agencyId: both.id }]);
+  st = await cur();
+  assert.deepEqual([st.availableTypes, st.enabledTypes, st.careTypes], [['gastouder', 'bso'], ['gastouder', 'bso'], null]);
+  const rates = (await call(h.putRates, { body: { rates: [{ from: '2030-01-01', rate: 7, type: 'gastouder' }, { from: '2030-01-01', rate: 5.5, type: 'bso' }] } })).jsonBody.rates;
+  assert.deepEqual(rates.map((r) => [r.type, r.rate]), [['gastouder', 7], ['bso', 5.5]]);   // dezelfde periode mag voor een andere soort
+  await assert.rejects(call(h.putRates, { body: { rates: [{ from: '2030-01-01', rate: 7 }, { from: '2030-06-01', rate: 8, type: 'gastouder' }] } }), (e) => e.status === 400);   // overlap binnen één soort
+  // het contract: soort en bureau moeten bij elkaar passen
+  await assert.rejects(call(h.createChild, { body: { firstName: 'SoortKind', contracts: [k({ type: 'bso', agencyId: go.id })] } }), (e) => e.status === 400 && /doet geen bso/.test(e.message));
+  const kid = (await call(h.createChild, { body: { firstName: 'SoortKind', contracts: [k({ type: 'gastouder', agencyId: go.id }), k({ start: '2031-01-01', end: '2031-12-31', type: 'bso', agencyId: both.id }), k({ start: '2032-01-01', end: '2032-12-31' })] } })).jsonBody;
+  assert.deepEqual(kid.contracts.map((c) => c.type), ['gastouder', 'bso', 'gastouder']);   // zonder soort: gastouder
+  // de gastouder zet bso uit: bestaande contracten blijven, nieuwe niet
+  await call(h.putCareTypes, { body: { careTypes: ['gastouder'] } });
+  assert.deepEqual((await cur()).enabledTypes, ['gastouder']);
+  assert.equal((await call(h.updateChild, { params: { id: kid.id }, body: { firstName: 'SoortKind', contracts: kid.contracts } })).status, 200);
+  await assert.rejects(call(h.updateChild, { params: { id: kid.id }, body: { firstName: 'SoortKind', contracts: [...kid.contracts, k({ start: '2033-01-01', end: '2033-12-31', type: 'bso' })] } }), (e) => e.status === 400);
+  await assert.rejects(call(h.putCareTypes, { body: { careTypes: [] } }), (e) => e.status === 400);
+  await call(h.putCareTypes, { body: { careTypes: ['gastouder', 'bso'] } });
+  // tarieven per bureau: alleen voor aangesloten bureaus en soorten die ze doen
+  const put = (l) => call(h.putAgencyRates, { body: { agencyRates: l } });
+  await assert.rejects(put([{ agencyId: bso.id, type: 'bso', from: '2030-01-01', rate: 6 }]), (e) => e.status === 400);   // niet aangesloten
+  await assert.rejects(put([{ agencyId: go.id, type: 'bso', from: '2030-01-01', rate: 6 }]), (e) => e.status === 400);    // bureau doet geen bso
+  await assert.rejects(put([{ agencyId: both.id, type: 'bso', from: '2030-01-01', rate: 6 }, { agencyId: both.id, type: 'bso', from: '2030-03-01', rate: 7 }]), (e) => e.status === 400);   // overlap
+  const ar = (await put([{ agencyId: both.id, type: 'bso', from: '2030-01-01', to: '2030-12-31', rate: 6 }, { agencyId: both.id, type: 'gastouder', from: '2030-01-01', rate: 7.25 }, { agencyId: both.id, type: 'bso', from: '2031-01-01', rate: 6.5 }])).jsonBody.agencyRates;
+  assert.equal(ar.length, 3);
+  assert.deepEqual((await cur()).agencyRates.map((r) => r.rate).sort(), [6, 6.5, 7.25]);
+  // het maximum van twee bureaus telt per soort: GO + GO(beide) + ... drie bureaus voor gastouder, maar bso maar twee
+  await links([{ agencyId: go.id }, { agencyId: both.id }, { agencyId: bso.id }, { agencyId: (await mk('Soort Nog Een GO', ['gastouder'])).id }]);
+  const w = (await cur()).agencyWarnings.filter((x) => x.from >= '2026-07-01');
+  assert.deepEqual(w.map((x) => [x.type, x.count]), [['gastouder', 3]]);   // gastouder: go + both + nog een = 3; bso: both + bso = 2
+  // oude bureaus zonder soort doen gastouder (we zetten het veld hier niet, dus de standaard geldt)
+  assert.deepEqual((await call(h.getSettings)).jsonBody.agencies.find((a) => a.id === go.id).types, ['gastouder']);
+});
+
+test('onboarding: een nieuwe organisatie kan pas kinderen toevoegen als er een gastouderbureau is gekozen', async () => {
+  const admin = require('../src/admin-handlers');
+  const created = (await call(admin.createOrganisation, { body: { name: 'Nieuwe Onboarding' } })).jsonBody.organisation;
+  const orgRepo = repo.forInstance(created.id);
+  const mgr = { email: 'mgr@onboarding.nl', kind: 'local', role: 'beheerder', instanceId: created.id };
+  const run = (fn, extra = {}) => fn({ user: mgr, repo: orgRepo, env, params: {}, query: {}, ...extra });
+  assert.equal((await run(h.getSettings)).jsonBody.agencyRequired, true);
+  await assert.rejects(run(h.createChild, { body: { firstName: 'Te vroeg' } }), (e) => e.status === 400 && /gastouderbureau/.test(e.message));
+  const ag = (await call(admin.createAgency, { body: { name: 'Onboarding Bureau' } })).jsonBody;
+  await run(h.putAgencyLinks, { body: { links: [{ agencyId: ag.id }] } });
+  assert.equal((await run(h.getSettings)).jsonBody.agencyRequired, false);
+  assert.equal((await run(h.createChild, { body: { firstName: 'Nu wel' } })).status, 201);
+  // een bestaande organisatie (zonder vlag) is niet geblokkeerd
+  assert.equal((await call(h.getSettings)).jsonBody.agencyRequired, false);
 });

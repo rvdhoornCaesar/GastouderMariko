@@ -276,6 +276,7 @@
 </main>
 
 <main id="app" hidden>
+  <div class="warn noprint" id="onboardBanner" hidden style="margin:10px 0"><strong>Eerste stap:</strong> kies bij Instellingen je gastouderbureau(s). <button class="btn small" id="onboardGo" type="button" style="margin-left:8px">Naar Instellingen</button></div>
   <!-- UREN -->
   <section id="tab-uren">
     <div class="datebar">
@@ -428,6 +429,7 @@
     <div id="childListView">
       <div class="card"><h2>Kinderen</h2><div id="childList"></div></div>
       <button class="btn" id="childAdd">Kind toevoegen</button>
+      <p class="hint" id="childAddNote" hidden>Kies eerst je gastouderbureau(s) bij Instellingen; daarna kun je kinderen toevoegen.</p>
       <details class="card" id="childInactive" style="margin-top:14px" hidden>
         <summary style="cursor:pointer"><strong id="childInactiveTitle"></strong></summary>
         <p class="hint">Kinderen zonder lopend contract: het contract is afgelopen, begint pas later, of er is nog geen contract. Hun uren en overzichten blijven gewoon bewaard.</p>
@@ -453,17 +455,38 @@
       </form>
       <div class="err" id="agencyErr"></div>
     </div>
+    <div class="card" id="careCard" hidden>
+      <h2>Soort opvang</h2>
+      <p class="hint">Welke soorten opvang doe je? Alleen soorten die minstens één van je gastouderbureaus aanbiedt zijn te kiezen. Per soort stel je een eigen algemeen tarief in (hieronder), en per contract kies je de soort. Een kind heeft per periode één soort: gaat het van gastouder naar bso, dan komt er een tweede contract.</p>
+      <div id="careTypes"></div>
+      <div class="err" id="careErr"></div>
+    </div>
     <div class="card">
       <h2>Algemeen uurtarief</h2>
       <p class="hint">Geldt voor contracten zonder eigen tarief, volgens de datum van de registratie. “Tot en met” is de laatste dag dat het tarief geldt (bijv. 1-1 t/m 31-12); laat het leeg als de periode doorloopt. De periode van het huidige jaar staat vet.</p>
       <div id="rateList"></div>
       <form class="rate-row grid2" id="rateForm">
+        <div id="rateTypeWrap" hidden><label for="rateType">Soort opvang</label><select id="rateType"></select></div>
         <div><label for="rateFrom">Van</label><input type="date" id="rateFrom" required></div>
         <div><label for="rateTo">Tot en met</label><input type="date" id="rateTo"></div>
         <div><label for="rateValue">€ / uur</label><input type="number" id="rateValue" step="0.01" min="0" required></div>
         <button class="btn small">+</button>
       </form>
       <div class="err" id="rateErr"></div>
+    </div>
+    <div class="card" id="agencyRateCard" hidden>
+      <h2>Tarieven per gastouderbureau</h2>
+      <p class="hint">Reken je bij het ene bureau meer of minder dan bij het andere? Stel hier per bureau (en soort opvang) een tarief in met een periode. Zo'n tarief geldt voor contracten bij dat bureau die geen eigen tarief hebben; het gaat voor op het algemene tarief. Volgorde: tarief van het contract, dan van het bureau, dan het algemene tarief.</p>
+      <div id="agencyRateList"></div>
+      <form class="grid2" id="agencyRateForm" style="margin-top:10px">
+        <div><label for="arAgency">Gastouderbureau</label><select id="arAgency"></select></div>
+        <div id="arTypeWrap"><label for="arType">Soort opvang</label><select id="arType"></select></div>
+        <div><label for="arFrom">Van</label><input type="date" id="arFrom" required></div>
+        <div><label for="arTo">Tot en met</label><input type="date" id="arTo"></div>
+        <div><label for="arRate">€ / uur</label><input type="number" id="arRate" step="0.01" min="0" required></div>
+        <div class="wide"><button class="btn secondary">Tarief toevoegen</button></div>
+      </form>
+      <div class="err" id="arErr"></div>
     </div>
 
     <div class="card">
@@ -600,6 +623,9 @@
       <div id="agencyList"></div>
       <form class="grid2" id="agencyForm" style="margin-top:10px">
         <div class="wide"><label for="agencyNew">Gastouderbureau toevoegen</label><input type="text" id="agencyNew" maxlength="100" required></div>
+        <div class="wide"><span class="sub">Doet dit bureau:</span>
+          <label class="chk" style="display:inline-block;margin:0 12px"><input type="checkbox" id="agTypeGo" checked> gastouder</label>
+          <label class="chk" style="display:inline-block"><input type="checkbox" id="agTypeBso"> bso</label></div>
         <div class="wide"><button class="btn secondary">Toevoegen</button></div>
       </form>
       <div class="err" id="agencyAdminErr"></div>
@@ -760,8 +786,24 @@
   const shortLabel = (x) => (x ? x.child.name + (x.child.contracts.length > 1 ? ` – ${contractPeriod(x.contract)}` : '') : '(verwijderd contract)');
   const label = (x) => x ? `${x.child.name} – ${contractPeriod(x.contract)}${x.contract.number ? ` (${x.contract.number})` : ''}` : '(verwijderd contract)';
   // Tarief voor een registratie: eigen contracttarief, anders het algemene tarief op die datum (null = onbekend).
-  const generalRate = (date) => { const r = state.settings.rates.find((x) => x.from <= date && (!x.to || date <= x.to)); return r ? r.rate : null; };
-  const rateFor = (x, date) => (!x ? null : x.contract.rate !== null && x.contract.rate !== undefined ? Number(x.contract.rate) : generalRate(date));
+  // Drie niveaus, het meest specifieke wint: het tarief van het contract, dan het tarief van het gastouderbureau van het contract (per soort opvang),
+  // dan het algemene tarief van die soort opvang (gastouder of bso).
+  const typeOf = (k) => k.type || 'gastouder';
+  const TYPE_LABEL = { gastouder: 'Gastouder', bso: 'BSO' };
+  const typeLabel = (t) => TYPE_LABEL[t] || t;
+  const inPeriod = (r, date) => r.from <= date && (!r.to || date <= r.to);
+  const generalRate = (date, type = 'gastouder') => { const r = state.settings.rates.find((x) => (x.type || 'gastouder') === type && inPeriod(x, date)); return r ? r.rate : null; };
+  function rateInfo(k, date) {
+    if (k.rate !== null && k.rate !== undefined) return { rate: Number(k.rate), source: 'contract' };
+    if (k.agencyId) {
+      const r = (state.settings.agencyRates || []).find((x) => x.agencyId === k.agencyId && x.type === typeOf(k) && inPeriod(x, date));
+      if (r) return { rate: r.rate, source: 'bureau' };
+    }
+    const g = generalRate(date, typeOf(k));
+    return { rate: g, source: g === null ? null : 'algemeen' };
+  }
+  const rateFor = (x, date) => (!x ? null : rateInfo(x.contract, date).rate);
+  const enabledTypes = () => state.settings.enabledTypes || ['gastouder'];
   const nlDate = (d) => d.split('-').reverse().join('-');
   const WEEKDAYS = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
 
@@ -1893,7 +1935,7 @@
   let draftIsNew = false;
   let showPastHolidays = false;
   const emptyDays = () => Array.from({ length: 7 }, () => ({ open: false, from: null, to: null }));
-  const newContract = () => ({ number: '', paidHolidays: false, rate: null, monthlyHours: null, start: iso(new Date()), end: '', schedule: emptyDays() });
+  const newContract = () => ({ number: '', paidHolidays: false, rate: null, monthlyHours: null, start: iso(new Date()), end: '', schedule: emptyDays(), type: enabledTypes()[0] || 'gastouder', agencyId: null });
   // Vakanties vóór de vorige maand zijn 'verleden' en staan standaard verborgen.
   const pastCutoff = () => { const d = new Date(); return iso(new Date(d.getFullYear(), d.getMonth() - 1, 1)); };
 
@@ -1907,6 +1949,7 @@
   }
   function renderChildren() {
     const today = iso(new Date());
+    syncChildAdd();
     const row = (c, note) => { const n = c.contracts.length;
       return `<div class="entry"><div><div class="who">${avatar(c)}${esc(c.name)}</div>
         <div class="meta">${c.birthDate ? `geboren ${nlDate(c.birthDate)} · ` : ''}${n} contract${n === 1 ? '' : 'en'}${note ? ` · ${note}` : ''}</div></div>
@@ -1940,6 +1983,17 @@
   // Afgelopen contracten staan standaard ingeklapt; wat je zelf open- of dichtklapt blijft zo staan zolang je dit kind bewerkt.
   const contractOpen = new WeakMap();
   const contractEnded = (k) => !!k.end && k.end < iso(new Date());
+  // Welk tarief geldt er voor dit contract als het geen eigen tarief heeft, en waar komt het vandaan (bureau of algemeen)?
+  function rateHint(k) {
+    const ri = rateInfo({ ...k, rate: null }, k.start || iso(new Date())), soort = enabledTypes().length > 1 || typeOf(k) !== 'gastouder' ? `, ${typeLabel(typeOf(k))}` : '';
+    return ri.rate === null ? { placeholder: 'geen tarief bekend', text: 'Zonder eigen tarief: geen tarief bekend.' }
+      : { placeholder: euro(ri.rate), text: `Zonder eigen tarief: ${euro(ri.rate)} (${ri.source === 'bureau' ? 'tarief van het bureau' : 'algemeen tarief'}${soort}).` };
+  }
+  function refreshRateHint(ci) {
+    const k = draft.contracts[ci], h = rateHint(k), box = $('childDetail');
+    box.querySelector(`[data-ratehint="${ci}"]`).textContent = h.text;
+    box.querySelector(`input[data-c="${ci}"][data-f="rate"]`).placeholder = h.placeholder;
+  }
   function contractEditor(k, i) {
     const ps = paidState(k);
     const open = contractOpen.has(k) ? contractOpen.get(k) : !contractEnded(k);
@@ -1953,8 +2007,9 @@
       ${f('start', 'Startdatum', 'type="date"', k.start)}
       ${f('end', 'T/m datum', 'type="date"', k.end)}
       ${f('number', 'Contractnummer (optioneel)', '', k.number)}
-      <div><label>Gastouderbureau (optioneel)</label><select data-c="${i}" data-f="agencyId"><option value="">(geen)</option>${(state.settings.agencies || []).filter((a) => (state.settings.agencyIds || []).includes(a.id) || a.id === k.agencyId).map((a) => `<option value="${esc(a.id)}" ${a.id === k.agencyId ? 'selected' : ''}>${esc(a.name)}${a.active ? '' : ' (niet actief)'}</option>`).join('')}</select></div>
-      ${f('rate', '€ / uur (optioneel)', 'type="number" step="0.01" min="0" placeholder="algemeen"', k.rate)}
+      ${(() => { const ts = [...new Set([...enabledTypes(), typeOf(k)])]; return ts.length > 1 ? `<div><label>Soort opvang</label><select data-c="${i}" data-f="type">${ts.map((t) => `<option value="${t}" ${t === typeOf(k) ? 'selected' : ''}>${typeLabel(t)}${enabledTypes().includes(t) ? '' : ' (niet actief)'}</option>`).join('')}</select></div>` : ''; })()}
+      <div><label>Gastouderbureau (optioneel)</label><select data-c="${i}" data-f="agencyId"><option value="">(geen)</option>${(state.settings.agencies || []).filter((a) => ((state.settings.agencyIds || []).includes(a.id) && (a.types || ['gastouder']).includes(typeOf(k))) || a.id === k.agencyId).map((a) => `<option value="${esc(a.id)}" ${a.id === k.agencyId ? 'selected' : ''}>${esc(a.name)}${a.active ? '' : ' (niet actief)'}</option>`).join('')}</select></div>
+      <div><label>€ / uur (optioneel)</label><input type="number" step="0.01" min="0" data-c="${i}" data-f="rate" value="${esc(k.rate ?? '')}" placeholder="${esc(rateHint(k).placeholder)}"><div class="sub" data-ratehint="${i}">${esc(rateHint(k).text)}</div></div>
       ${f('monthlyHours', 'Vast aantal uren / maand (optioneel)', 'type="number" step="0.25" min="0" placeholder="geen"', k.monthlyHours, 'wide')}
       <div class="wide"><label class="chk"><input type="checkbox" data-c="${i}" data-f="paidHolidays" ${ps.checked ? 'checked' : ''} ${ps.disabled ? 'disabled' : ''}> Vakanties doorbetalen</label>
         <div class="sub" data-paidhint="${i}">${ps.hint}</div></div>
@@ -2031,6 +2086,7 @@
     if (id) openChild(state.children.find((c) => c.id === id));
   }));
   $('childAdd').onclick = () => openChild(null);
+  const syncChildAdd = () => { const blocked = !!state.settings.agencyRequired; $('childAdd').disabled = blocked; $('childAddNote').hidden = !blocked; };
 
   // Velden werken het concept (draft) bij zonder opnieuw te tekenen, zodat het cursorfocus behouden blijft.
   function syncField(t) {
@@ -2047,8 +2103,14 @@
         d[t.dataset.t] = t.value || null;
       }
     } else if (ci !== undefined && f) {
-      draft.contracts[ci][f] = t.type === 'checkbox' ? t.checked : f === 'rate' || f === 'monthlyHours' ? (t.value === '' ? null : Number(t.value)) : t.value;
+      draft.contracts[ci][f] = t.type === 'checkbox' ? t.checked : f === 'rate' || f === 'monthlyHours' ? (t.value === '' ? null : Number(t.value)) : f === 'agencyId' ? (t.value || null) : t.value;
       if (f === 'monthlyHours') refreshPaid(ci);
+      if (f === 'type') {   // een bureau dat deze soort niet doet kan niet blijven staan
+        const ag = (state.settings.agencies || []).find((a) => a.id === draft.contracts[ci].agencyId);
+        if (ag && !(ag.types || ['gastouder']).includes(t.value)) draft.contracts[ci].agencyId = null;
+      }
+      if (f === 'start') refreshRateHint(ci);   // het tarief hangt af van de datum
+      if (f === 'type' || f === 'agencyId') renderDetail();   // bureau- en tariefkeuze en de tariefhint volgen de soort
     } else if (f === 'parent0' || f === 'parent1') {
       draft.parents[Number(f.slice(-1))] = t.value;
     } else if (f === 'birthDate') {
@@ -2224,9 +2286,12 @@
     renderAccounts();
     $('runtimeInfo').textContent = state.settings.runtime ? `Technische info: de API draait op Node ${state.settings.runtime.replace(/^v/, '')}.` : '';
     const { rates, users, fixedUsers, me } = state.settings;
+    const many = enabledTypes().length > 1 || rates.some((r) => (r.type || 'gastouder') !== enabledTypes()[0]);
+    $('rateTypeWrap').hidden = enabledTypes().length < 2;
+    $('rateType').innerHTML = enabledTypes().map((t) => `<option value="${t}">${typeLabel(t)}</option>`).join('');
     $('rateList').innerHTML = rates.length
-      ? `<table><tr><th>Van</th><th>Tot en met</th><th class="num">€ / uur</th><th></th></tr>${rates.map((r) =>
-          `<tr class="${isCurrentYear(r) ? 'cur' : ''}"><td>${nlDate(r.from)}</td><td>${r.to ? nlDate(r.to) : 'doorlopend'}</td><td class="num">${euro(r.rate)}</td>
+      ? `<table><tr>${many ? '<th>Soort</th>' : ''}<th>Van</th><th>Tot en met</th><th class="num">€ / uur</th><th></th></tr>${[...rates].sort((a, b) => (a.type || 'gastouder').localeCompare(b.type || 'gastouder') || a.from.localeCompare(b.from)).map((r) =>
+          `<tr class="${isCurrentYear(r) ? 'cur' : ''}">${many ? `<td>${typeLabel(r.type || 'gastouder')}</td>` : ''}<td>${nlDate(r.from)}</td><td>${r.to ? nlDate(r.to) : 'doorlopend'}</td><td class="num">${euro(r.rate)}</td>
            <td class="num"><button class="link" data-rmrate="${r.id}" title="Verwijderen">✕</button></td></tr>`).join('')}</table>`
       : '<div class="empty">Nog geen algemeen tarief.</div>';
     const row = (e, fixed) => `<div class="entry"><div class="who">${esc(e)}${fixed ? '<span class="tag">admin</span>' : '<span class="tag">beheerder</span>'}${e === me ? '<span class="tag">jij</span>' : ''}</div>
@@ -2243,20 +2308,63 @@
   function renderAgencies() {
     const all = state.settings.agencies || [], links = agencyLinks(), mine = new Set(links.map((l) => l.agencyId));
     const warn = state.settings.agencyWarnings || [], lim = state.settings.agencyLimit || { max: 2 };
-    $('agencyWarn').innerHTML = warn.map((w) => `<div>Let op: ${w.from === w.to ? `op ${nlDate(w.from)}` : `${w.to ? `van ${nlDate(w.from)} t/m ${nlDate(w.to)}` : `vanaf ${nlDate(w.from)}`}`} ben je bij ${w.count} gastouderbureaus tegelijk aangesloten; het maximum is ${lim.max} (bij een overstap tijdelijk 3). Klopt dit niet, pas dan een datum aan.</div>`).join('');
+    $('agencyWarn').innerHTML = warn.map((w) => `<div>Let op${(state.settings.availableTypes || []).length > 1 ? ` (${typeLabel(w.type || 'gastouder')})` : ''}: ${w.from === w.to ? `op ${nlDate(w.from)}` : `${w.to ? `van ${nlDate(w.from)} t/m ${nlDate(w.to)}` : `vanaf ${nlDate(w.from)}`}`} ben je bij ${w.count} gastouderbureaus tegelijk aangesloten; het maximum is ${lim.max} (bij een overstap tijdelijk 3). Klopt dit niet, pas dan een datum aan.</div>`).join('');
     $('agencyPick').innerHTML = links.length ? links.map((l, i) => { const a = all.find((x) => x.id === l.agencyId);
       return `<div class="entry" style="flex-wrap:wrap"><div style="flex:1 1 200px"><div class="who">${esc(a ? a.name : 'Onbekend bureau')}${a && !a.active ? ' <span class="tag">niet actief</span>' : ''}</div>
         <div class="meta">${linkSpan(l)}</div></div>
         <div style="display:flex;gap:6px;align-items:center"><input type="date" data-aglink="${i}" data-f="from" value="${esc(l.from || '')}" aria-label="Vanaf" style="width:auto"><input type="date" data-aglink="${i}" data-f="to" value="${esc(l.to || '')}" aria-label="T/m" style="width:auto">
         <button class="link" data-agunlink="${i}" title="Aansluiting verwijderen">✕</button></div></div>`; }).join('') : '<div class="empty">Nog geen aansluitingen.</div>';
+    renderCare();
+    $('onboardBanner').hidden = !(can('settings:write') && !links.length);
     const free = all.filter((a) => a.active);
     $('agencyLinkSel').innerHTML = free.length ? free.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('') : '<option value="">(geen bureaus in de lijst)</option>';
     if (!can('orgs:manage')) return;
-    $('agencyList').innerHTML = all.length ? all.map((a) => `<div class="entry"><div class="who">${esc(a.name)}${a.active ? '' : ' <span class="tag">niet actief</span>'}</div>
+    $('agencyList').innerHTML = all.length ? all.map((a) => `<div class="entry" style="flex-wrap:wrap"><div><div class="who">${esc(a.name)}${a.active ? '' : ' <span class="tag">niet actief</span>'}</div>
+      <div class="meta">Doet: ${['gastouder', 'bso'].map((t) => `<label class="chk" style="display:inline-block;margin-right:10px"><input type="checkbox" data-agtype="${esc(a.id)}|${t}" ${(a.types || ['gastouder']).includes(t) ? 'checked' : ''}> ${t}</label>`).join('')}</div></div>
       <div style="display:flex;gap:6px"><button class="btn secondary small" data-agrename="${esc(a.id)}">Naam wijzigen</button>
       <button class="btn secondary small" data-agtoggle="${esc(a.id)}">${a.active ? 'Niet actief maken' : 'Weer actief maken'}</button></div></div>`).join('') : '<div class="empty">Nog geen gastouderbureaus.</div>';
   }
-  const saveLinks = (links) => saveSetting($('agencyErr'), 'agencies', { links }, (r) => { Object.assign(state.settings, { agencyLinks: r.agencyLinks, agencyIds: r.agencyIds, agencyWarnings: r.agencyWarnings, agencyLimit: r.agencyLimit }); });
+  const saveLinks = (links) => saveSetting($('agencyErr'), 'agencies', { links }, (r) => { Object.assign(state.settings, r); });
+  // Soort opvang (gastouder/bso): alleen te kiezen als meer dan één soort beschikbaar is (door de bureaus waarbij je bent aangesloten).
+  function renderCare() {
+    const avail = state.settings.availableTypes || [], on = new Set(enabledTypes());
+    $('careCard').hidden = avail.length < 2;
+    $('careTypes').innerHTML = avail.map((t) => `<label class="chk" style="display:inline-block;margin-right:16px"><input type="checkbox" data-caretype="${t}" ${on.has(t) ? 'checked' : ''}> ${typeLabel(t)}</label>`).join('');
+    // tarieven per bureau: alleen voor aangesloten bureaus en soorten die dat bureau doet en die actief zijn
+    const links = agencyLinks(), linked = [...new Set(links.map((l) => l.agencyId))], all = state.settings.agencies || [];
+    $('agencyRateCard').hidden = !linked.length;
+    const cur = $('arAgency').value;
+    $('arAgency').innerHTML = linked.map((id) => `<option value="${esc(id)}" ${id === cur ? 'selected' : ''}>${esc((all.find((a) => a.id === id) || {}).name || 'Onbekend bureau')}</option>`).join('');
+    fillArTypes();
+    const rows = [...(state.settings.agencyRates || [])].sort((a, b) => agencyName(a.agencyId).localeCompare(agencyName(b.agencyId), 'nl') || a.type.localeCompare(b.type) || a.from.localeCompare(b.from));
+    const multi = avail.length > 1 || rows.some((r) => r.type !== 'gastouder');
+    $('agencyRateList').innerHTML = rows.length ? `<table><tr><th>Bureau</th>${multi ? '<th>Soort</th>' : ''}<th>Van</th><th>Tot en met</th><th class="num">€ / uur</th><th></th></tr>${rows.map((r) =>
+      `<tr><td>${esc(agencyName(r.agencyId) || 'Onbekend bureau')}</td>${multi ? `<td>${typeLabel(r.type)}</td>` : ''}<td>${nlDate(r.from)}</td><td>${r.to ? nlDate(r.to) : 'doorlopend'}</td><td class="num">${euro(r.rate)}</td>
+       <td class="num"><button class="link" data-rmar="${esc(r.id)}" title="Verwijderen">✕</button></td></tr>`).join('')}</table>` : '<div class="empty">Nog geen tarieven per bureau.</div>';
+  }
+  function fillArTypes() {
+    const ag = (state.settings.agencies || []).find((a) => a.id === $('arAgency').value), ok = ((ag && ag.types) || ['gastouder']).filter((t) => enabledTypes().includes(t));
+    $('arType').innerHTML = ok.map((t) => `<option value="${t}">${typeLabel(t)}</option>`).join('');
+    $('arTypeWrap').hidden = ok.length < 2;
+  }
+  $('arAgency').addEventListener('change', fillArTypes);
+  $('agencyRateForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const from = $('arFrom').value, to = $('arTo').value;
+    if (!$('arType').value) { $('arErr').textContent = 'Dit bureau doet geen soort opvang die je hebt aangevinkt.'; return; }
+    if (!completeDate(from) || (to && !completeDate(to))) { $('arErr').textContent = 'Vul een geldige datum in.'; return; }
+    if (await saveSetting($('arErr'), 'agency-rates', { agencyRates: [...(state.settings.agencyRates || []), { agencyId: $('arAgency').value, type: $('arType').value, from, to: to || null, rate: Number($('arRate').value) }] }, (r) => { state.settings.agencyRates = r.agencyRates; })) { $('arFrom').value = ''; $('arTo').value = ''; $('arRate').value = ''; }
+  });
+  $('agencyRateList').addEventListener('click', (ev) => {
+    const id = ev.target.dataset.rmar;
+    if (id && confirm('Dit tarief verwijderen?')) saveSetting($('arErr'), 'agency-rates', { agencyRates: state.settings.agencyRates.filter((r) => r.id !== id) }, (r) => { state.settings.agencyRates = r.agencyRates; });
+  });
+  $('careTypes').addEventListener('change', async () => {
+    const types = [...$('careTypes').querySelectorAll('input[data-caretype]:checked')].map((x) => x.dataset.caretype);
+    if (!types.length) { $('careErr').textContent = 'Kies minstens één soort opvang.'; renderCare(); return; }
+    if (!(await saveSetting($('careErr'), 'care-types', { careTypes: types }, (r) => { Object.assign(state.settings, r); }))) renderCare();
+  });
+  $('onboardGo').onclick = () => document.querySelector('[data-tab=instellingen]').click();
   $('agencyLinkForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
     const from = $('agencyLinkFrom').value, to = $('agencyLinkTo').value;
@@ -2277,7 +2385,18 @@
   });
   $('agencyForm').addEventListener('submit', async (ev) => {
     ev.preventDefault(); $('agencyAdminErr').textContent = '';
-    try { await api('POST', 'agencies', { name: $('agencyNew').value }); ev.target.reset(); await reloadSettings(); } catch (e) { if (!e.noAccess) $('agencyAdminErr').textContent = e.message; }
+    const types = [$('agTypeGo').checked && 'gastouder', $('agTypeBso').checked && 'bso'].filter(Boolean);
+    if (!types.length) { $('agencyAdminErr').textContent = 'Kies minstens één: gastouder of bso.'; return; }
+    try { await api('POST', 'agencies', { name: $('agencyNew').value, types }); ev.target.reset(); $('agTypeGo').checked = true; await reloadSettings(); } catch (e) { if (!e.noAccess) $('agencyAdminErr').textContent = e.message; }
+  });
+  $('agencyList').addEventListener('change', async (ev) => {   // soorten opvang van een bureau
+    const key = ev.target.dataset.agtype;
+    if (!key) return;
+    const id = key.split('|')[0];
+    const types = [...$('agencyList').querySelectorAll(`input[data-agtype^="${id}|"]:checked`)].map((x) => x.dataset.agtype.split('|')[1]);
+    $('agencyAdminErr').textContent = '';
+    if (!types.length) { $('agencyAdminErr').textContent = 'Een bureau doet minstens gastouder of bso.'; renderAgencies(); return; }
+    try { await api('PUT', `agencies/${id}`, { types }); await reloadSettings(); } catch (e) { if (!e.noAccess) $('agencyAdminErr').textContent = e.message; renderAgencies(); }
   });
   $('agencyList').addEventListener('click', async (ev) => {
     const d = ev.target.dataset, a = (id) => (state.settings.agencies || []).find((x) => x.id === id);
@@ -2302,7 +2421,7 @@
 
   $('rateForm').addEventListener('submit', async (ev) => {
     ev.preventDefault();
-    const r = { from: $('rateFrom').value, to: $('rateTo').value || null, rate: Number($('rateValue').value) };
+    const r = { type: $('rateType').value || enabledTypes()[0] || 'gastouder', from: $('rateFrom').value, to: $('rateTo').value || null, rate: Number($('rateValue').value) };
     if (await saveSetting($('rateErr'), 'rates', { rates: [...state.settings.rates, r] }, (res) => { state.settings.rates = res.rates; })) ev.target.reset();
   });
   $('rateList').addEventListener('click', (ev) => {
