@@ -13,6 +13,7 @@ const SERIAL_MIN = 20000, SERIAL_MAX = 80000;   // Excel-datums (1954 t/m 2118);
 const isoOfSerial = (n) => new Date(Math.round((Math.floor(n) - 25569) * 86400000)).toISOString().slice(0, 10);
 const hhmm = (f) => { const m = Math.round(f * 1440); return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`; };
 const mins = (e) => (+e.end.slice(0, 2) * 60 + +e.end.slice(3)) - (+e.start.slice(0, 2) * 60 + +e.start.slice(3));
+const nlDate = (d) => d.split('-').reverse().join('-');
 const key = (first, last) => `${String(first).trim().toLowerCase()}|${String(last || '').trim().toLowerCase()}`;
 const str = (x) => (typeof x === 'string' ? x.replace(/\s+/g, ' ').trim() : '');
 
@@ -91,7 +92,8 @@ function parsePlanning(buf) {
 
 // Wat er zou gebeuren (apply = false) of wat er is gebeurd (apply = true), voor de administratie van repo en de gekozen jaren.
 // selected = lijst jaartallen (leeg of weggelaten: alle jaren in het bestand).
-async function runImport({ repo, parsed, apply, selected }) {
+async function runImport({ repo, parsed, apply, selected, until }) {
+  if (until !== undefined && until !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(until))) throw new HttpError(400, 'Ongeldige datum voor "tot en met".');
   const available = parsed.years.map((y) => y.year);
   const want = Array.isArray(selected) && selected.length ? selected.map(Number) : available;
   if (want.some((y) => !available.includes(y))) throw new HttpError(400, 'Dat jaar staat niet in dit bestand.');
@@ -99,11 +101,19 @@ async function runImport({ repo, parsed, apply, selected }) {
   const startDate = await repo.getStartDate();
   const existing = await repo.listChildren();
   const known = new Map(existing.map((c) => [key(c.firstName, c.lastName), c]));
-  const taken = new Set((await repo.listAllEntries()).map((e) => `${e.contractId}|${e.date}|${e.start}|${e.end}`));
+  // Wat er al in de app staat, per kind en dag (over alle contracten van dat kind heen): daar komt niets bij, ook niet als de tijden anders zijn.
+  const childOfContract = new Map(existing.flatMap((c) => c.contracts.map((k) => [k.id, c.id])));
+  const inApp = new Map();
+  for (const e of await repo.listAllEntries()) {
+    const cid = childOfContract.get(e.contractId);
+    if (cid) inApp.set(`${cid}|${e.date}`, [...(inApp.get(`${cid}|${e.date}`) || []), e]);
+  }
   const warnings = [...parsed.warnings];
-  let before = 0, outside = 0;
+  const samples = [];
+  let before = 0, outside = 0, later = 0;
 
-  // Per kind en jaar: welk contract, welke uren erbij. Een contract voor een jaar alleen als het kind in dat jaar uren heeft.
+  // Per kind en jaar: bij welk contract komen de uren. Een bestaand contract dat de dag dekt gaat voor; alleen voor dagen die geen enkel contract dekt
+  // komt er (per jaar) een nieuw contract. Een dag waarop het kind al iets heeft ingevuld wordt overgeslagen.
   const plan = new Map(parsed.children.map((c) => [key(c.firstName, c.lastName), { src: c, existing: known.get(key(c.firstName, c.lastName)) || null, perYear: [] }]));
   for (const y of chosen) {
     const from = `${y.year}-01-01`, to = `${y.year}-12-31`;
@@ -112,49 +122,62 @@ async function runImport({ repo, parsed, apply, selected }) {
     for (const [k, p] of plan) {
       const list = mine.get(k) || [];
       if (!list.length) continue;
-      const have = p.existing && p.existing.contracts.find((x) => x.start && x.end && x.start <= from && x.end >= to);
-      const py = { year: y.year, contract: have || { id: newId(), number: p.src.number, rate: null, monthlyHours: null, start: from, end: to, schedule: undefined, paidHolidays: false, agencyId: null }, newContract: !have, add: [], duplicate: 0 };
+      const py = { year: y.year, fresh: null, usedExisting: false, add: [], duplicate: 0, conflicts: 0 };
+      const seen = new Set();
       for (const e of list) {
         if (e.date < from || e.date > to) { outside++; continue; }
         if (startDate && e.date < startDate) { before++; continue; }
-        const id = `${py.contract.id}|${e.date}|${e.start}|${e.end}`;
-        if (taken.has(id)) { py.duplicate++; continue; }
-        taken.add(id);
-        py.add.push(e);
+        if (until && e.date > until) { later++; continue; }   // alleen t/m deze datum importeren (bijvoorbeeld vandaag): de rest is planning
+        const there = p.existing ? inApp.get(`${p.existing.id}|${e.date}`) : null;
+        if (there && there.length) {
+          if (there.some((x) => x.start === e.start && x.end === e.end)) py.duplicate++;
+          else { py.conflicts++; if (samples.length < 12) samples.push(`${nlDate(e.date)} ${p.src.firstName}: in de app ${there.map((x) => `${x.start}–${x.end}`).join(', ')}, in Excel ${e.start}–${e.end}`); }
+          continue;
+        }
+        const dupKey = `${e.date}|${e.start}|${e.end}`;
+        if (seen.has(dupKey)) { py.duplicate++; continue; }   // twee keer dezelfde regel in het bestand
+        seen.add(dupKey);
+        let contract = p.existing && p.existing.contracts.find((x) => (x.start && x.end ? x.start <= e.date && e.date <= x.end : true));
+        if (contract) py.usedExisting = true;
+        else contract = py.fresh || (py.fresh = { id: newId(), number: p.src.number, rate: null, monthlyHours: null, start: from, end: to, schedule: undefined, paidHolidays: false, agencyId: null });
+        py.add.push({ ...e, contractId: contract.id });
       }
       p.perYear.push(py);
     }
   }
   if (outside) warnings.push(`${outside} uren vielen buiten het jaar van hun blad en zijn overgeslagen.`);
+  if (later) warnings.push(`${later} uren na ${nlDate(until)} zijn niet meegenomen.`);
   if (before) warnings.push(`${before} uren lagen vóór de begindatum van de gastouder en zijn overgeslagen.`);
+  const conflictTotal = [...plan.values()].reduce((t, p) => t + p.perYear.reduce((u, py) => u + py.conflicts, 0), 0);
+  if (conflictTotal) warnings.push(`${conflictTotal} dagen zijn overgeslagen omdat er in de app al uren voor dat kind op die dag staan, met andere tijden dan in Excel${samples.length ? ` (bijvoorbeeld: ${samples.join('; ')}${conflictTotal > samples.length ? '; …' : ''})` : ''}. Pas die dagen zelf aan in de app als Excel gelijk heeft.`);
 
   if (apply) {
     for (const p of plan.values()) {
-      const fresh = p.perYear.filter((py) => py.newContract);
+      const fresh = p.perYear.map((py) => py.fresh).filter(Boolean);
       if (p.existing && !fresh.length) continue;
       if (!p.existing && !p.perYear.length) {
         // geen uren in de gekozen jaren: het kind komt er wel in, zonder contract
         await repo.saveChild({ id: newId(), ...v.parseChild({ firstName: p.src.firstName, lastName: p.src.lastName, birthDate: p.src.birthDate }, newId) });
         continue;
       }
-      const body = { firstName: p.src.firstName, lastName: p.src.lastName, birthDate: p.src.birthDate, ...(p.existing ? { ...p.existing } : {}), contracts: [...(p.existing ? p.existing.contracts : []), ...fresh.map((py) => py.contract)] };
-      const child = { id: p.existing ? p.existing.id : newId(), ...v.parseChild(body, newId) };
-      const saved = new Map(child.contracts.map((c) => [`${c.start}|${c.end}|${c.number}`, c]));
-      fresh.forEach((py) => { py.contract = saved.get(`${py.contract.start}|${py.contract.end}|${py.contract.number || ''}`) || py.contract; });
-      await repo.saveChild(child);
+      const body = { firstName: p.src.firstName, lastName: p.src.lastName, birthDate: p.src.birthDate, ...(p.existing ? { ...p.existing } : {}), contracts: [...(p.existing ? p.existing.contracts : []), ...fresh] };
+      await repo.saveChild({ id: p.existing ? p.existing.id : newId(), ...v.parseChild(body, newId) });   // parseChild behoudt de id's van de contracten
     }
-    const all = [...plan.values()].flatMap((p) => p.perYear.flatMap((py) => py.add.map((e) => ({ id: `${e.date}_${newId()}`, date: e.date, contractId: py.contract.id, start: e.start, end: e.end, note: '' }))));
+    const all = [...plan.values()].flatMap((p) => p.perYear.flatMap((py) => py.add.map((e) => ({ id: `${e.date}_${newId()}`, date: e.date, contractId: e.contractId, start: e.start, end: e.end, note: '' }))));
     for (let i = 0; i < all.length; i += 25) await Promise.all(all.slice(i, i + 25).map((e) => repo.saveEntry(e)));
   }
   const rows = [...plan.values()].map((p) => ({
     name: [p.src.firstName, p.src.lastName].filter(Boolean).join(' '),
     child: p.existing ? 'bestaat al' : 'nieuw',
-    years: p.perYear.map((py) => ({ year: py.year, contract: py.newContract ? 'nieuw' : 'bestaand', entries: py.add.length, duplicates: py.duplicate, minutes: py.add.reduce((s, e) => s + mins(e), 0) })),
+    years: p.perYear.map((py) => ({
+      year: py.year, contract: py.fresh ? (py.usedExisting ? 'bestaand + nieuw' : 'nieuw') : 'bestaand',
+      entries: py.add.length, duplicates: py.duplicate, conflicts: py.conflicts, minutes: py.add.reduce((t, e) => t + mins(e), 0),
+    })),
   }));
-  const sum = (f) => rows.reduce((s, r) => s + r.years.reduce((t, y) => t + f(y), 0), 0);
+  const sum = (f) => rows.reduce((t, r) => t + r.years.reduce((u, y) => u + f(y), 0), 0);
   return {
     applied: !!apply, availableYears: available, selectedYears: chosen.map((y) => y.year), children: rows,
-    entries: { found: chosen.reduce((s, y) => s + y.entries.length, 0), add: sum((y) => y.entries), minutes: sum((y) => y.minutes), duplicate: sum((y) => y.duplicates), outside, before },
+    entries: { found: chosen.reduce((t, y) => t + y.entries.length, 0), add: sum((y) => y.entries), minutes: sum((y) => y.minutes), duplicate: sum((y) => y.duplicates), conflict: sum((y) => y.conflicts), outside, before, later },
     warnings,
   };
 }

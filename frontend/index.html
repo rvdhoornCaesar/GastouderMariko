@@ -570,6 +570,7 @@
     <div class="card" id="importCard">
       <h2>Import uit Excel-planning</h2>
       <p class="hint">Eenmalige import van historische gegevens uit het Excel-planningsbestand (blad <em>Kinderen</em> en één of meer bladen met een jaartal, zoals <em>2024</em> en <em>2025</em>; bij meer jaren kies je welk jaar), in de organisatie <strong id="importOrg"></strong> waarin je nu zit. Per kind wordt per gekozen jaar (waarin het kind uren heeft) een contract voor dat hele jaar aangemaakt (zonder vaste tijden en zonder eigen tarief), en de ingevulde tijden worden geschreven uren. Er wordt alleen toegevoegd: bestaande kinderen, contracten en uren blijven ongemoeid, en nogmaals importeren voegt niets dubbel toe. Je ziet eerst een voorbeeld.</p>
+      <label class="chk" style="display:block;margin:8px 0"><input type="checkbox" id="importUntil" checked> Alleen t/m vandaag importeren (uren na vandaag zijn planning en worden overgeslagen)</label>
       <input type="file" id="importFile" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
       <div class="err" id="importErr"></div>
       <div id="importResult"></div>
@@ -2396,13 +2397,14 @@
   let importB64 = null;
   const fileToBase64 = (file) => file.arrayBuffer().then((buf) => { const bytes = new Uint8Array(buf); let bin = ''; for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000)); return btoa(bin); });
   let importYears = null;   // gekozen jaren (null = nog niet gekozen)
-  const importPreview = (years) => api('POST', 'import/planning', { file: importB64, years });
+  const importUntil = () => ($('importUntil').checked ? iso(new Date()) : undefined);
+  const importPreview = (years) => api('POST', 'import/planning', { file: importB64, years, until: importUntil() });
   function showImport(r) {
     const e = r.entries, many = r.availableYears.length > 1, chosen = r.selectedYears;
     const picker = many ? `<fieldset style="border:1px solid var(--line);border-radius:8px;margin:8px 0;padding:8px 12px"><legend class="sub">Welk(e) jaar importeren?</legend>${r.availableYears.map((y) => `<label class="chk" style="display:inline-block;margin-right:14px"><input type="checkbox" data-importyear="${y}" ${(importYears || []).includes(y) ? 'checked' : ''} ${r.applied ? 'disabled' : ''}> ${y}</label>`).join('')}</fieldset>` : '';
     if (many && !importYears) { $('importResult').innerHTML = `<p>Dit bestand heeft meerdere jaren (${r.availableYears.join(', ')}). Kies welk(e) jaar je wilt importeren.</p>${picker}${r.warnings.length ? `<div class="warn" style="margin-top:8px">${r.warnings.map((w) => `<div>${esc(w)}</div>`).join('')}</div>` : ''}`; return; }
-    const cell = (c, y) => { const x = c.years.find((z) => z.year === y); return x ? `${x.contract === 'nieuw' ? 'nieuw contract' : 'bestaand contract'} · ${x.entries} reg. (${hrs(x.minutes)} uur)${x.duplicates ? ` <small class="sub">(+${x.duplicates} al aanwezig)</small>` : ''}` : '–'; };
-    $('importResult').innerHTML = `${picker}<p><strong>${r.applied ? 'Geïmporteerd' : 'Voorbeeld'} (${chosen.join(', ')}):</strong> ${e.add} registraties (${hrs(e.minutes)} uur) ${r.applied ? 'toegevoegd' : 'toe te voegen'}${e.duplicate ? `, ${e.duplicate} stonden er al` : ''}${e.outside ? `, ${e.outside} buiten het jaar van hun blad` : ''}${e.before ? `, ${e.before} vóór de begindatum` : ''}.</p>
+    const cell = (c, y) => { const x = c.years.find((z) => z.year === y); return x ? `${x.contract === 'nieuw' ? 'nieuw contract' : x.contract === 'bestaand' ? 'bestaand contract' : 'bestaand + nieuw contract'} · ${x.entries} reg. (${hrs(x.minutes)} uur)${x.duplicates ? ` <small class="sub">(+${x.duplicates} al aanwezig)</small>` : ''}${x.conflicts ? ` <small class="sub">(${x.conflicts} dag${x.conflicts === 1 ? '' : 'en'} overgeslagen: al ingevuld met andere tijden)</small>` : ''}` : '–'; };
+    $('importResult').innerHTML = `${picker}<p><strong>${r.applied ? 'Geïmporteerd' : 'Voorbeeld'} (${chosen.join(', ')}):</strong> ${e.add} registraties (${hrs(e.minutes)} uur) ${r.applied ? 'toegevoegd' : 'toe te voegen'}${e.duplicate ? `, ${e.duplicate} stonden er al` : ''}${e.conflict ? `, ${e.conflict} dagen overgeslagen omdat die dag al is ingevuld met andere tijden` : ''}${e.outside ? `, ${e.outside} buiten het jaar van hun blad` : ''}${e.before ? `, ${e.before} vóór de begindatum` : ''}${e.later ? `, ${e.later} na vandaag niet meegenomen` : ''}.</p>
       <div class="scrollx"><table><tr><th>Kind</th><th>Kind in app</th>${chosen.map((y) => `<th>${y}</th>`).join('')}</tr>${r.children.map((c) => `<tr><td>${esc(c.name)}</td><td>${c.child}</td>${chosen.map((y) => `<td>${cell(c, y)}</td>`).join('')}</tr>`).join('')}</table></div>
       ${r.warnings.length ? `<div class="warn" style="margin-top:8px">${r.warnings.map((w) => `<div>${esc(w)}</div>`).join('')}</div>` : ''}`;
   }
@@ -2420,6 +2422,11 @@
       $('importApply').hidden = !importCanApply(r);
     } catch (e) { if (!e.noAccess) $('importErr').textContent = e.message; }
   });
+  $('importUntil').addEventListener('change', async () => {   // keuze t/m vandaag wisselen: voorbeeld opnieuw maken
+    if (!importB64 || ($('importResult').querySelector('input[data-importyear]') && !importYears)) return;
+    $('importErr').textContent = '';
+    try { const r = await importPreview(importYears && importYears.length ? importYears : undefined); showImport(r); $('importApply').hidden = !importCanApply(r); } catch (e) { if (!e.noAccess) $('importErr').textContent = e.message; }
+  });
   $('importResult').addEventListener('change', async (ev) => {
     if (!ev.target.dataset.importyear || !importB64) return;
     importYears = [...$('importResult').querySelectorAll('input[data-importyear]:checked')].map((x) => Number(x.dataset.importyear));
@@ -2435,7 +2442,7 @@
     if (!importB64 || !importYears || !confirm(`Dit voegt de kinderen, contracten en uren van ${importYears.join(' en ')} uit het voorbeeld toe aan de huidige organisatie. Er wordt niets verwijderd of gewijzigd. Doorgaan?`)) return;
     $('importErr').textContent = ''; $('importApply').disabled = true;
     try {
-      const r = await api('POST', 'import/planning', { file: importB64, years: importYears, apply: true });
+      const r = await api('POST', 'import/planning', { file: importB64, years: importYears, until: importUntil(), apply: true });
       showImport(r); $('importApply').hidden = true; importB64 = null; importYears = null; $('importFile').value = '';
       await reloadSettings();
       const [children] = await Promise.all([guard(() => api('GET', 'children'))]);
