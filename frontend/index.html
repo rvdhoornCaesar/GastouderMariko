@@ -404,6 +404,11 @@
     <div id="childListView">
       <div class="card"><h2>Kinderen</h2><div id="childList"></div></div>
       <button class="btn" id="childAdd">Kind toevoegen</button>
+      <details class="card" id="childInactive" style="margin-top:14px" hidden>
+        <summary style="cursor:pointer"><strong id="childInactiveTitle"></strong></summary>
+        <p class="hint">Kinderen zonder lopend contract: het contract is afgelopen, begint pas later, of er is nog geen contract. Hun uren en overzichten blijven gewoon bewaard.</p>
+        <div id="childInactiveList"></div>
+      </details>
     </div>
     <div id="childDetail" hidden></div>
   </section>
@@ -1817,13 +1822,25 @@
   // Vakanties vóór de vorige maand zijn 'verleden' en staan standaard verborgen.
   const pastCutoff = () => { const d = new Date(); return iso(new Date(d.getFullYear(), d.getMonth() - 1, 1)); };
 
+  // Een kind is 'actief' als het vandaag een lopend contract heeft; de andere kinderen staan onderaan in een ingeklapt kopje.
+  const isActiveChild = (c, today) => c.contracts.some((k) => runsOn({ contract: k }, today));
+  function inactiveReason(c, today) {
+    if (!c.contracts.length) return 'nog geen contract';
+    const future = c.contracts.filter((k) => k.start && k.start > today).map((k) => k.start).sort();
+    const ended = c.contracts.filter((k) => k.end && k.end < today).map((k) => k.end).sort();
+    return [ended.length ? `laatste contract afgelopen op ${nlDate(ended[ended.length - 1])}` : '', future.length ? `volgend contract begint op ${nlDate(future[0])}` : ''].filter(Boolean).join(' · ');
+  }
   function renderChildren() {
-    $('childList').innerHTML = state.children.map((c) => {
-      const n = c.contracts.length;
+    const today = iso(new Date());
+    const row = (c, note) => { const n = c.contracts.length;
       return `<div class="entry"><div><div class="who">${avatar(c)}${esc(c.name)}</div>
-        <div class="meta">${c.birthDate ? `geboren ${nlDate(c.birthDate)} · ` : ''}${n} contract${n === 1 ? '' : 'en'}</div></div>
-        <button class="btn secondary small" data-edit="${c.id}">Bewerken</button></div>`;
-    }).join('') || '<div class="empty">Nog geen kinderen.</div>';
+        <div class="meta">${c.birthDate ? `geboren ${nlDate(c.birthDate)} · ` : ''}${n} contract${n === 1 ? '' : 'en'}${note ? ` · ${note}` : ''}</div></div>
+        <button class="btn secondary small" data-edit="${c.id}">Bewerken</button></div>`; };
+    const active = state.children.filter((c) => isActiveChild(c, today)), inactive = state.children.filter((c) => !isActiveChild(c, today));
+    $('childList').innerHTML = active.map((c) => row(c)).join('') || `<div class="empty">${inactive.length ? 'Geen kinderen met een lopend contract.' : 'Nog geen kinderen.'}</div>`;
+    $('childInactive').hidden = !inactive.length;
+    $('childInactiveTitle').textContent = `Kinderen zonder lopend contract (${inactive.length})`;
+    $('childInactiveList').innerHTML = inactive.map((c) => row(c, inactiveReason(c, today))).join('');
   }
 
   // 'Vakanties doorbetalen' is alleen te kiezen bij vaste tijden; bij vaste uren altijd aan, zonder beide niet van toepassing.
@@ -1934,10 +1951,10 @@
     renderChildren();
   }
 
-  $('childList').addEventListener('click', (ev) => {
+  [$('childList'), $('childInactiveList')].forEach((box) => box.addEventListener('click', (ev) => {
     const id = ev.target.dataset.edit;
     if (id) openChild(state.children.find((c) => c.id === id));
-  });
+  }));
   $('childAdd').onclick = () => openChild(null);
 
   // Velden werken het concept (draft) bij zonder opnieuw te tekenen, zodat het cursorfocus behouden blijft.
