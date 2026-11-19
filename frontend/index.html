@@ -275,6 +275,14 @@
       <div id="dayEntries"></div>
       <div class="warn" id="dayCap"></div>
       <div class="sickbar noprint"><span class="tag sick" id="sickInfo" hidden>Gastouder ziek gemeld</span><button class="btn secondary small" id="sickBtn" type="button">Gastouder ziek melden</button></div>
+      <div class="warn noprint" id="sickAsk" hidden style="margin-top:8px">
+        <div id="sickAskText"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button class="btn small" id="sickAskDelete" type="button">Uren verwijderen en ziek melden</button>
+          <button class="btn secondary small" id="sickAskKeep" type="button">Uren laten staan en ziek melden</button>
+          <button class="btn secondary small" id="sickAskCancel" type="button">Annuleren</button>
+        </div>
+      </div>
     </div>
 
     <form class="card" id="entryForm" aria-label="Uren toevoegen">
@@ -404,6 +412,11 @@
     <div id="childListView">
       <div class="card"><h2>Kinderen</h2><div id="childList"></div></div>
       <button class="btn" id="childAdd">Kind toevoegen</button>
+      <details class="card" id="childInactive" style="margin-top:14px" hidden>
+        <summary style="cursor:pointer"><strong id="childInactiveTitle"></strong></summary>
+        <p class="hint">Kinderen zonder lopend contract: het contract is afgelopen, begint pas later, of er is nog geen contract. Hun uren en overzichten blijven gewoon bewaard.</p>
+        <div id="childInactiveList"></div>
+      </details>
     </div>
     <div id="childDetail" hidden></div>
   </section>
@@ -834,12 +847,31 @@
 
   // --- uren tab ---
   // De gastouder ziek melden voor de gekozen dag (of dat ongedaan maken).
+  async function setSick(date, sick, deleteEntries) {
+    if (deleteEntries) {
+      for (const e of state.entries.filter((x) => x.date === date)) {
+        if (!(await guard(() => api('DELETE', 'entries/' + e.id).then(() => true)))) return false;
+        state.entries = state.entries.filter((x) => x.id !== e.id);
+      }
+    }
+    const r = await guard(() => api('PUT', 'sick-days', { date, sick }));
+    if (!r) { render(); return false; }
+    state.settings.sickDays = r.sickDays; render();
+    return true;
+  }
+  // Staan er die dag al uren, dan eerst vragen: verwijderen, laten staan, of toch niet ziek melden.
   $('sickBtn').onclick = async () => {
     const date = $('day').value;
     if (!date) return;
-    const r = await guard(() => api('PUT', 'sick-days', { date, sick: !sickOf(date) }));
-    if (r) { state.settings.sickDays = r.sickDays; render(); }
+    const there = state.entries.filter((e) => e.date === date);
+    if (sickOf(date) || !there.length) return setSick(date, !sickOf(date), false);
+    const total = there.reduce((t, e) => t + entryMin(e), 0);
+    $('sickAskText').textContent = `Er ${there.length === 1 ? 'staat' : 'staan'} op ${nlDate(date)} al ${there.length} registratie${there.length === 1 ? '' : 's'} (${fmt(total)} uur). Moeten deze uren worden verwijderd nu de gastouder ziek is?`;
+    $('sickAsk').hidden = false;
   };
+  $('sickAskDelete').onclick = async () => { const date = $('day').value; $('sickAsk').hidden = true; await setSick(date, true, true); };
+  $('sickAskKeep').onclick = async () => { const date = $('day').value; $('sickAsk').hidden = true; await setSick(date, true, false); };
+  $('sickAskCancel').onclick = () => { $('sickAsk').hidden = true; };
   // Knoppen en datumvelden houden de begindatum aan: ervoor kun je niet navigeren.
   function updateNavLimits() {
     const g = gStart(), day = $('day').value, month = $('month').value;
@@ -929,6 +961,7 @@
     await guard(() => ensureMonth(day.slice(0, 7)));
     if (seq !== daySeq) return;
     const sick = sickOf(day);
+    $('sickAsk').hidden = true;
     $('sickInfo').hidden = !sick;
     $('sickBtn').textContent = sick ? 'Ziekmelding ongedaan maken' : 'Gastouder ziek melden';
     $('sickBtn').disabled = !sick && beforeStart(day);
@@ -1817,13 +1850,25 @@
   // Vakanties vóór de vorige maand zijn 'verleden' en staan standaard verborgen.
   const pastCutoff = () => { const d = new Date(); return iso(new Date(d.getFullYear(), d.getMonth() - 1, 1)); };
 
+  // Een kind is 'actief' als het vandaag een lopend contract heeft; de andere kinderen staan onderaan in een ingeklapt kopje.
+  const isActiveChild = (c, today) => c.contracts.some((k) => runsOn({ contract: k }, today));
+  function inactiveReason(c, today) {
+    if (!c.contracts.length) return 'nog geen contract';
+    const future = c.contracts.filter((k) => k.start && k.start > today).map((k) => k.start).sort();
+    const ended = c.contracts.filter((k) => k.end && k.end < today).map((k) => k.end).sort();
+    return [ended.length ? `laatste contract afgelopen op ${nlDate(ended[ended.length - 1])}` : '', future.length ? `volgend contract begint op ${nlDate(future[0])}` : ''].filter(Boolean).join(' · ');
+  }
   function renderChildren() {
-    $('childList').innerHTML = state.children.map((c) => {
-      const n = c.contracts.length;
+    const today = iso(new Date());
+    const row = (c, note) => { const n = c.contracts.length;
       return `<div class="entry"><div><div class="who">${avatar(c)}${esc(c.name)}</div>
-        <div class="meta">${c.birthDate ? `geboren ${nlDate(c.birthDate)} · ` : ''}${n} contract${n === 1 ? '' : 'en'}</div></div>
-        <button class="btn secondary small" data-edit="${c.id}">Bewerken</button></div>`;
-    }).join('') || '<div class="empty">Nog geen kinderen.</div>';
+        <div class="meta">${c.birthDate ? `geboren ${nlDate(c.birthDate)} · ` : ''}${n} contract${n === 1 ? '' : 'en'}${note ? ` · ${note}` : ''}</div></div>
+        <button class="btn secondary small" data-edit="${c.id}">Bewerken</button></div>`; };
+    const active = state.children.filter((c) => isActiveChild(c, today)), inactive = state.children.filter((c) => !isActiveChild(c, today));
+    $('childList').innerHTML = active.map((c) => row(c)).join('') || `<div class="empty">${inactive.length ? 'Geen kinderen met een lopend contract.' : 'Nog geen kinderen.'}</div>`;
+    $('childInactive').hidden = !inactive.length;
+    $('childInactiveTitle').textContent = `Kinderen zonder lopend contract (${inactive.length})`;
+    $('childInactiveList').innerHTML = inactive.map((c) => row(c, inactiveReason(c, today))).join('');
   }
 
   // 'Vakanties doorbetalen' is alleen te kiezen bij vaste tijden; bij vaste uren altijd aan, zonder beide niet van toepassing.
@@ -1934,10 +1979,10 @@
     renderChildren();
   }
 
-  $('childList').addEventListener('click', (ev) => {
+  [$('childList'), $('childInactiveList')].forEach((box) => box.addEventListener('click', (ev) => {
     const id = ev.target.dataset.edit;
     if (id) openChild(state.children.find((c) => c.id === id));
-  });
+  }));
   $('childAdd').onclick = () => openChild(null);
 
   // Velden werken het concept (draft) bij zonder opnieuw te tekenen, zodat het cursorfocus behouden blijft.
