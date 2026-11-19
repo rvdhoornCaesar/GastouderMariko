@@ -1230,7 +1230,7 @@
     const holidays = paidHolidayEntries(m, registered);
     holidays.forEach((e) => { const x = findContract(e.contractId); if (x && !vacationOf(e.date)) add(e.date, x, 'planned', e.start, e.end, true); });
     // Gepland voor dagen die al voorbij zijn: alleen na de laatst geschreven uren van dat kind (kinderen wisselen soms van dag, dus eerdere gaten zijn
-    // geen plan), en niet verder terug dan de vorige maand. De uren worden meestal pas aan het eind van de maand of begin van de volgende geschreven.
+    // geen plan), en niet verder terug dan de vorige maand. Is er voor het kind de laatste maanden niets geschreven, dan telt het hele venster. De uren worden meestal pas aan het eind van de maand of begin van de volgende geschreven.
     // Vanaf vandaag geldt gewoon de planning voor elke dag waarvoor nog niets is ingevuld.
     const [y, mo] = m.split('-').map(Number), now = new Date(), planFrom = iso(new Date(now.getFullYear(), now.getMonth() - 1, 1)), todayIso = iso(now);
     const lastWritten = new Map();
@@ -1243,7 +1243,7 @@
         if (!sched || !k.start || !k.end || date < k.start || date > k.end || Number(k.monthlyHours) > 0) return;
         if ((x.child.holidays || []).some((h) => h.from <= date && date <= h.to)) return;   // vakantie: alleen als doorbetaald (hierboven)
         if (registered.some((e) => e.contractId === k.id && e.date === date)) return;
-        if (date < todayIso && date <= (lastWritten.get(x.child.id) || todayIso)) return;   // voorbij en niet na de laatst geschreven uren (of nog nooit iets geschreven): geen plan
+        if (date < todayIso && date <= (lastWritten.get(x.child.id) || '')) return;   // voorbij en niet na de laatst geschreven uren: geen plan (is er de laatste maanden niets geschreven, dan geldt het hele venster)
         add(date, x, 'planned', sched.from, sched.to);
       });
     }
