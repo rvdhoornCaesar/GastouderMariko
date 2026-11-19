@@ -72,7 +72,7 @@ test('overstap: lidmaatschappen, vlag voor platformbeheer, organisatie als laats
   const res = await seed(repo, env, { now: new Date('2026-11-15T12:00:00Z') });
   assert.equal(res.dryRun, false);
   assert.equal(await snapshot(), before);   // kinderen, uren, accounts en de oude gebruikerslijst: exact gelijk
-  assert.deepEqual(await repo.getOrganisation('main'), { id: 'main', name: 'Gastouder Mariko', status: 'active', createdAt: '2026-11-15T12:00:00.000Z', deletedAt: '' });
+  assert.deepEqual(await repo.getOrganisation('main'), { id: 'main', name: 'Gastouder Mariko', status: 'active', createdAt: '2026-11-15T12:00:00.000Z', deletedAt: '', needsAgency: false });
   const members = Object.fromEntries((await repo.listMembersOf('main')).map((x) => [x.email, x.role]));
   assert.equal(Object.keys(members).length, res.members.length);
   assert.equal(members['gebr@voorbeeld.nl'], 'gebruiker');

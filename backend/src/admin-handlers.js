@@ -58,7 +58,7 @@ async function createAgency({ user, repo, body }) {
   requirePlatform(user);
   const name = v.parseAgencyName(body && body.name);
   if ((await repo.listAgencies()).some((a) => a.name.toLowerCase() === name.toLowerCase())) throw new HttpError(409, 'Dit gastouderbureau staat al in de lijst.');
-  const agency = { id: crypto.randomBytes(6).toString('hex'), name, active: true };
+  const agency = { id: crypto.randomBytes(6).toString('hex'), name, active: true, types: body && body.types !== undefined ? v.parseTypes(body.types, 'soorten opvang van dit bureau') : ['gastouder'] };
   await repo.saveAgency(agency);
   return { status: 201, jsonBody: agency };
 }
@@ -69,6 +69,7 @@ async function updateAgency({ user, repo, params, body }) {
   if (!a) throw new HttpError(404, 'Gastouderbureau niet gevonden.');
   const next = { ...a };
   if (body && body.name !== undefined) next.name = v.parseAgencyName(body.name);
+  if (body && body.types !== undefined) next.types = v.parseTypes(body.types, 'soorten opvang van dit bureau');
   if (body && body.active !== undefined) {
     if (typeof body.active !== 'boolean') throw new HttpError(400, 'Ongeldige waarde voor actief.');
     next.active = body.active;
@@ -100,7 +101,7 @@ async function createOrganisation({ user, repo, body, now = new Date() }) {
   requirePlatform(user);
   const name = v.parseOrgName(body && body.name);
   const id = await newOrgId(repo, name);
-  await repo.saveOrganisation({ id, name, status: 'active', createdAt: now.toISOString() });
+  await repo.saveOrganisation({ id, name, status: 'active', createdAt: now.toISOString(), needsAgency: true });   // eerst een gastouderbureau kiezen voordat er kinderen bij kunnen
   let manager = null;
   if (body && body.managerEmail) manager = await addManager(repo, { id }, body.managerEmail, parseLogin(body.login), now);
   return { status: 201, jsonBody: { organisation: await view(repo, await repo.getOrganisation(id)), manager } };
@@ -168,7 +169,7 @@ async function exportData({ user, repo, now = new Date() }) {
   const payload = {
     format: 'gastouderuren-export-1', exportedAt: now.toISOString(), organisation: { id: user.instanceId, name: org ? org.name : user.instanceId },
     children: await repo.listChildren(), entries: await repo.listAllEntries(),
-    settings: { rates: await repo.getRates(), opening: await repo.getOpening(), startDate: await repo.getStartDate(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), agencyIds: await repo.getAgencyIds(), agencies: await mine(repo), ownChildren: await repo.getOwnChildren() },
+    settings: { rates: await repo.getRates(), opening: await repo.getOpening(), startDate: await repo.getStartDate(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), agencyIds: await repo.getAgencyIds(), agencyLinks: await repo.getAgencyLinks(), careTypes: await repo.getCareTypes(), agencyRates: await repo.getAgencyRates(), agencies: await mine(repo), ownChildren: await repo.getOwnChildren() },
     members,
   };
   return { status: 200, jsonBody: payload, headers: { 'content-disposition': `attachment; filename="export-${user.instanceId}-${now.toISOString().slice(0, 10)}.json"` } };
