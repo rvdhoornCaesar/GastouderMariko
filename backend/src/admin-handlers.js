@@ -86,7 +86,7 @@ async function importPlanning({ user, repo, body }) {
   perm.require(user, 'entries:write');
   if (!body || typeof body.file !== 'string' || !body.file.length || body.file.length > 34 * 1024 * 1024) throw new HttpError(400, 'Kies een Excel-bestand (.xlsx) van maximaal 25 MB.');
   const parsed = parsePlanning(Buffer.from(body.file, 'base64'));
-  return { status: 200, jsonBody: await runImport({ repo, parsed, apply: body.apply === true, selected: body.years }) };
+  return { status: 200, jsonBody: await runImport({ repo, parsed, apply: body.apply === true, selected: body.years, until: body.until }) };
 }
 
 async function listOrganisations({ user, repo }) {

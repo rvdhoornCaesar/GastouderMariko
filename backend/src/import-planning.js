@@ -92,7 +92,8 @@ function parsePlanning(buf) {
 
 // Wat er zou gebeuren (apply = false) of wat er is gebeurd (apply = true), voor de administratie van repo en de gekozen jaren.
 // selected = lijst jaartallen (leeg of weggelaten: alle jaren in het bestand).
-async function runImport({ repo, parsed, apply, selected }) {
+async function runImport({ repo, parsed, apply, selected, until }) {
+  if (until !== undefined && until !== null && !/^\d{4}-\d{2}-\d{2}$/.test(String(until))) throw new HttpError(400, 'Ongeldige datum voor "tot en met".');
   const available = parsed.years.map((y) => y.year);
   const want = Array.isArray(selected) && selected.length ? selected.map(Number) : available;
   if (want.some((y) => !available.includes(y))) throw new HttpError(400, 'Dat jaar staat niet in dit bestand.');
@@ -109,7 +110,7 @@ async function runImport({ repo, parsed, apply, selected }) {
   }
   const warnings = [...parsed.warnings];
   const samples = [];
-  let before = 0, outside = 0;
+  let before = 0, outside = 0, later = 0;
 
   // Per kind en jaar: bij welk contract komen de uren. Een bestaand contract dat de dag dekt gaat voor; alleen voor dagen die geen enkel contract dekt
   // komt er (per jaar) een nieuw contract. Een dag waarop het kind al iets heeft ingevuld wordt overgeslagen.
@@ -126,6 +127,7 @@ async function runImport({ repo, parsed, apply, selected }) {
       for (const e of list) {
         if (e.date < from || e.date > to) { outside++; continue; }
         if (startDate && e.date < startDate) { before++; continue; }
+        if (until && e.date > until) { later++; continue; }   // alleen t/m deze datum importeren (bijvoorbeeld vandaag): de rest is planning
         const there = p.existing ? inApp.get(`${p.existing.id}|${e.date}`) : null;
         if (there && there.length) {
           if (there.some((x) => x.start === e.start && x.end === e.end)) py.duplicate++;
@@ -144,6 +146,7 @@ async function runImport({ repo, parsed, apply, selected }) {
     }
   }
   if (outside) warnings.push(`${outside} uren vielen buiten het jaar van hun blad en zijn overgeslagen.`);
+  if (later) warnings.push(`${later} uren na ${nlDate(until)} zijn niet meegenomen.`);
   if (before) warnings.push(`${before} uren lagen vóór de begindatum van de gastouder en zijn overgeslagen.`);
   const conflictTotal = [...plan.values()].reduce((t, p) => t + p.perYear.reduce((u, py) => u + py.conflicts, 0), 0);
   if (conflictTotal) warnings.push(`${conflictTotal} dagen zijn overgeslagen omdat er in de app al uren voor dat kind op die dag staan, met andere tijden dan in Excel${samples.length ? ` (bijvoorbeeld: ${samples.join('; ')}${conflictTotal > samples.length ? '; …' : ''})` : ''}. Pas die dagen zelf aan in de app als Excel gelijk heeft.`);
@@ -174,7 +177,7 @@ async function runImport({ repo, parsed, apply, selected }) {
   const sum = (f) => rows.reduce((t, r) => t + r.years.reduce((u, y) => u + f(y), 0), 0);
   return {
     applied: !!apply, availableYears: available, selectedYears: chosen.map((y) => y.year), children: rows,
-    entries: { found: chosen.reduce((t, y) => t + y.entries.length, 0), add: sum((y) => y.entries), minutes: sum((y) => y.minutes), duplicate: sum((y) => y.duplicates), conflict: sum((y) => y.conflicts), outside, before },
+    entries: { found: chosen.reduce((t, y) => t + y.entries.length, 0), add: sum((y) => y.entries), minutes: sum((y) => y.minutes), duplicate: sum((y) => y.duplicates), conflict: sum((y) => y.conflicts), outside, before, later },
     warnings,
   };
 }

@@ -792,3 +792,23 @@ test('import in een jaar dat al deels met de hand is ingevuld: geen dubbele uren
   assert.equal(again.entries.add, 0);
   assert.equal((await repo.listAllEntries()).length, before + 2);
 });
+
+test('import t/m een datum: latere uren (planning) blijven buiten het voorbeeld en de import', async () => {
+  const admin = require('../src/admin-handlers');
+  const { xlsx, serial, time } = require('./xlsx-helper');
+  const file = xlsx({
+    Kinderen: { B2: 'Kinderen', F2: 'Achternaam', B4: 'Tot', F4: 'Vandaag' },
+    2029: { A1: serial('2029-01-01'), B4: serial('2029-03-05'), B5: 'Tot', C5: time('08:00'), D5: time('12:00'), E4: serial('2029-03-06'), E5: 'Tot', F5: time('08:00'), G5: time('12:00'),
+      H4: serial('2029-03-07'), H5: 'Tot', I5: time('08:00'), J5: time('12:00') },
+  });
+  const b64 = file.toString('base64');
+  await assert.rejects(call(admin.importPlanning, { body: { file: b64, until: 'vandaag' } }), (e) => e.status === 400);
+  const preview = (await call(admin.importPlanning, { body: { file: b64, until: '2029-03-06' } })).jsonBody;
+  assert.deepEqual([preview.entries.add, preview.entries.later], [2, 1]);
+  assert.ok(preview.warnings.some((w) => /1 uren na 06-03-2029/.test(w)));
+  await call(admin.importPlanning, { body: { file: b64, until: '2029-03-06', apply: true } });
+  const kid = (await repo.listChildren()).find((c) => c.name === 'Tot Vandaag');
+  assert.deepEqual((await repo.listAllEntries()).filter((e) => e.contractId === kid.contracts[0].id).map((e) => e.date).sort(), ['2029-03-05', '2029-03-06']);
+  // zonder grens komt de rest er later bij
+  assert.equal((await call(admin.importPlanning, { body: { file: b64, apply: true } })).jsonBody.entries.add, 1);
+});
