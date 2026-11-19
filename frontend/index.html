@@ -318,6 +318,7 @@
 
   <!-- OVERZICHT -->
   <section id="tab-overzicht" hidden>
+    <div class="seg typefilter noprint" hidden style="max-width:380px;margin-bottom:8px"></div>
     <div class="datebar noprint">
       <button class="btn secondary" id="prevMonth" aria-label="Vorige maand">‹</button>
       <input type="month" id="month">
@@ -345,6 +346,7 @@
 
   <!-- KALENDER -->
   <section id="tab-kalender" hidden>
+    <div class="seg typefilter noprint" hidden style="max-width:380px;margin-bottom:8px"></div>
     <div class="seg noprint">
       <button data-cal="week" class="active">Week</button>
       <button data-cal="maand">Maand</button>
@@ -371,6 +373,7 @@
 
   <!-- FINANCIEEL -->
   <section id="tab-financieel" hidden>
+    <div class="seg typefilter noprint" hidden style="max-width:380px;margin-bottom:8px"></div>
     <div class="datebar noprint">
       <button class="btn secondary" id="finPrev" aria-label="Vorig jaar">‹</button>
       <div class="caltitle" id="finTitle"></div>
@@ -804,6 +807,11 @@
   }
   const rateFor = (x, date) => (!x ? null : rateInfo(x.contract, date).rate);
   const enabledTypes = () => state.settings.enabledTypes || ['gastouder'];
+  // Filter per soort opvang in de overzichten (Overzicht, Kalender, Financieel): standaard alles samen. Alleen te kiezen als er meer dan één soort is.
+  const typeFilter = { v: 'alle' };
+  try { const t = localStorage.getItem('typeFilter'); if (t === 'gastouder' || t === 'bso') typeFilter.v = t; } catch (e) { /* standaard: alles */ }
+  const typeOk = (x) => typeFilter.v === 'alle' || typeOf(x.contract) === typeFilter.v;
+  const hasManyTypes = () => enabledTypes().length > 1 || state.children.some((c) => c.contracts.some((k) => typeOf(k) !== 'gastouder'));
   const nlDate = (d) => d.split('-').reverse().join('-');
   const WEEKDAYS = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrijdag', 'Zaterdag', 'Zondag'];
 
@@ -818,12 +826,12 @@
 
   // Contracten met vaste uren per maand die in maand m (JJJJ-MM) gelden.
   // Een contract geldt voor een maand als de periode die maand raakt.
-  const fixedContracts = (m) => contracts().filter((x) => Number(x.contract.monthlyHours) > 0 && x.contract.start && x.contract.end
+  const fixedContracts = (m, all) => contracts().filter((x) => (all || typeOk(x)) && Number(x.contract.monthlyHours) > 0 && x.contract.start && x.contract.end
     && x.contract.start.slice(0, 7) <= m && m <= x.contract.end.slice(0, 7) && !(gStart() && m < gStart().slice(0, 7)));
   // Per contract met vaste uren in maand m: hoeveel geschreven minuten niet extra tellen (maximaal de vaste uren). Map contractId -> { child, min }.
-  function fixedWrittenDrop(m, registered) {
+  function fixedWrittenDrop(m, registered, all) {
     const out = new Map();
-    fixedContracts(m).forEach((x) => {
+    fixedContracts(m, all).forEach((x) => {
       const vastMin = Math.round(Number(x.contract.monthlyHours) * 60);
       const written = registered.filter((e) => e.contractId === x.contract.id).reduce((s, e) => s + toMin(e.end) - toMin(e.start), 0);
       if (written > 0) out.set(x.contract.id, { child: x.child, written, min: Math.min(written, vastMin) });
@@ -890,12 +898,12 @@
   // Doorbetaalde vakanties: een contract met vaste tijden (zonder vaste uren) en 'Vakanties doorbetalen' telt de uren van de vaste
   // tijden mee op elke vakantiedag van het kind binnen de contractperiode, tenzij er die dag al uren zijn ingevuld.
   // Bij vaste uren zijn vakanties altijd doorbetaald (de uren tellen elke maand vol mee); zonder vaste uren of tijden vul je het zelf in.
-  function paidHolidayEntries(m, registered) {
+  function paidHolidayEntries(m, registered, all) {
     const [y, mo] = m.split('-').map(Number), first = `${m}-01`, last = `${m}-${pad(new Date(y, mo, 0).getDate())}`;
     const seen = new Set(registered.map((e) => `${e.contractId}_${e.date}`));
     const out = [];
     state.children.forEach((c) => (c.holidays || []).forEach((h) => c.contracts.forEach((k) => {
-      if (!paysBySchedule(k) || !k.start || !k.end) return;
+      if (!paysBySchedule(k) || !k.start || !k.end || !(all || typeOk({ contract: k }))) return;
       const from = [h.from, k.start, first, gStart()].sort().pop(), to = [h.to, k.end, last].sort()[0];
       for (let d = new Date(from + 'T12:00'); iso(d) <= to; d.setDate(d.getDate() + 1)) {
         const date = iso(d), key = `${k.id}_${date}`, sched = scheduleFor(k, date);
@@ -1194,7 +1202,7 @@
 
   // Per dag op naam van het kind (alfabetisch), daarna op begintijd.
   const childNameOf = (e) => { const x = findContract(e.contractId); return x ? x.child.name : '\uffff'; };
-  const monthEntries = () => state.entries.filter((e) => e.date.startsWith($('month').value))
+  const monthEntries = () => state.entries.filter((e) => e.date.startsWith($('month').value) && (() => { const x = findContract(e.contractId); return !x || typeOk(x); })())
     .sort((a, b) => a.date.localeCompare(b.date) || childNameOf(a).localeCompare(childNameOf(b), 'nl') || a.start.localeCompare(b.start));
 
   let monthSeq = 0;
@@ -1297,16 +1305,18 @@
   const nlLong = (d, o) => d.toLocaleDateString('nl-NL', o);
 
   // Alle uren van maand m (JJJJ-MM), per datum: { days: Map datum -> [{ child, kind, start, end, min, holiday }], vast: Map kind -> minuten }.
-  function monthPlan(m) {
+  // all: ook de andere soort opvang meenemen (voor beschikbaarheid en 'Past het?', die gaan over alle kinderen).
+  function monthPlan(m, opts) {
+    const all = !!(opts && opts.all), ok = (x) => all || typeOk(x);
     const days = new Map(), vast = new Map();
     const add = (date, x, kind, start, end, holiday) => {
       if (!days.has(date)) days.set(date, []);
       days.get(date).push({ child: x.child, kind, date, contractId: x.contract.id, start, end, min: toMin(end) - toMin(start), holiday: !!holiday });
     };
     const registered = state.entries.filter((e) => e.date.startsWith(m));
-    registered.forEach((e) => { const x = findContract(e.contractId); if (x) add(e.date, x, 'written', e.start, e.end); });
-    const holidays = paidHolidayEntries(m, registered);
-    holidays.forEach((e) => { const x = findContract(e.contractId); if (x && !vacationOf(e.date)) add(e.date, x, 'planned', e.start, e.end, true); });
+    registered.forEach((e) => { const x = findContract(e.contractId); if (x && ok(x)) add(e.date, x, 'written', e.start, e.end); });
+    const holidays = paidHolidayEntries(m, registered, all);
+    holidays.forEach((e) => { const x = findContract(e.contractId); if (x && ok(x) && !vacationOf(e.date)) add(e.date, x, 'planned', e.start, e.end, true); });
     // Gepland voor dagen die al voorbij zijn: alleen na de laatst geschreven uren van dat kind (kinderen wisselen soms van dag, dus eerdere gaten zijn
     // geen plan), en niet verder terug dan de vorige maand. Is er voor het kind de laatste maanden niets geschreven, dan telt het hele venster. De uren worden meestal pas aan het eind van de maand of begin van de volgende geschreven.
     // Vanaf vandaag geldt gewoon de planning voor elke dag waarvoor nog niets is ingevuld.
@@ -1317,6 +1327,7 @@
       const date = `${m}-${pad(i)}`;
       if (date < planFrom || beforeStart(date) || vacationOf(date)) continue;   // geen geplande uren ver in het verleden of tijdens vakantie van de gastouder
       contracts().forEach((x) => {
+        if (!ok(x)) return;
         const k = x.contract, sched = scheduleFor(k, date);
         if (!sched || !k.start || !k.end || date < k.start || date > k.end || Number(k.monthlyHours) > 0) return;
         if ((x.child.holidays || []).some((h) => h.from <= date && date <= h.to)) return;   // vakantie: alleen als doorbetaald (hierboven)
@@ -1325,9 +1336,9 @@
         add(date, x, 'planned', sched.from, sched.to);
       });
     }
-    fixedContracts(m).forEach((x) => vast.set(x.child.id, (vast.get(x.child.id) || 0) + Math.round(Number(x.contract.monthlyHours) * 60)));
+    fixedContracts(m, all).forEach((x) => vast.set(x.child.id, (vast.get(x.child.id) || 0) + Math.round(Number(x.contract.monthlyHours) * 60)));
     // Bij een contract met vaste uren zijn de geschreven uren geen extra: de vaste uren tellen. Alleen wat je méér schrijft dan de vaste uren komt erbij.
-    const drop = fixedWrittenDrop(m, registered);
+    const drop = fixedWrittenDrop(m, registered, all);
     return { days, vast, drop };
   }
   // Per kind en soort (geschreven/gepland) samenvoegen: één regel met alle tijden van die dag.
@@ -1483,7 +1494,7 @@
         + (cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '');
     await Promise.all(months.map((m) => guard(() => ensureMonth(m))));
     if (seq !== calSeq) return;
-    const plans = months.map(monthPlan), dayMap = new Map(), vast = new Map(), drops = new Map();
+    const plans = months.map((m) => monthPlan(m, { all: cal.mode === 'vrij' })), dayMap = new Map(), vast = new Map(), drops = new Map();
     plans.forEach((p) => p.days.forEach((v, k) => dayMap.set(k, v)));
     plans.forEach((p, i) => { vast.set(months[i], p.vast); drops.set(months[i], p.drop); });
     const body = $('calBody');
@@ -1671,7 +1682,7 @@
     $('pRun').disabled = true; $('pResult').innerHTML = '<div class="card"><div class="empty">Bezig met controleren…</div></div>';
     await Promise.all(months.map((m) => guard(() => ensureMonth(m))));
     $('pRun').disabled = false;
-    const plans = new Map(months.map((m) => [m, monthPlan(m)]));
+    const plans = new Map(months.map((m) => [m, monthPlan(m, { all: true })]));
 
     // Per gevraagde weekdag: de dagen die zijn gecontroleerd en de dagen waarop het niet past.
     const per = rows.map(() => ({ days: [], conflicts: [] }));
@@ -2759,7 +2770,22 @@
     }
   });
 
-  function render() { renderDay(); renderMonth(); renderCal(); renderFin(); renderPast(); renderChildren(); renderSettings(); }
+  function renderTypeFilter() {
+    const many = hasManyTypes();
+    if (!many) typeFilter.v = 'alle';
+    document.querySelectorAll('.typefilter').forEach((box) => {
+      box.hidden = !many;
+      box.innerHTML = ['alle', 'gastouder', 'bso'].map((t) => `<button data-tf="${t}" class="${typeFilter.v === t ? 'active' : ''}">${t === 'alle' ? 'Alle soorten' : typeLabel(t)}</button>`).join('');
+    });
+  }
+  document.addEventListener('click', (ev) => {
+    const t = ev.target.dataset && ev.target.dataset.tf;
+    if (!t) return;
+    typeFilter.v = t;
+    try { localStorage.setItem('typeFilter', t); } catch (e) { /* niet erg */ }
+    render();
+  });
+  function render() { renderTypeFilter(); renderDay(); renderMonth(); renderCal(); renderFin(); renderPast(); renderChildren(); renderSettings(); }
 
   // Laadt de gegevens en toont de app (of eerst het scherm om het tijdelijke wachtwoord te vervangen).
   async function start(mustChange) {
