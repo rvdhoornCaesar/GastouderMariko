@@ -238,6 +238,18 @@ function parseAgencyIds(list) {
   return out;
 }
 
+// Aansluitingen van de gastouder bij gastouderbureaus: lijst van { agencyId, from, to (t/m) }, datums optioneel (leeg = open).
+function parseAgencyLinks(list) {
+  if (!Array.isArray(list) || list.length > 60) throw bad('Ongeldige aansluitingen.');
+  return list.map((l) => {
+    if (!l || typeof l.agencyId !== 'string' || !ID.test(l.agencyId)) throw bad('Ongeldig gastouderbureau.');
+    const date = (x, msg) => (x === null || x === undefined || x === '' ? null : requiredDate(x, msg));
+    const from = date(l.from, 'Ongeldige begindatum van de aansluiting.'), to = date(l.to, 'Ongeldige einddatum van de aansluiting.');
+    if (from && to && to < from) throw bad('De einddatum van een aansluiting ligt voor de begindatum.');
+    return { agencyId: l.agencyId, from, to };
+  });
+}
+
 function parseOrgName(v) {
   const n = String(v ?? '').replace(/\s+/g, ' ').trim();
   if (!n || n.length > 100 || /[\u0000-\u001f\u007f-\u009f<>]/.test(n)) throw bad('Geef een naam van 1 tot 100 tekens.');
@@ -250,4 +262,4 @@ function parseRole(v) {
   return r;
 }
 
-module.exports = { parseSickDay, parseOrgName, parseAgencyName, parseAgencyIds, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
+module.exports = { parseSickDay, parseOrgName, parseAgencyName, parseAgencyIds, parseAgencyLinks, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };

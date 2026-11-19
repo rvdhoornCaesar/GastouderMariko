@@ -200,6 +200,12 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     setStartDate: (d) => setSetting('startDate', d),
     getAgencyIds: () => getSetting('agencyIds'),
     setAgencyIds: (list) => setSetting('agencyIds', list),
+    // Aansluitingen bij gastouderbureaus met periodes. Bestaande gegevens (alleen een lijst bureaus) tellen als aansluiting zonder begin en einde.
+    async getAgencyLinks() {
+      const links = await getSetting('agencyLinks', null);
+      return links || (await getSetting('agencyIds')).map((agencyId) => ({ agencyId, from: null, to: null }));
+    },
+    setAgencyLinks: (list) => setSetting('agencyLinks', list),
     getSickDays: () => getSetting('sickDays'),
     setSickDays: (list) => setSetting('sickDays', list),
     getVacations: () => getSetting('vacations'),

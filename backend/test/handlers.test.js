@@ -654,9 +654,9 @@ test('gastouderbureaus: platformbeheer maakt de lijst, de gastouder kiest, het c
   await assert.rejects(call(admin.createAgency, { body: { name: '  ' } }), (e) => e.status === 400);
   assert.deepEqual((await call(h.getSettings)).jsonBody.agencies.map((x) => x.name), ['Bureau Maan', 'Bureau Zon']);
   // aansluiten: alleen bestaande bureaus
-  await assert.rejects(call(h.putAgencyIds, { body: { agencyIds: ['bestaatniet1'] } }), (e) => e.status === 400);
-  await assert.rejects(call(h.putAgencyIds, { body: { agencyIds: 'zon' } }), (e) => e.status === 400);
-  assert.deepEqual((await call(h.putAgencyIds, { body: { agencyIds: [a.id, a.id] } })).jsonBody.agencyIds, [a.id]);
+  await assert.rejects(call(h.putAgencyLinks, { body: { agencyIds: ['bestaatniet1'] } }), (e) => e.status === 400);
+  await assert.rejects(call(h.putAgencyLinks, { body: { agencyIds: 'zon' } }), (e) => e.status === 400);
+  assert.deepEqual((await call(h.putAgencyLinks, { body: { agencyIds: [a.id, a.id] } })).jsonBody.agencyIds, [a.id]);
   // een contract mag alleen verwijzen naar een bureau waarbij je bent aangesloten
   await assert.rejects(call(h.createChild, { body: { firstName: 'Bureaukind', contracts: [K({ agencyId: b.id })] } }), (e) => e.status === 400);
   const kid = (await call(h.createChild, { body: { firstName: 'Bureaukind', contracts: [K({ agencyId: a.id }), K({})] } })).jsonBody;
@@ -664,8 +664,8 @@ test('gastouderbureaus: platformbeheer maakt de lijst, de gastouder kiest, het c
   assert.equal(kid.contracts[1].agencyId, null);
   // niet-actief: niet meer te kiezen, maar de bestaande verwijzing blijft geldig
   await call(admin.updateAgency, { params: { id: a.id }, body: { active: false } });
-  assert.equal((await call(h.putAgencyIds, { body: { agencyIds: [a.id] } })).status, 200);   // blijven staan mag
-  await assert.rejects(call(h.putAgencyIds, { body: { agencyIds: [a.id, b.id, 'nietactief1'] } }), (e) => e.status === 400);
+  assert.equal((await call(h.putAgencyLinks, { body: { agencyIds: [a.id] } })).status, 200);   // blijven staan mag
+  await assert.rejects(call(h.putAgencyLinks, { body: { agencyIds: [a.id, b.id, 'nietactief1'] } }), (e) => e.status === 400);
   assert.equal((await call(h.updateChild, { params: { id: kid.id }, body: { firstName: 'Bureaukind', contracts: kid.contracts } })).jsonBody.contracts[0].agencyId, a.id);
   // hernoemen en weer activeren
   const renamed = (await call(admin.updateAgency, { params: { id: a.id }, body: { name: 'Bureau Zonnig', active: true } })).jsonBody;
@@ -811,4 +811,38 @@ test('import t/m een datum: latere uren (planning) blijven buiten het voorbeeld 
   assert.deepEqual((await repo.listAllEntries()).filter((e) => e.contractId === kid.contracts[0].id).map((e) => e.date).sort(), ['2029-03-05', '2029-03-06']);
   // zonder grens komt de rest er later bij
   assert.equal((await call(admin.importPlanning, { body: { file: b64, apply: true } })).jsonBody.entries.add, 1);
+});
+
+test('aansluiting bij gastouderbureaus met periodes en de waarschuwing bij meer dan twee tegelijk', async () => {
+  const admin = require('../src/admin-handlers');
+  const { overLimit } = require('../src/agency-links');
+  const mk = async (name) => (await call(admin.createAgency, { body: { name } })).jsonBody.id;
+  const [a, b, c, d] = [await mk('Periode A'), await mk('Periode B'), await mk('Periode C'), await mk('Periode D')];
+  const put = (links) => call(h.putAgencyLinks, { body: { links } });
+  // ongeldige invoer
+  await assert.rejects(put([{ agencyId: a, from: '2027-02-30' }]), (e) => e.status === 400);
+  await assert.rejects(put([{ agencyId: a, from: '2027-05-01', to: '2027-04-01' }]), (e) => e.status === 400);
+  await assert.rejects(put([{ agencyId: 'bestaatniet1' }]), (e) => e.status === 400);
+  await assert.rejects(put('a'), (e) => e.status === 400);
+  // twee bureaus tegelijk is goed, geen waarschuwing
+  let r = (await put([{ agencyId: a, from: '2027-01-01', to: null }, { agencyId: b, from: '2027-01-01', to: '2027-12-31' }])).jsonBody;
+  assert.deepEqual(r.agencyWarnings, []);
+  assert.deepEqual(r.agencyIds.sort(), [a, b].sort());
+  // een derde die overlapt: waarschuwing voor precies de overlap (ook als B afloopt en D erbij komt, zolang het er drie zijn)
+  r = (await put([{ agencyId: a, from: '2027-01-01', to: null }, { agencyId: b, from: '2027-01-01', to: '2027-12-31' }, { agencyId: c, from: '2027-10-01', to: '2028-03-31' }, { agencyId: d, from: '2028-01-01', to: null }])).jsonBody;
+  assert.deepEqual(r.agencyWarnings, [{ from: '2027-10-01', to: '2028-03-31', count: 3 }]);   // A, B en C; daarna A, C en D: aaneengesloten, steeds drie
+  assert.equal(r.agencyLimit.max, 2);
+  assert.deepEqual((await call(h.getSettings)).jsonBody.agencyWarnings, r.agencyWarnings);
+  assert.equal((await call(h.getSettings)).jsonBody.agencyLinks.length, 4);
+  // dezelfde twee keer (opnieuw aangesloten) telt als één bureau
+  assert.deepEqual(overLimit([{ agencyId: a, from: '2027-01-01', to: '2027-06-30' }, { agencyId: a, from: '2027-03-01', to: null }, { agencyId: b, from: null, to: null }]), []);
+  // vóór de ingangsdatum van de regel (1 juli 2026) is er geen overtreding, ook niet bij drie bureaus
+  assert.deepEqual(overLimit([{ agencyId: a, from: '2025-01-01', to: '2026-06-30' }, { agencyId: b, from: '2025-01-01', to: '2026-06-30' }, { agencyId: c, from: '2025-01-01', to: '2026-06-30' }]), []);
+  assert.deepEqual(overLimit([{ agencyId: a, from: null, to: null }, { agencyId: b, from: null, to: null }, { agencyId: c, from: null, to: null }]), [{ from: '2026-07-01', to: null, count: 3 }]);
+  // oude gegevens (alleen een lijst bureaus) blijven werken: aansluiting zonder periode
+  await repo.setAgencyIds([a]);
+  await repo.setAgencyLinks(null);
+  assert.deepEqual((await call(h.getSettings)).jsonBody.agencyLinks, [{ agencyId: a, from: null, to: null }]);
+  // een contract mag nog steeds alleen verwijzen naar een bureau waarbij je (ooit) bent aangesloten
+  await assert.rejects(call(h.createChild, { body: { firstName: 'Bureaukind2', contracts: [K({ agencyId: d })] } }), (e) => e.status === 400);
 });

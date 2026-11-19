@@ -168,7 +168,7 @@ async function exportData({ user, repo, now = new Date() }) {
   const payload = {
     format: 'gastouderuren-export-1', exportedAt: now.toISOString(), organisation: { id: user.instanceId, name: org ? org.name : user.instanceId },
     children: await repo.listChildren(), entries: await repo.listAllEntries(),
-    settings: { rates: await repo.getRates(), opening: await repo.getOpening(), startDate: await repo.getStartDate(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), agencyIds: await repo.getAgencyIds(), agencies: await mine(repo), ownChildren: await repo.getOwnChildren() },
+    settings: { rates: await repo.getRates(), opening: await repo.getOpening(), startDate: await repo.getStartDate(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), agencyIds: await repo.getAgencyIds(), agencyLinks: await repo.getAgencyLinks(), agencies: await mine(repo), ownChildren: await repo.getOwnChildren() },
     members,
   };
   return { status: 200, jsonBody: payload, headers: { 'content-disposition': `attachment; filename="export-${user.instanceId}-${now.toISOString().slice(0, 10)}.json"` } };

@@ -441,8 +441,16 @@
   <section id="tab-instellingen" hidden>
     <div class="card">
       <h2>Gastouderbureau</h2>
-      <p class="hint">Bij welke gastouderbureaus ben je aangesloten? Per contract kies je daarna (bij Kinderen) welk bureau erbij hoort. De lijst met bureaus wordt door de platformbeheerder bijgehouden; ontbreekt jouw bureau, vraag dan om het toe te voegen.</p>
+      <p class="hint">Bij welke gastouderbureaus ben je aangesloten, en van wanneer tot wanneer? Laat <em>t/m</em> leeg als de aansluiting doorloopt. Per contract kies je daarna (bij Kinderen) welk bureau erbij hoort. De lijst met bureaus wordt door de platformbeheerder bijgehouden; ontbreekt jouw bureau, vraag dan om het toe te voegen.</p>
+      <p class="hint"><strong>Regel:</strong> volgens de Wet kinderopvang (art. 1.56c) mag een gastouder bij maximaal <strong>2</strong> gastouderbureaus tegelijk zijn aangesloten, bij een overstap tijdelijk bij 3. Heb je kinderen via een overeenkomst van vóór deze regel, dan mag je die kinderen houden tot ze stoppen met de opvang. Volgens de Rijksoverheid en de VNG geldt de regel sinds <strong>1 juli 2026</strong>; deze datum is niet in het Staatsblad zelf nagelopen. De app waarschuwt alleen, het blijft mogelijk om meer dan twee in te vullen.</p>
+      <div class="warn" id="agencyWarn"></div>
       <div id="agencyPick"></div>
+      <form class="grid2" id="agencyLinkForm" style="margin-top:10px">
+        <div class="wide"><label for="agencyLinkSel">Gastouderbureau</label><select id="agencyLinkSel" required></select></div>
+        <div><label for="agencyLinkFrom">Aangesloten vanaf</label><input type="date" id="agencyLinkFrom"></div>
+        <div><label for="agencyLinkTo">T/m (leeg = doorlopend)</label><input type="date" id="agencyLinkTo"></div>
+        <div class="wide"><button class="btn secondary">Aansluiting toevoegen</button></div>
+      </form>
       <div class="err" id="agencyErr"></div>
     </div>
     <div class="card">
@@ -2230,19 +2238,42 @@
   // Slaat een instelling op; fouten komen onder het formulier te staan.
   // --- Gastouderbureaus: kiezen bij Instellingen (aangesloten bij) en de lijst beheren bij Admin ---
   const agencyName = (id) => { const a = (state.settings.agencies || []).find((x) => x.id === id); return a ? a.name + (a.active ? '' : ' (niet actief)') : ''; };
+  const agencyLinks = () => state.settings.agencyLinks || (state.settings.agencyIds || []).map((agencyId) => ({ agencyId, from: null, to: null }));
+  const linkSpan = (l) => `${l.from ? `vanaf ${nlDate(l.from)}` : 'sinds het begin'} ${l.to ? `t/m ${nlDate(l.to)}` : '(doorlopend)'}`;
   function renderAgencies() {
-    const all = state.settings.agencies || [], mine = new Set(state.settings.agencyIds || []);
-    const shown = all.filter((a) => a.active || mine.has(a.id));
-    $('agencyPick').innerHTML = shown.length ? shown.map((a) => `<label class="chk" style="display:block;margin:6px 0"><input type="checkbox" data-agency="${esc(a.id)}" ${mine.has(a.id) ? 'checked' : ''}> ${esc(a.name)}${a.active ? '' : ' <span class="tag">niet actief</span>'}</label>`).join('') : '<div class="empty">Er zijn nog geen gastouderbureaus in de lijst.</div>';
+    const all = state.settings.agencies || [], links = agencyLinks(), mine = new Set(links.map((l) => l.agencyId));
+    const warn = state.settings.agencyWarnings || [], lim = state.settings.agencyLimit || { max: 2 };
+    $('agencyWarn').innerHTML = warn.map((w) => `<div>Let op: ${w.from === w.to ? `op ${nlDate(w.from)}` : `${w.to ? `van ${nlDate(w.from)} t/m ${nlDate(w.to)}` : `vanaf ${nlDate(w.from)}`}`} ben je bij ${w.count} gastouderbureaus tegelijk aangesloten; het maximum is ${lim.max} (bij een overstap tijdelijk 3). Klopt dit niet, pas dan een datum aan.</div>`).join('');
+    $('agencyPick').innerHTML = links.length ? links.map((l, i) => { const a = all.find((x) => x.id === l.agencyId);
+      return `<div class="entry" style="flex-wrap:wrap"><div style="flex:1 1 200px"><div class="who">${esc(a ? a.name : 'Onbekend bureau')}${a && !a.active ? ' <span class="tag">niet actief</span>' : ''}</div>
+        <div class="meta">${linkSpan(l)}</div></div>
+        <div style="display:flex;gap:6px;align-items:center"><input type="date" data-aglink="${i}" data-f="from" value="${esc(l.from || '')}" aria-label="Vanaf" style="width:auto"><input type="date" data-aglink="${i}" data-f="to" value="${esc(l.to || '')}" aria-label="T/m" style="width:auto">
+        <button class="link" data-agunlink="${i}" title="Aansluiting verwijderen">✕</button></div></div>`; }).join('') : '<div class="empty">Nog geen aansluitingen.</div>';
+    const free = all.filter((a) => a.active);
+    $('agencyLinkSel').innerHTML = free.length ? free.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('') : '<option value="">(geen bureaus in de lijst)</option>';
     if (!can('orgs:manage')) return;
     $('agencyList').innerHTML = all.length ? all.map((a) => `<div class="entry"><div class="who">${esc(a.name)}${a.active ? '' : ' <span class="tag">niet actief</span>'}</div>
       <div style="display:flex;gap:6px"><button class="btn secondary small" data-agrename="${esc(a.id)}">Naam wijzigen</button>
       <button class="btn secondary small" data-agtoggle="${esc(a.id)}">${a.active ? 'Niet actief maken' : 'Weer actief maken'}</button></div></div>`).join('') : '<div class="empty">Nog geen gastouderbureaus.</div>';
   }
-  $('agencyPick').addEventListener('change', async (ev) => {
-    if (!ev.target.dataset.agency) return;
-    const ids = [...$('agencyPick').querySelectorAll('input[data-agency]:checked')].map((x) => x.dataset.agency);
-    if (!(await saveSetting($('agencyErr'), 'agencies', { agencyIds: ids }, (r) => { state.settings.agencyIds = r.agencyIds; }))) renderAgencies();
+  const saveLinks = (links) => saveSetting($('agencyErr'), 'agencies', { links }, (r) => { Object.assign(state.settings, { agencyLinks: r.agencyLinks, agencyIds: r.agencyIds, agencyWarnings: r.agencyWarnings, agencyLimit: r.agencyLimit }); });
+  $('agencyLinkForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const from = $('agencyLinkFrom').value, to = $('agencyLinkTo').value;
+    if ((from && !completeDate(from)) || (to && !completeDate(to))) { $('agencyErr').textContent = 'Vul een geldige datum in.'; return; }
+    if (await saveLinks([...agencyLinks(), { agencyId: $('agencyLinkSel').value, from: from || null, to: to || null }])) { $('agencyLinkFrom').value = ''; $('agencyLinkTo').value = ''; }
+  });
+  $('agencyPick').addEventListener('change', async (ev) => {   // een datum van een aansluiting wijzigen
+    const d = ev.target.dataset;
+    if (d.aglink === undefined) return;
+    if (ev.target.value && !completeDate(ev.target.value)) return;   // het jaar wordt nog getypt
+    const links = agencyLinks().map((l, i) => (i === Number(d.aglink) ? { ...l, [d.f]: ev.target.value || null } : l));
+    if (!(await saveLinks(links))) renderAgencies();
+  });
+  $('agencyPick').addEventListener('click', async (ev) => {
+    const i = ev.target.dataset.agunlink;
+    if (i === undefined) return;
+    if (confirm('Deze aansluiting verwijderen? Contracten die naar dit bureau verwijzen behouden hun verwijzing.')) await saveLinks(agencyLinks().filter((_, k) => k !== Number(i)));
   });
   $('agencyForm').addEventListener('submit', async (ev) => {
     ev.preventDefault(); $('agencyAdminErr').textContent = '';
