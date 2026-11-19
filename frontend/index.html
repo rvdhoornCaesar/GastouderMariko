@@ -364,7 +364,7 @@
       <h2 id="finTableTitle"></h2>
       <div class="scrollx" id="finTable"></div>
       <div class="warn" id="finWarn"></div>
-      <p class="hint" style="margin: 10px 0 0">Bedrag = uren × uurprijs, met de toeslag buiten de openingstijden. <em>Geschreven</em> = ingevulde uren, <em>gepland</em> = vaste tijden vanaf vandaag en doorbetaalde vakanties, <em>vast</em> = vaste uren per maand. Kinderen zonder uren in dit jaar staan er niet bij.</p>
+      <p class="hint" style="margin: 10px 0 0">Bedrag = uren × uurprijs, met de toeslag buiten de openingstijden. <em>Geschreven</em> = ingevulde uren, <em>gepland</em> = vaste tijden voor dagen in de vorige en huidige maand (en daarna) waarvoor nog niets is ingevuld, en doorbetaalde vakanties, <em>vast</em> = vaste uren per maand. Kinderen zonder uren in dit jaar staan er niet bij.</p>
     </div>
     <div class="card">
       <h2 id="finChartTitle"></h2>
@@ -1197,7 +1197,7 @@
   };
 
   // --- kalender: week, maand en jaar ---
-  // 'Geschreven' = uren die zijn ingevuld. 'Gepland' = de vaste tijden van een contract voor dagen vanaf vandaag waarvoor nog niets is
+  // 'Geschreven' = uren die zijn ingevuld. 'Gepland' = de vaste tijden van een contract voor dagen vanaf de vorige maand (dus ook al voorbij) waarvoor nog niets is
   // ingevuld, plus doorbetaalde vakanties. Vaste uren per maand hebben geen tijden en worden apart als 'vast' getoond.
   const cal = { view: 'week', date: new Date(), mode: 'kinderen', age: true, photos: false };
   try { cal.photos = localStorage.getItem('cal.photos') === '1'; cal.age = localStorage.getItem('cal.age') !== '0'; cal.mode = localStorage.getItem('cal.mode') === 'vrij' ? 'vrij' : 'kinderen'; } catch (e) { /* geen opslag: standaardwaarden */ }
@@ -1224,10 +1224,12 @@
     registered.forEach((e) => { const x = findContract(e.contractId); if (x) add(e.date, x, 'written', e.start, e.end); });
     const holidays = paidHolidayEntries(m, registered);
     holidays.forEach((e) => { const x = findContract(e.contractId); if (x && !vacationOf(e.date)) add(e.date, x, 'planned', e.start, e.end, true); });
-    const [y, mo] = m.split('-').map(Number), today = iso(new Date());
+    // Gepland geldt ook voor dagen in de huidige en de vorige maand waarvoor nog niets is ingevuld: de uren worden meestal pas aan het eind van de
+    // maand of begin van de volgende maand geschreven. Verder terug in het verleden wordt niets meer gepland.
+    const [y, mo] = m.split('-').map(Number), now = new Date(), planFrom = iso(new Date(now.getFullYear(), now.getMonth() - 1, 1));
     for (let i = 1; i <= new Date(y, mo, 0).getDate(); i++) {
       const date = `${m}-${pad(i)}`;
-      if (date < today || beforeStart(date) || vacationOf(date)) continue;   // geen geplande uren op dagen in het verleden of tijdens vakantie van de gastouder
+      if (date < planFrom || beforeStart(date) || vacationOf(date)) continue;   // geen geplande uren ver in het verleden of tijdens vakantie van de gastouder
       contracts().forEach((x) => {
         const k = x.contract, sched = scheduleFor(k, date);
         if (!sched || !k.start || !k.end || date < k.start || date > k.end || Number(k.monthlyHours) > 0) return;
@@ -1506,7 +1508,7 @@
       body.innerHTML = kids.length ? `<div class="card"><h2>Uren per kind per maand, ${d.getFullYear()}</h2><div class="scrollx"><table>
         <tr><th>Maand</th>${kids.map((c) => `<th class="num${cal.age ? ' agehead' : ''}"${cStyle(c, today)}>${esc(firstName(c))}${cal.age && c.birthDate ? `<small class="sub" style="display:block">${ageShort(c, today)}</small>` : ''}</th>`).join('')}<th class="num">Totaal</th></tr>${rowsHtml}
         <tr><th>Totaal ${d.getFullYear()}</th>${kids.map((c) => `<th class="num">${hrs(colTot.get(c.id))}</th>`).join('')}<th class="num">${hrs(grand)}</th></tr></table></div>
-        <p class="hint" style="margin:10px 0 0">Geschreven = ingevuld; gepland = vaste tijden vanaf vandaag en doorbetaalde vakanties; vast = vaste uren per maand van het contract. Alleen geschreven uren staan zonder toelichting.${cal.age ? ' De leeftijd is van vandaag.' : ''}</p></div>`
+        <p class="hint" style="margin:10px 0 0">Geschreven = ingevuld; gepland = vaste tijden (vanaf de vorige maand) waarvoor nog niets is ingevuld, en doorbetaalde vakanties; vast = vaste uren per maand van het contract. Alleen geschreven uren staan zonder toelichting.${cal.age ? ' De leeftijd is van vandaag.' : ''}</p></div>`
         : `<div class="card"><div class="empty">Geen uren in ${d.getFullYear()}.</div></div>`;
     }
   }
