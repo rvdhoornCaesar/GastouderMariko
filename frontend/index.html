@@ -171,6 +171,7 @@
   #summary tr.statusrow label { display: inline-flex; align-items: center; margin: 0; }
   #summary tr.statusrow .sub { display: inline; margin-left: 10px; }
   #summary tr.statusrow select { width: auto; padding: 3px 8px; font-size: .85rem; margin-left: 6px; }
+  .paid, .paid strong { color: var(--ok); }
   .st { display: block; font-size: .66rem; font-weight: 700; white-space: nowrap; font-style: normal; }
   .st-ingediend { color: var(--accent); }
   .st-betaald { color: var(--ok); }
@@ -826,6 +827,17 @@
   const statusOf = (childId, month) => ((state.settings.monthStatus || {})[`${childId}|${month}`] || { status: 'geen' });
   // Kleine markering in de jaaroverzichten: alleen als er een status is.
   const statusBadge = (childId, m) => { const st = statusOf(childId, m).status; return st === 'geen' ? '' : `<span class="st st-${st}" title="${STATUS_LABEL[st]}">${st === 'betaald' ? '✓✓ betaald' : '✓ ingediend'}</span>`; };
+  // Groen als alles betaald is: een tracker per tabel houdt per maand (rij) en per kind (kolom) bij of alles waarvoor uren zijn ook de status betaald heeft.
+  const paidTracker = () => {
+    const kid = new Map(), cur = { has: false, paid: true };
+    let all = { has: false, paid: true };
+    return {
+      cell(childId, m, hasHours) { if (!hasHours) return; const ok = statusOf(childId, m).status === 'betaald'; cur.has = true; all.has = true; if (!ok) { cur.paid = false; all.paid = false; } const k = kid.get(childId) || { has: false, paid: true }; k.has = true; if (!ok) k.paid = false; kid.set(childId, k); },
+      rowDone() { const r = cur.has && cur.paid; cur.has = false; cur.paid = true; return r; },
+      kidPaid: (childId) => { const k = kid.get(childId); return !!(k && k.has && k.paid); },
+      allPaid: () => all.has && all.paid,
+    };
+  };
   const monthName0 = (m) => new Date(`${m}-01T12:00`).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
   // Filter per soort opvang in de overzichten (Overzicht, Kalender, Financieel): standaard alles samen. Alleen te kiezen als er meer dan één soort is.
   const typeFilter = { v: 'alle' };
@@ -1276,11 +1288,15 @@
       const last = p.x && !(arr[i + 1] && arr[i + 1].x && arr[i + 1].x.child.id === p.x.child.id);
       const st = last ? statusOf(p.x.child.id, m) : null;
       const statusRow = last ? `<tr class="statusrow noprint"><td colspan="4"><label>Status <select data-statuskid="${esc(p.x.child.id)}" aria-label="Status van ${esc(firstName(p.x.child))}">${Object.entries(STATUS_LABEL).map(([k, l]) => `<option value="${k}" ${k === st.status ? 'selected' : ''}>${l}</option>`).join('')}</select></label>${st.status !== 'geen' && st.at ? ` <span class="sub">gezet door ${esc(st.by || '?')} op ${nlDate(st.at.slice(0, 10))}</span>` : ''}</td></tr>` : '';
-      return `<tr${last ? ' class="hasstatus"' : ''}><td>${esc(label(p.x))}${notes.map((n) => `<div class="sub">${n}</div>`).join('')}</td><td class="num">${fmt(p.min)}</td><td class="num">${tarief}</td><td class="num">${euro(p.eur)}</td></tr>${statusRow}`;
+      const isPaid = p.x && statusOf(p.x.child.id, m).status === 'betaald';
+      return `<tr${last ? ' class="hasstatus"' : ''}><td>${esc(label(p.x))}${notes.map((n) => `<div class="sub">${n}</div>`).join('')}</td><td class="num${isPaid ? ' paid' : ''}">${fmt(p.min)}</td><td class="num">${tarief}</td><td class="num${isPaid ? ' paid' : ''}">${euro(p.eur)}</td></tr>${statusRow}`;
     });
+    // Het totaal wordt groen als voor alle kinderen met uren in deze maand de status betaald is.
+    const kidsInMonth = [...new Set(Object.values(per).filter((p) => p.x).map((p) => p.x.child.id))];
+    const allPaidMonth = kidsInMonth.length > 0 && kidsInMonth.every((id) => statusOf(id, m).status === 'betaald');
     $('summary').innerHTML = rows.length
       ? `<table><tr><th>Kind – contract</th><th class="num">Uren</th><th class="num">Tarief</th><th class="num">Bedrag</th></tr>${rows.join('')}
-         <tr><th>Totaal</th><th class="num">${fmt(totMin)}</th><th></th><th class="num">${euro(totEur)}</th></tr></table>
+         <tr><th>Totaal</th><th class="num${allPaidMonth ? ' paid' : ''}">${fmt(totMin)}</th><th></th><th class="num${allPaidMonth ? ' paid' : ''}">${euro(totEur)}</th></tr></table>
          ${missing ? `<div class="warn">Voor sommige uren is geen tarief bekend (bedrag telt als € 0). ${can('settings:write') ? 'Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.' : 'Vraag een beheerder een tarief toe te voegen.'}</div>` : ''}
          ${outsideContract ? `<div class="warn">${outsideContract} registratie${outsideContract === 1 ? '' : 's'} ${outsideContract === 1 ? 'valt' : 'vallen'} buiten de contractperiode.</div>` : ''}
          ${capDays.length ? `<div class="warn">Op ${capDays.length} dag${capDays.length === 1 ? '' : 'en'} zijn er te veel kinderen tegelijk (${capDays.map(nlDate).join(', ')}). Zie de dag in het tabblad Uren invullen.</div>` : ''}`
@@ -1625,24 +1641,24 @@
       });
       const kids = state.children.filter((c) => hasHours.has(c.id)).sort((a, b) => firstName(a).localeCompare(firstName(b)));
       const nowM = today.slice(0, 7);
-      const colTot = new Map(kids.map((c) => [c.id, 0]));
+      const colTot = new Map(kids.map((c) => [c.id, 0])), paid = paidTracker();
       const rowsHtml = months.map((m, i) => {
         const rows = new Map(sumChildren([].concat(...[...plans[i].days.values()].map(groupDay))).map((r) => [r.child.id, r]));
         let rowTot = 0;
         const cells = kids.map((c) => {
           const r0 = rows.get(c.id) || { written: 0, planned: 0 }, v = plans[i].vast.get(c.id) || 0;
           const r = { ...r0, written: Math.max(0, r0.written - (dropByChild(plans[i].drop).get(c.id) || 0)) }, tot = r.written + r.planned + v;
-          colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot;
+          colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot; paid.cell(c.id, m, tot > 0);
           const parts = [r.written && `${v ? 'extra' : 'geschreven'} ${fmt(r.written)}`, r.planned && `gepland ${fmt(r.planned)}`, v && `vast ${fmt(v)}`].filter(Boolean);
           return `<td class="num yearcell${tot && !r.written && m > nowM ? ' future' : ''}">${hrs(tot)}${parts.length > 1 || (parts.length === 1 && !r.written) ? `<small>${parts.join(' · ')}</small>` : ''}${statusBadge(c.id, m)}</td>`;
         }).join('');
         const overN = [...plans[i].days.entries()].filter(([dt, it]) => isOver(dayFree(dt, it))).length;
-        return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(nlLong(new Date(d.getFullYear(), i, 1, 12), { month: 'long' }))}${overN ? ` <span class="warnico" title="${overN} dag${overN === 1 ? '' : 'en'} met te veel kinderen">⚠️${overN}</span>` : ''}</th>${cells}<td class="num"><strong>${hrs(rowTot)}</strong></td></tr>`;
+        return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(nlLong(new Date(d.getFullYear(), i, 1, 12), { month: 'long' }))}${overN ? ` <span class="warnico" title="${overN} dag${overN === 1 ? '' : 'en'} met te veel kinderen">⚠️${overN}</span>` : ''}</th>${cells}<td class="num${paid.rowDone() ? ' paid' : ''}"><strong>${hrs(rowTot)}</strong></td></tr>`;
       }).join('');
       const grand = [...colTot.values()].reduce((s, x) => s + x, 0);
       body.innerHTML = kids.length ? `<div class="card"><h2>Uren per kind per maand, ${d.getFullYear()}</h2><div class="scrollx"><table class="sticky">
         <tr><th>Maand</th>${kids.map((c) => `<th class="num${cal.age ? ' agehead' : ''}"${cStyle(c, today)}>${esc(firstName(c))}${cal.age && c.birthDate ? `<small class="sub" style="display:block">${ageShort(c, today)}</small>` : ''}</th>`).join('')}<th class="num">Totaal</th></tr>${rowsHtml}
-        <tr><th>Totaal ${d.getFullYear()}</th>${kids.map((c) => `<th class="num">${hrs(colTot.get(c.id))}</th>`).join('')}<th class="num">${hrs(grand)}</th></tr></table></div>
+        <tr><th>Totaal ${d.getFullYear()}</th>${kids.map((c) => `<th class="num${paid.kidPaid(c.id) ? ' paid' : ''}">${hrs(colTot.get(c.id))}</th>`).join('')}<th class="num${paid.allPaid() ? ' paid' : ''}">${hrs(grand)}</th></tr></table></div>
         <p class="hint" style="margin:10px 0 0">Geschreven = ingevuld; gepland = vaste tijden vanaf vandaag en voorbije dagen na de laatst geschreven uren van het kind, en doorbetaalde vakanties; vast = vaste uren per maand van het contract. Alleen geschreven uren staan zonder toelichting.${cal.age ? ' De leeftijd is van vandaag.' : ''}</p></div>`
         : `<div class="card"><div class="empty">Geen uren in ${d.getFullYear()}.</div></div>`;
     }
@@ -1847,21 +1863,21 @@
     const kids = [...data.kids.values()].filter((c) => cells.some((m) => cellSum(m.get(c.id)) > 0)).sort((a, b) => firstName(a).localeCompare(firstName(b), 'nl'));
 
     // Tabel
-    const colTot = new Map(kids.map((c) => [c.id, 0]));
+    const colTot = new Map(kids.map((c) => [c.id, 0])), paid = paidTracker();
     let grand = 0;
     const rows = months.map((m, i) => {
       let rowTot = 0;
       const tds = kids.map((c) => {
         const cell = cells[i].get(c.id), tot = cellSum(cell);
-        colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot;
+        colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot; paid.cell(c.id, m, tot > 0.005);
         const parts = cell ? [cell.w > 0.005 && `${cell.v > 0.005 ? 'extra' : 'geschreven'} ${euro0(cell.w)}`, cell.p > 0.005 && `gepland ${euro0(cell.p)}`, cell.v > 0.005 && `vast ${euro0(cell.v)}`].filter(Boolean) : [];
         return `<td class="num yearcell${tot > 0 && !(cell && cell.w > 0) && m > nowM ? ' future' : ''}">${tot > 0.005 ? euro(tot) : '–'}${parts.length > 1 || (parts.length === 1 && !(cell && (cell.w > 0 || cell.v > 0.005))) ? `<small>${parts.join(' · ')}</small>` : ''}${statusBadge(c.id, m)}</td>`;
       }).join('');
       grand += rowTot;
-      return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(MONTHS_LONG[i])}</th>${tds}<td class="num"><strong>${rowTot > 0.005 ? euro(rowTot) : '–'}</strong></td></tr>`;
+      return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(MONTHS_LONG[i])}</th>${tds}<td class="num${paid.rowDone() ? ' paid' : ''}"><strong>${rowTot > 0.005 ? euro(rowTot) : '–'}</strong></td></tr>`;
     }).join('');
     $('finTable').innerHTML = kids.length ? `<table class="fin-table sticky"><tr><th>Maand</th>${kids.map((c) => `<th class="num">${esc(firstName(c))}</th>`).join('')}<th class="num">Totaal</th></tr>${rows}
-      <tr><th>Totaal ${year}</th>${kids.map((c) => `<th class="num">${euro(colTot.get(c.id))}</th>`).join('')}<th class="num">${euro(grand)}</th></tr></table>` : `<div class="empty">Geen uren in ${year}.</div>`;
+      <tr><th>Totaal ${year}</th>${kids.map((c) => `<th class="num${paid.kidPaid(c.id) ? ' paid' : ''}">${euro(colTot.get(c.id))}</th>`).join('')}<th class="num${paid.allPaid() ? ' paid' : ''}">${euro(grand)}</th></tr></table>` : `<div class="empty">Geen uren in ${year}.</div>`;
     $('finWarn').textContent = missing ? `Voor sommige uren is geen tarief bekend (het bedrag telt als € 0). ${can('settings:write') ? 'Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.' : 'Vraag een beheerder een tarief toe te voegen.'}` : '';
 
     // Grafiek: kolommen voor het gekozen jaar, of een lijn per jaar om jaren te vergelijken.
