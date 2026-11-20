@@ -146,6 +146,12 @@
   th.agehead { border-bottom: 3px solid var(--c); }
   .warnico { cursor: help; font-size: .85em; }
   .scrollx { overflow-x: auto; }
+  /* Tabel met veel kinderen: alleen de kinderen scrollen; de eerste kolom (maand) en de laatste (totaal) blijven staan. */
+  table.sticky { border-collapse: separate; border-spacing: 0; }
+  table.sticky th:first-child, table.sticky td:first-child, table.sticky th:last-child, table.sticky td:last-child { position: sticky; z-index: 2; background: var(--card); white-space: nowrap; }
+  table.sticky th:first-child, table.sticky td:first-child { left: 0; box-shadow: 1px 0 0 var(--line); }
+  table.sticky th:last-child, table.sticky td:last-child { right: 0; box-shadow: -1px 0 0 var(--line); }
+  table.sticky tr.cur-row th:first-child, table.sticky tr.cur-row td:first-child, table.sticky tr.cur-row th:last-child, table.sticky tr.cur-row td:last-child { background: color-mix(in srgb, var(--accent) 12%, var(--card)); }
   .month { display: grid; grid-template-columns: repeat(7, minmax(84px, 1fr)) 64px; min-width: 700px; gap: 4px; }
   .month .hd { font-size: .75rem; color: var(--muted); font-weight: 600; text-align: center; }
   .month .day { border: 1px solid var(--line); border-radius: 8px; padding: 4px; min-height: 76px; background: var(--card); cursor: pointer; }
@@ -1603,7 +1609,7 @@
         return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(nlLong(new Date(d.getFullYear(), i, 1, 12), { month: 'long' }))}${overN ? ` <span class="warnico" title="${overN} dag${overN === 1 ? '' : 'en'} met te veel kinderen">⚠️${overN}</span>` : ''}</th>${cells}<td class="num"><strong>${hrs(rowTot)}</strong></td></tr>`;
       }).join('');
       const grand = [...colTot.values()].reduce((s, x) => s + x, 0);
-      body.innerHTML = kids.length ? `<div class="card"><h2>Uren per kind per maand, ${d.getFullYear()}</h2><div class="scrollx"><table>
+      body.innerHTML = kids.length ? `<div class="card"><h2>Uren per kind per maand, ${d.getFullYear()}</h2><div class="scrollx"><table class="sticky">
         <tr><th>Maand</th>${kids.map((c) => `<th class="num${cal.age ? ' agehead' : ''}"${cStyle(c, today)}>${esc(firstName(c))}${cal.age && c.birthDate ? `<small class="sub" style="display:block">${ageShort(c, today)}</small>` : ''}</th>`).join('')}<th class="num">Totaal</th></tr>${rowsHtml}
         <tr><th>Totaal ${d.getFullYear()}</th>${kids.map((c) => `<th class="num">${hrs(colTot.get(c.id))}</th>`).join('')}<th class="num">${hrs(grand)}</th></tr></table></div>
         <p class="hint" style="margin:10px 0 0">Geschreven = ingevuld; gepland = vaste tijden vanaf vandaag en voorbije dagen na de laatst geschreven uren van het kind, en doorbetaalde vakanties; vast = vaste uren per maand van het contract. Alleen geschreven uren staan zonder toelichting.${cal.age ? ' De leeftijd is van vandaag.' : ''}</p></div>`
@@ -1823,7 +1829,7 @@
       grand += rowTot;
       return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(MONTHS_LONG[i])}</th>${tds}<td class="num"><strong>${rowTot > 0.005 ? euro(rowTot) : '–'}</strong></td></tr>`;
     }).join('');
-    $('finTable').innerHTML = kids.length ? `<table class="fin-table"><tr><th>Maand</th>${kids.map((c) => `<th class="num">${esc(firstName(c))}</th>`).join('')}<th class="num">Totaal</th></tr>${rows}
+    $('finTable').innerHTML = kids.length ? `<table class="fin-table sticky"><tr><th>Maand</th>${kids.map((c) => `<th class="num">${esc(firstName(c))}</th>`).join('')}<th class="num">Totaal</th></tr>${rows}
       <tr><th>Totaal ${year}</th>${kids.map((c) => `<th class="num">${euro(colTot.get(c.id))}</th>`).join('')}<th class="num">${euro(grand)}</th></tr></table>` : `<div class="empty">Geen uren in ${year}.</div>`;
     $('finWarn').textContent = missing ? `Voor sommige uren is geen tarief bekend (het bedrag telt als € 0). ${can('settings:write') ? 'Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.' : 'Vraag een beheerder een tarief toe te voegen.'}` : '';
 
