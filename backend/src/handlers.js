@@ -437,7 +437,7 @@ async function logout({ repo, headers }) {
 }
 
 const THEMES = ['light', 'dark', 'auto'];
-// Voorkeuren van de ingelogde persoon (nu het thema: licht, donker of automatisch naar het besturingssysteem; standaard licht).
+// Voorkeuren van de ingelogde persoon (nu het thema: licht, donker of automatisch naar het besturingssysteem; standaard automatisch).
 async function putPrefs({ user, repo, body }) {
   const theme = body && body.theme;
   if (!THEMES.includes(theme)) throw new HttpError(400, 'Kies een thema: licht, donker of automatisch.');
@@ -447,7 +447,7 @@ async function putPrefs({ user, repo, body }) {
 
 async function me({ user, repo }) {
   const prefs = repo ? await repo.getUserPrefs(user.email) : {};
-  return { status: 200, jsonBody: { prefs: { theme: THEMES.includes(prefs.theme) ? prefs.theme : 'light' }, kind: user.kind, email: user.email, name: user.name, role: user.role, platformAdmin: !!user.platformAdmin,
+  return { status: 200, jsonBody: { prefs: { theme: THEMES.includes(prefs.theme) ? prefs.theme : 'auto' }, kind: user.kind, email: user.email, name: user.name, role: user.role, platformAdmin: !!user.platformAdmin,
     organisation: user.organisation, organisations: user.organisations || [],
     permissions: perm.permissionsFor(user), assignableRoles: perm.assignableRoles(user.role), mustChange: user.mustChange, totp: !!user.totp } };
 }

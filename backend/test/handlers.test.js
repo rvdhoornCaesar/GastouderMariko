@@ -962,16 +962,16 @@ test('status van de uren per kind per maand: geen status, ingediend, betaald', a
   assert.deepEqual(await repo.forInstance('andereorg').listMonthStatuses(), []);
 });
 
-test('voorkeuren per account: het thema, standaard licht', async () => {
+test('voorkeuren per account: het thema, standaard automatisch', async () => {
   const u = (email) => ({ email, kind: 'local', role: 'gebruiker', instanceId: 'main', name: 'x', mustChange: false });
   const me = async (email) => (await h.me({ user: u(email), repo })).jsonBody.prefs;
-  assert.deepEqual(await me('thema@voorbeeld.nl'), { theme: 'light' });   // standaard
+  assert.deepEqual(await me('thema@voorbeeld.nl'), { theme: 'auto' });   // standaard
   await assert.rejects(h.putPrefs({ user: u('thema@voorbeeld.nl'), repo, body: { theme: 'paars' } }), (e) => e.status === 400);
   await assert.rejects(h.putPrefs({ user: u('thema@voorbeeld.nl'), repo, body: {} }), (e) => e.status === 400);
   assert.deepEqual((await h.putPrefs({ user: u('thema@voorbeeld.nl'), repo, body: { theme: 'dark' } })).jsonBody.prefs, { theme: 'dark' });
   assert.deepEqual(await me('thema@voorbeeld.nl'), { theme: 'dark' });
   assert.deepEqual(await me('Thema@Voorbeeld.nl'), { theme: 'dark' });   // hoofdletters maken geen verschil
-  assert.deepEqual(await me('ander@voorbeeld.nl'), { theme: 'light' });  // per account
-  await h.putPrefs({ user: u('thema@voorbeeld.nl'), repo, body: { theme: 'auto' } });
-  assert.deepEqual(await me('thema@voorbeeld.nl'), { theme: 'auto' });
+  assert.deepEqual(await me('ander@voorbeeld.nl'), { theme: 'auto' });  // per account
+  await h.putPrefs({ user: u('thema@voorbeeld.nl'), repo, body: { theme: 'light' } });
+  assert.deepEqual(await me('thema@voorbeeld.nl'), { theme: 'light' });
 });
