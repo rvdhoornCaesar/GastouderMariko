@@ -1494,11 +1494,12 @@
     $('calTitle').textContent = view === 'week' ? `Week ${isoWeek(dates[0])} · ${nlLong(dates[0], { day: 'numeric', month: 'short' })} t/m ${nlLong(dates[6], { day: 'numeric', month: 'short', year: 'numeric' })}`
       : view === 'maand' ? nlLong(d, { month: 'long', year: 'numeric' }) : String(d.getFullYear());
     // De uitleg van de chips en tags hoort bij de maandkalender; bij week en jaar staat alleen (als de leeftijd aan staat) de uitleg van de kleuren.
-    $('calLegend').innerHTML = vrij
+    const ageLegend = cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '';
+    $('calLegend').innerHTML = (vrij
       ? `<span><span class="badge av-ok">2+ vrij</span></span><span><span class="badge av-low">1 vrij</span></span><span><span class="badge av-full">vol</span></span><span><span class="badge av-closed">gesloten / vakantie / ziek</span></span>
          <span style="flex-basis:100%">Vrij = plekken over op het drukste moment van de dag (maximaal ${CAP.total} kinderen tegelijk, eigen kinderen onder 8 jaar meegeteld), op basis van geschreven en geplande uren. Vaste uren per maand hebben geen tijden en tellen niet mee.</span>`
-      : (view === 'maand' ? `<span><span class="chip written">Noor 9:00</span> geschreven (ingevuld)</span><span><span class="chip planned">Noor 9:00</span> gepland (vaste tijden)</span><span><span class="tag">gesloten</span> geen opvang volgens de openingstijden · <span class="tag">vakantie</span> vakantie van de gastouder · <span class="tag sick">ziek</span> gastouder ziek gemeld</span>` : '')
-        + (cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '');
+      : (view === 'maand' ? `<span><span class="chip written">Noor 9:00</span> geschreven (ingevuld)</span><span><span class="chip planned">Noor 9:00</span> gepland (vaste tijden)</span><span><span class="tag">gesloten</span> geen opvang volgens de openingstijden · <span class="tag">vakantie</span> vakantie van de gastouder · <span class="tag sick">ziek</span> gastouder ziek gemeld</span>` : ''))
+        + ageLegend;
     await Promise.all(months.map((m) => guard(() => ensureMonth(m))));
     if (seq !== calSeq) return;
     const plans = months.map((m) => monthPlan(m, { all: cal.mode === 'vrij' })), dayMap = new Map(), vast = new Map(), drops = new Map();
