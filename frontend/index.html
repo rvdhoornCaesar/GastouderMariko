@@ -166,6 +166,11 @@
   .month .day .n { font-size: .75rem; color: var(--muted); }
   .month .wk { font-size: .8rem; font-weight: 700; text-align: right; padding: 4px 2px; font-variant-numeric: tabular-nums; }
   .month .wk small { display: block; font-weight: 400; color: var(--muted); font-size: .68rem; }
+  #summary tr.hasstatus td { border-bottom: 0; }
+  #summary tr.statusrow td { padding: 0 6px 9px; font-size: .85rem; color: var(--muted); }
+  #summary tr.statusrow label { display: inline-flex; align-items: center; margin: 0; }
+  #summary tr.statusrow .sub { display: inline; margin-left: 10px; }
+  #summary tr.statusrow select { width: auto; padding: 3px 8px; font-size: .85rem; margin-left: 6px; }
   .st { display: block; font-size: .66rem; font-weight: 700; white-space: nowrap; font-style: normal; }
   .st-ingediend { color: var(--accent); }
   .st-betaald { color: var(--ok); }
@@ -336,7 +341,6 @@
     <div class="card">
       <h2 id="monthTitle"></h2>
       <div id="summary"></div>
-      <div id="monthStatus" class="noprint"></div>
     </div>
     <div class="card noprint" id="takeCard">
       <h2>Geplande uren overnemen</h2>
@@ -1262,13 +1266,17 @@
     const outsideContract = list.filter((e) => { const x = findContract(e.contractId); return x && contractWarning(x.contract, e.date); }).length;
     const capDays = [...new Set(list.map((e) => e.date))].filter((d) => capacityIssues(d).length);
     let totMin = 0, totEur = 0;
-    const rows = Object.values(per).sort((a, b) => (a.x ? a.x.child.name : '').localeCompare(b.x ? b.x.child.name : '', 'nl') || ((a.x && a.x.contract.start) || '').localeCompare((b.x && b.x.contract.start) || '')).map((p) => {
+    const rows = Object.values(per).sort((a, b) => (a.x ? a.x.child.name : '').localeCompare(b.x ? b.x.child.name : '', 'nl') || ((a.x && a.x.contract.start) || '').localeCompare((b.x && b.x.contract.start) || '')).map((p, i, arr) => {
       totMin += p.min; totEur += p.eur;
       const tarief = p.rates.size === 1 ? euro([...p.rates][0]) : p.rates.size > 1 ? 'wisselend' : '–';
       const notes = [p.fixedMin ? `waarvan ${fmt(p.fixedMin)} vast per maand` : '',
         p.holidayMin ? `waarvan ${fmt(p.holidayMin)} doorbetaalde vakantie` : '',
         factor !== 1 && p.outsideMin ? `waarvan ${fmt(p.outsideMin)} buiten openingstijden (× ${factor})` : ''].filter(Boolean);
-      return `<tr><td>${esc(label(p.x))}${notes.map((n) => `<div class="sub">${n}</div>`).join('')}</td><td class="num">${fmt(p.min)}</td><td class="num">${tarief}</td><td class="num">${euro(p.eur)}</td></tr>`;
+      // Na het laatste contract van een kind komt een tweede regel met de status van de uren van dat kind in deze maand.
+      const last = p.x && !(arr[i + 1] && arr[i + 1].x && arr[i + 1].x.child.id === p.x.child.id);
+      const st = last ? statusOf(p.x.child.id, m) : null;
+      const statusRow = last ? `<tr class="statusrow noprint"><td colspan="4"><label>Status <select data-statuskid="${esc(p.x.child.id)}" aria-label="Status van ${esc(firstName(p.x.child))}">${Object.entries(STATUS_LABEL).map(([k, l]) => `<option value="${k}" ${k === st.status ? 'selected' : ''}>${l}</option>`).join('')}</select></label>${st.status !== 'geen' && st.at ? ` <span class="sub">gezet door ${esc(st.by || '?')} op ${nlDate(st.at.slice(0, 10))}</span>` : ''}</td></tr>` : '';
+      return `<tr${last ? ' class="hasstatus"' : ''}><td>${esc(label(p.x))}${notes.map((n) => `<div class="sub">${n}</div>`).join('')}</td><td class="num">${fmt(p.min)}</td><td class="num">${tarief}</td><td class="num">${euro(p.eur)}</td></tr>${statusRow}`;
     });
     $('summary').innerHTML = rows.length
       ? `<table><tr><th>Kind – contract</th><th class="num">Uren</th><th class="num">Tarief</th><th class="num">Bedrag</th></tr>${rows.join('')}
@@ -1277,7 +1285,6 @@
          ${outsideContract ? `<div class="warn">${outsideContract} registratie${outsideContract === 1 ? '' : 's'} ${outsideContract === 1 ? 'valt' : 'vallen'} buiten de contractperiode.</div>` : ''}
          ${capDays.length ? `<div class="warn">Op ${capDays.length} dag${capDays.length === 1 ? '' : 'en'} zijn er te veel kinderen tegelijk (${capDays.map(nlDate).join(', ')}). Zie de dag in het tabblad Uren invullen.</div>` : ''}`
       : '<div class="empty">Geen uren in deze maand.</div>';
-    renderMonthStatus(m, [...new Map(Object.values(per).filter((p) => p.x).map((p) => [p.x.child.id, p.x.child])).values()].sort((a, b) => firstName(a).localeCompare(firstName(b), 'nl')));
     const sickInMonth = (state.settings.sickDays || []).filter((d) => d.startsWith(m) && !beforeStart(d));
     $('summary').innerHTML += sickInMonth.length ? `<p class="hint" style="margin:10px 0 0"><span class="tag sick">ziek</span> Gastouder ziek gemeld op ${sickInMonth.length} dag${sickInMonth.length === 1 ? '' : 'en'}: ${sickInMonth.map(nlDate).join(', ')}.</p>` : '';
     $('monthEntries').innerHTML = (list.length ? list.map((e) => entryRow(e, true)).join('') : '<div class="empty">Geen registraties.</div>')
@@ -1285,13 +1292,7 @@
     renderTake();
   }
 
-  // Status per kind voor de gekozen maand (Overzicht): een keuzelijst per kind met uren, met wie het wanneer heeft gezet.
-  function renderMonthStatus(m, kids) {
-    $('monthStatus').innerHTML = kids.length ? `<h3 class="subhead">Status per kind</h3>${kids.map((c) => { const st = statusOf(c.id, m);
-      return `<div class="entry" style="flex-wrap:wrap"><div style="flex:1 1 160px"><div class="who">${esc(firstName(c))}</div>${st.status !== 'geen' && st.at ? `<div class="meta">gezet door ${esc(st.by || '?')} op ${nlDate(st.at.slice(0, 10))}</div>` : ''}</div>
-        <select data-statuskid="${esc(c.id)}" aria-label="Status van ${esc(firstName(c))}" style="width:auto">${Object.entries(STATUS_LABEL).map(([k, l]) => `<option value="${k}" ${k === st.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`; }).join('')}` : '';
-  }
-  $('monthStatus').addEventListener('change', async (ev) => {
+  $('summary').addEventListener('change', async (ev) => {   // status van een kind in de gekozen maand
     const id = ev.target.dataset.statuskid;
     if (!id) return;
     const m = $('month').value;
