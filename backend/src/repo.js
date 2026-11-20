@@ -200,6 +200,18 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     setRates: (list) => setSetting('rates', list),
     getStartDate: () => getSetting('startDate', null),
     setStartDate: (d) => setSetting('startDate', d),
+    // Status van de uren per kind per maand (geen status = geen rij): 'ingediend' of 'betaald', met wie en wanneer. Eén rij per kind en maand in de
+    // instellingentabel (RowKey ms:<kind>:<maand>), zodat het met de jaren niet in één rij hoeft te passen.
+    async listMonthStatuses() {
+      const t = await table('settings');
+      const rows = own(await collect(t.listEntities({ queryOptions: { filter: `PartitionKey eq '${scope.id}' and RowKey ge 'ms:' and RowKey lt 'ms;'` } })));
+      return rows.map((r) => { const [, childId, month] = r.rowKey.split(':'); return { childId, month, ...JSON.parse(r.value) }; });
+    },
+    async setMonthStatus(childId, month, status, by, at) {
+      const t = await table('settings'), rowKey = `ms:${childId}:${month}`;
+      if (status === 'geen') { try { await t.deleteEntity(scope.id, rowKey); } catch (e) { if (e.statusCode !== 404) throw e; } return; }
+      await t.upsertEntity({ partitionKey: scope.id, rowKey, value: JSON.stringify({ status, by, at }) }, 'Replace');
+    },
     getAgencyIds: () => getSetting('agencyIds'),
     setAgencyIds: (list) => setSetting('agencyIds', list),
     // Aansluitingen bij gastouderbureaus met periodes. Bestaande gegevens (alleen een lijst bureaus) tellen als aansluiting zonder begin en einde.

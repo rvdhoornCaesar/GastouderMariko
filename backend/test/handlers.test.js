@@ -931,3 +931,33 @@ test('aansluiting: één bureau mag niet overlappen met zichzelf, aansluitende p
   // verschillende bureaus mogen elkaar wel overlappen (dat is de regel van maximaal twee tegelijk)
   assert.equal((await put([{ agencyId: a, from: '2026-01-01', to: null }, { agencyId: b, from: '2026-01-01', to: null }])).status, 200);
 });
+
+test('status van de uren per kind per maand: geen status, ingediend, betaald', async () => {
+  const kid = (await call(h.createChild, { body: { firstName: 'Statuskind', contracts: [K({})] } })).jsonBody;
+  const set = (extra, now) => call(h.putMonthStatus, { body: { childId: kid.id, month: '2026-03', status: 'ingediend', ...extra }, now });
+  const cur = async () => (await call(h.getSettings)).jsonBody.monthStatus;
+  assert.deepEqual(await cur(), {});   // standaard: geen status
+  let r = (await set({}, new Date('2026-04-02T10:00:00Z'))).jsonBody.monthStatus;
+  assert.deepEqual(r[`${kid.id}|2026-03`], { status: 'ingediend', by: 'mariko@voorbeeld.nl', at: '2026-04-02T10:00:00.000Z' });
+  r = (await set({ status: 'betaald' }, new Date('2026-04-20T10:00:00Z'))).jsonBody.monthStatus;
+  assert.equal(r[`${kid.id}|2026-03`].status, 'betaald');
+  assert.equal(Object.keys(await cur()).filter((k) => k.startsWith(kid.id)).length, 1);   // één status per kind en maand
+  // een andere maand is los van de eerste
+  await set({ month: '2026-04' });
+  assert.equal(Object.keys(await cur()).filter((k) => k.startsWith(kid.id)).length, 2);
+  // terug naar geen status haalt de regel weg
+  await set({ status: 'geen' });
+  assert.equal((await cur())[`${kid.id}|2026-03`], undefined);
+  assert.ok((await cur())[`${kid.id}|2026-04`]);
+  // ongeldige invoer
+  await assert.rejects(set({ status: 'goedgekeurd' }), (e) => e.status === 400);
+  await assert.rejects(set({ month: '2026-13' }), (e) => e.status === 400);
+  await assert.rejects(set({ childId: 'x y' }), (e) => e.status === 400);
+  await assert.rejects(set({ childId: 'bestaatniet1' }), (e) => e.status === 404);
+  // een gebruiker (alleen uren invullen) mag het ook; zonder dat recht niet
+  const gebruiker = { email: 'g@voorbeeld.nl', kind: 'local', role: 'gebruiker', instanceId: 'main' };
+  assert.equal((await h.putMonthStatus({ user: gebruiker, repo, env, params: {}, body: { childId: kid.id, month: '2026-05', status: 'ingediend' } })).status, 200);
+  await assert.rejects(h.putMonthStatus({ user: { ...gebruiker, role: 'onbekend' }, repo, env, params: {}, body: { childId: kid.id, month: '2026-05', status: 'betaald' } }), (e) => e.status === 403);
+  // een andere administratie ziet de status niet
+  assert.deepEqual(await repo.forInstance('andereorg').listMonthStatuses(), []);
+});

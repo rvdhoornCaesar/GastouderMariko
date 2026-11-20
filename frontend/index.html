@@ -333,6 +333,7 @@
     <div class="card">
       <h2 id="monthTitle"></h2>
       <div id="summary"></div>
+      <div id="monthStatus" class="noprint"></div>
     </div>
     <div class="card noprint" id="takeCard">
       <h2>Geplande uren overnemen</h2>
@@ -813,6 +814,10 @@
   }
   const rateFor = (x, date) => (!x ? null : rateInfo(x.contract, date).rate);
   const enabledTypes = () => state.settings.enabledTypes || ['gastouder'];
+  // Status van de uren van een kind in een maand: geen status, uren ingediend of betaald (ter voorbereiding op een koppeling met het bureau).
+  const STATUS_LABEL = { geen: 'Geen status', ingediend: 'Uren ingediend', betaald: 'Betaald' };
+  const statusOf = (childId, month) => ((state.settings.monthStatus || {})[`${childId}|${month}`] || { status: 'geen' });
+  const monthName0 = (m) => new Date(`${m}-01T12:00`).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
   // Filter per soort opvang in de overzichten (Overzicht, Kalender, Financieel): standaard alles samen. Alleen te kiezen als er meer dan één soort is.
   const typeFilter = { v: 'alle' };
   try { const t = localStorage.getItem('typeFilter'); if (t === 'gastouder' || t === 'bso') typeFilter.v = t; } catch (e) { /* standaard: alles */ }
@@ -1042,6 +1047,8 @@
       // Dit is een voorbeeld van wat er gebeurt als je dit kind toevoegt; er is nog niets opgeslagen.
       html = issues.length ? `<div class="hint"><strong>Als je ${esc(x.child.name)} toevoegt (${hm(a)}–${hm(b)}):</strong></div>${issues.map(capacityLine).join('')}` : '';
     }
+    const st = x ? statusOf(x.child.id, date.slice(0, 7)) : null;
+    if (st && st.status !== 'geen') html = `<div class="hint"><strong>Let op:</strong> de uren van ${esc(x.child.name)} over ${monthName0(date.slice(0, 7))} staan op <em>${STATUS_LABEL[st.status].toLowerCase()}</em>. Ze zijn al doorgegeven; wijzigingen komen niet vanzelf bij het bureau.</div>` + html;
     $('entryCap').innerHTML = html;
   }
   $('start').addEventListener('input', updateEntryCap);
@@ -1079,7 +1086,8 @@
     if (prefill === true) contractTouched = false;
     const pick = contractTouched ? null : defaultContract(day);
     if (pick) sel.value = pick; else if (prev) sel.value = prev;
-    $('dayCap').innerHTML = capacityIssues(day).map(capacityLine).join('');
+    const locked = [...new Map(list.map((e) => { const x = findContract(e.contractId); return x ? [x.child.id, x.child] : null; }).filter(Boolean)).values()].filter((c) => statusOf(c.id, day.slice(0, 7)).status !== 'geen');
+    $('dayCap').innerHTML = capacityIssues(day).map(capacityLine).join('') + locked.map((c) => `<div>Let op: de uren van ${esc(firstName(c))} over ${monthName0(day.slice(0, 7))} staan op ${STATUS_LABEL[statusOf(c.id, day.slice(0, 7)).status].toLowerCase()}.</div>`).join('');
     updateEntryHints(prefill === true || (!!pick && pick !== prev));
   }
 
@@ -1264,12 +1272,27 @@
          ${outsideContract ? `<div class="warn">${outsideContract} registratie${outsideContract === 1 ? '' : 's'} ${outsideContract === 1 ? 'valt' : 'vallen'} buiten de contractperiode.</div>` : ''}
          ${capDays.length ? `<div class="warn">Op ${capDays.length} dag${capDays.length === 1 ? '' : 'en'} zijn er te veel kinderen tegelijk (${capDays.map(nlDate).join(', ')}). Zie de dag in het tabblad Uren invullen.</div>` : ''}`
       : '<div class="empty">Geen uren in deze maand.</div>';
+    renderMonthStatus(m, [...new Map(Object.values(per).filter((p) => p.x).map((p) => [p.x.child.id, p.x.child])).values()].sort((a, b) => firstName(a).localeCompare(firstName(b), 'nl')));
     const sickInMonth = (state.settings.sickDays || []).filter((d) => d.startsWith(m) && !beforeStart(d));
     $('summary').innerHTML += sickInMonth.length ? `<p class="hint" style="margin:10px 0 0"><span class="tag sick">ziek</span> Gastouder ziek gemeld op ${sickInMonth.length} dag${sickInMonth.length === 1 ? '' : 'en'}: ${sickInMonth.map(nlDate).join(', ')}.</p>` : '';
     $('monthEntries').innerHTML = (list.length ? list.map((e) => entryRow(e, true)).join('') : '<div class="empty">Geen registraties.</div>')
       + (holidayEntries.length ? `<h3 class="subhead">Doorbetaalde vakantiedagen</h3>${holidayEntries.map(holidayRow).join('')}` : '');
     renderTake();
   }
+
+  // Status per kind voor de gekozen maand (Overzicht): een keuzelijst per kind met uren, met wie het wanneer heeft gezet.
+  function renderMonthStatus(m, kids) {
+    $('monthStatus').innerHTML = kids.length ? `<h3 class="subhead">Status per kind</h3>${kids.map((c) => { const st = statusOf(c.id, m);
+      return `<div class="entry" style="flex-wrap:wrap"><div style="flex:1 1 160px"><div class="who">${esc(firstName(c))}</div>${st.status !== 'geen' && st.at ? `<div class="meta">gezet door ${esc(st.by || '?')} op ${nlDate(st.at.slice(0, 10))}</div>` : ''}</div>
+        <select data-statuskid="${esc(c.id)}" aria-label="Status van ${esc(firstName(c))}" style="width:auto">${Object.entries(STATUS_LABEL).map(([k, l]) => `<option value="${k}" ${k === st.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`; }).join('')}` : '';
+  }
+  $('monthStatus').addEventListener('change', async (ev) => {
+    const id = ev.target.dataset.statuskid;
+    if (!id) return;
+    const m = $('month').value;
+    const r = await guard(() => api('PUT', 'month-status', { childId: id, month: m, status: ev.target.value }));
+    if (r) { state.settings.monthStatus = r.monthStatus; render(); } else renderMonth();
+  });
 
   $('print').onclick = () => window.print();
   $('csv').onclick = () => {
