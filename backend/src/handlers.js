@@ -3,7 +3,7 @@ const { fixedUsers, sessionToken, sessionCookie, expiredCookie, SESSION_DAYS } =
 const P = require('./passwords');
 const T = require('./totp');
 const perm = require('./permissions');
-const { LIMIT } = require('./agency-links');
+const { LIMIT, selfOverlap } = require('./agency-links');
 const { careInfo, warningsOf, typesOf } = require('./care-types');
 const v = require('./validation');
 
@@ -206,6 +206,11 @@ async function putAgencyLinks({ user, repo, body }) {
   perm.require(user, 'settings:write');
   const links = body && body.links !== undefined ? v.parseAgencyLinks(body.links) : v.parseAgencyIds(body && body.agencyIds).map((agencyId) => ({ agencyId, from: null, to: null }));
   const known = new Map((await repo.listAgencies()).map((a) => [a.id, a]));
+  const overlap = selfOverlap(links);
+  if (overlap) {
+    const nl = (d) => (d ? d.split('-').reverse().join('-') : null), span = (p) => `${p.from ? `vanaf ${nl(p.from)}` : 'sinds het begin'} ${p.to ? `t/m ${nl(p.to)}` : '(doorlopend)'}`;
+    throw new HttpError(400, `${(known.get(overlap.agencyId) || {}).name || 'Dit bureau'} heeft overlappende periodes (${span(overlap.a)} en ${span(overlap.b)}). Eén bureau kan niet twee keer tegelijk worden aangesloten; pas de datums aan of verwijder een aansluiting.`);
+  }
   const current = new Set((await repo.getAgencyLinks()).map((l) => l.agencyId));
   if (links.some((l) => !known.has(l.agencyId) || (!known.get(l.agencyId).active && !current.has(l.agencyId)))) throw new HttpError(400, 'Dat gastouderbureau bestaat niet of is niet meer actief.');
   await repo.setAgencyLinks(links);
