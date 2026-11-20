@@ -172,9 +172,11 @@
   #summary tr.statusrow .sub { display: inline; margin-left: 10px; }
   #summary tr.statusrow select { width: auto; padding: 3px 8px; font-size: .85rem; margin-left: 6px; }
   .paid, .paid strong { color: var(--ok); }
-  .st { display: block; font-size: .66rem; font-weight: 700; white-space: nowrap; font-style: normal; }
-  .st-ingediend { color: var(--accent); }
-  .st-betaald { color: var(--ok); }
+  table td.yearcell.st-bg-ingediend { background: color-mix(in srgb, var(--accent) 22%, var(--card)); }
+  table td.yearcell.st-bg-betaald { background: color-mix(in srgb, var(--ok) 26%, var(--card)); }
+  .stsw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; border: 1px solid var(--line); }
+  .stsw.st-bg-ingediend { background: color-mix(in srgb, var(--accent) 22%, var(--card)); }
+  .stsw.st-bg-betaald { background: color-mix(in srgb, var(--ok) 26%, var(--card)); }
   .yearcell small { display: block; color: var(--muted); font-size: .68rem; font-weight: 400; white-space: nowrap; }
   .yearcell.future { color: var(--muted); font-style: italic; }
   tr.cur-row td, tr.cur-row th { background: color-mix(in srgb, var(--accent) 12%, transparent); }
@@ -398,6 +400,7 @@
     <div class="card">
       <h2 id="finTableTitle"></h2>
       <div class="scrollx" id="finTable"></div>
+      <div class="legend noprint" id="finStatusLegend" style="margin-top:8px"></div>
       <div class="warn" id="finWarn"></div>
       <p class="hint" style="margin: 10px 0 0">Bedrag = uren × uurprijs, met de toeslag buiten de openingstijden. <em>Geschreven</em> = ingevulde uren, <em>gepland</em> = vaste tijden voor dagen vanaf vandaag, en voorbije dagen na de laatst geschreven uren van het kind, waarvoor nog niets is ingevuld, en doorbetaalde vakanties, <em>vast</em> = vaste uren per maand. Kinderen zonder uren in dit jaar staan er niet bij.</p>
     </div>
@@ -825,8 +828,11 @@
   // Status van de uren van een kind in een maand: geen status, uren ingediend of betaald (ter voorbereiding op een koppeling met het bureau).
   const STATUS_LABEL = { geen: 'Geen status', ingediend: 'Uren ingediend', betaald: 'Betaald' };
   const statusOf = (childId, month) => ((state.settings.monthStatus || {})[`${childId}|${month}`] || { status: 'geen' });
-  // Kleine markering in de jaaroverzichten: alleen als er een status is.
-  const statusBadge = (childId, m) => { const st = statusOf(childId, m).status; return st === 'geen' ? '' : `<span class="st st-${st}" title="${STATUS_LABEL[st]}">${st === 'betaald' ? '✓✓ betaald' : '✓ ingediend'}</span>`; };
+  // Achtergrondkleur van een cel in de jaaroverzichten (Kalender, Jaar en Financieel) naar de status van het kind in die maand, met een legenda.
+  const statusCls = (childId, m) => { const st = statusOf(childId, m).status; return st === 'geen' ? '' : ` st-bg-${st}`; };
+  const statusTitle = (childId, m) => { const st = statusOf(childId, m).status; return st === 'geen' ? '' : ` title="${STATUS_LABEL[st]}"`; };
+  const yearHasStatus = (year) => Object.entries(state.settings.monthStatus || {}).some(([k, v]) => k.split('|')[1].startsWith(String(year)) && v.status !== 'geen');
+  const statusLegend = (year) => (yearHasStatus(year) ? `<span><span class="stsw st-bg-ingediend"></span>uren ingediend</span><span><span class="stsw st-bg-betaald"></span>betaald</span>` : '');
   // Groen als alles betaald is: een tracker per tabel houdt per maand (rij) en per kind (kolom) bij of alles waarvoor uren zijn ook de status betaald heeft.
   const paidTracker = () => {
     const kid = new Map(), cur = { has: false, paid: true };
@@ -1539,7 +1545,7 @@
     $('calTitle').textContent = view === 'week' ? `Week ${isoWeek(dates[0])} · ${nlLong(dates[0], { day: 'numeric', month: 'short' })} t/m ${nlLong(dates[6], { day: 'numeric', month: 'short', year: 'numeric' })}`
       : view === 'maand' ? nlLong(d, { month: 'long', year: 'numeric' }) : String(d.getFullYear());
     // De uitleg van de chips en tags hoort bij de maandkalender; bij week en jaar staat alleen (als de leeftijd aan staat) de uitleg van de kleuren.
-    const ageLegend = cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '';
+    const ageLegend = (view === 'jaar' && !vrij ? statusLegend(d.getFullYear()) : '') + (cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '');
     $('calLegend').innerHTML = (vrij
       ? `<span><span class="badge av-ok">2+ vrij</span></span><span><span class="badge av-low">1 vrij</span></span><span><span class="badge av-full">vol</span></span><span><span class="badge av-closed">gesloten / vakantie / ziek</span></span>
          <span style="flex-basis:100%">Vrij = plekken over op het drukste moment van de dag (maximaal ${CAP.total} kinderen tegelijk, eigen kinderen onder 8 jaar meegeteld), op basis van geschreven en geplande uren. Vaste uren per maand hebben geen tijden en tellen niet mee.</span>`
@@ -1650,7 +1656,7 @@
           const r = { ...r0, written: Math.max(0, r0.written - (dropByChild(plans[i].drop).get(c.id) || 0)) }, tot = r.written + r.planned + v;
           colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot; paid.cell(c.id, m, tot > 0);
           const parts = [r.written && `${v ? 'extra' : 'geschreven'} ${fmt(r.written)}`, r.planned && `gepland ${fmt(r.planned)}`, v && `vast ${fmt(v)}`].filter(Boolean);
-          return `<td class="num yearcell${tot && !r.written && m > nowM ? ' future' : ''}">${hrs(tot)}${parts.length > 1 || (parts.length === 1 && !r.written) ? `<small>${parts.join(' · ')}</small>` : ''}${statusBadge(c.id, m)}</td>`;
+          return `<td class="num yearcell${tot && !r.written && m > nowM ? ' future' : ''}${statusCls(c.id, m)}"${statusTitle(c.id, m)}>${hrs(tot)}${parts.length > 1 || (parts.length === 1 && !r.written) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
         }).join('');
         const overN = [...plans[i].days.entries()].filter(([dt, it]) => isOver(dayFree(dt, it))).length;
         return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(nlLong(new Date(d.getFullYear(), i, 1, 12), { month: 'long' }))}${overN ? ` <span class="warnico" title="${overN} dag${overN === 1 ? '' : 'en'} met te veel kinderen">⚠️${overN}</span>` : ''}</th>${cells}<td class="num${paid.rowDone() ? ' paid' : ''}"><strong>${hrs(rowTot)}</strong></td></tr>`;
@@ -1871,13 +1877,14 @@
         const cell = cells[i].get(c.id), tot = cellSum(cell);
         colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot; paid.cell(c.id, m, tot > 0.005);
         const parts = cell ? [cell.w > 0.005 && `${cell.v > 0.005 ? 'extra' : 'geschreven'} ${euro0(cell.w)}`, cell.p > 0.005 && `gepland ${euro0(cell.p)}`, cell.v > 0.005 && `vast ${euro0(cell.v)}`].filter(Boolean) : [];
-        return `<td class="num yearcell${tot > 0 && !(cell && cell.w > 0) && m > nowM ? ' future' : ''}">${tot > 0.005 ? euro(tot) : '–'}${parts.length > 1 || (parts.length === 1 && !(cell && (cell.w > 0 || cell.v > 0.005))) ? `<small>${parts.join(' · ')}</small>` : ''}${statusBadge(c.id, m)}</td>`;
+        return `<td class="num yearcell${tot > 0 && !(cell && cell.w > 0) && m > nowM ? ' future' : ''}${statusCls(c.id, m)}"${statusTitle(c.id, m)}>${tot > 0.005 ? euro(tot) : '–'}${parts.length > 1 || (parts.length === 1 && !(cell && (cell.w > 0 || cell.v > 0.005))) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
       }).join('');
       grand += rowTot;
       return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(MONTHS_LONG[i])}</th>${tds}<td class="num${paid.rowDone() ? ' paid' : ''}"><strong>${rowTot > 0.005 ? euro(rowTot) : '–'}</strong></td></tr>`;
     }).join('');
     $('finTable').innerHTML = kids.length ? `<table class="fin-table sticky"><tr><th>Maand</th>${kids.map((c) => `<th class="num">${esc(firstName(c))}</th>`).join('')}<th class="num">Totaal</th></tr>${rows}
       <tr><th>Totaal ${year}</th>${kids.map((c) => `<th class="num${paid.kidPaid(c.id) ? ' paid' : ''}">${euro(colTot.get(c.id))}</th>`).join('')}<th class="num${paid.allPaid() ? ' paid' : ''}">${euro(grand)}</th></tr></table>` : `<div class="empty">Geen uren in ${year}.</div>`;
+    $('finStatusLegend').innerHTML = kids.length ? statusLegend(year) : '';
     $('finWarn').textContent = missing ? `Voor sommige uren is geen tarief bekend (het bedrag telt als € 0). ${can('settings:write') ? 'Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.' : 'Vraag een beheerder een tarief toe te voegen.'}` : '';
 
     // Grafiek: kolommen voor het gekozen jaar, of een lijn per jaar om jaren te vergelijken.
