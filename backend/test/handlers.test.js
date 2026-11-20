@@ -914,3 +914,50 @@ test('onboarding: een nieuwe organisatie kan pas kinderen toevoegen als er een g
   // een bestaande organisatie (zonder vlag) is niet geblokkeerd
   assert.equal((await call(h.getSettings)).jsonBody.agencyRequired, false);
 });
+
+test('aansluiting: één bureau mag niet overlappen met zichzelf, aansluitende periodes en verschillende bureaus wel', async () => {
+  const admin = require('../src/admin-handlers');
+  const mk = async (name) => (await call(admin.createAgency, { body: { name } })).jsonBody.id;
+  const [a, b] = [await mk('Zelfoverlap A'), await mk('Zelfoverlap B')];
+  const put = (links) => call(h.putAgencyLinks, { body: { links } });
+  // dezelfde periode in een andere die erin valt (zoals Bibaloe 2023-2026 en nov 2026): niet toegestaan
+  await assert.rejects(put([{ agencyId: a, from: '2023-01-01', to: '2026-12-31' }, { agencyId: a, from: '2026-11-01', to: '2026-11-30' }]), (e) => e.status === 400 && /overlappende periodes/.test(e.message) && /Zelfoverlap A/.test(e.message));
+  await assert.rejects(put([{ agencyId: a, from: '2026-01-01', to: null }, { agencyId: a, from: '2027-01-01', to: '2027-06-30' }]), (e) => e.status === 400);   // een open einde overlapt alles daarna
+  await assert.rejects(put([{ agencyId: a }, { agencyId: a, from: '2026-01-01', to: '2026-02-01' }]), (e) => e.status === 400);                       // zonder datums overlapt alles
+  await assert.rejects(put([{ agencyId: a, from: '2026-01-01', to: '2026-03-31' }, { agencyId: a, from: '2026-03-31', to: '2026-06-30' }]), (e) => e.status === 400);   // één dag overlap
+  // een tweede periode zonder overlap mag wel, ook direct aansluitend (de dag erna) en in willekeurige volgorde
+  const ok = (await put([{ agencyId: a, from: '2026-04-01', to: null }, { agencyId: a, from: '2023-01-01', to: '2026-03-31' }])).jsonBody;
+  assert.equal(ok.agencyLinks.length, 2);
+  // verschillende bureaus mogen elkaar wel overlappen (dat is de regel van maximaal twee tegelijk)
+  assert.equal((await put([{ agencyId: a, from: '2026-01-01', to: null }, { agencyId: b, from: '2026-01-01', to: null }])).status, 200);
+});
+
+test('status van de uren per kind per maand: geen status, ingediend, betaald', async () => {
+  const kid = (await call(h.createChild, { body: { firstName: 'Statuskind', contracts: [K({})] } })).jsonBody;
+  const set = (extra, now) => call(h.putMonthStatus, { body: { childId: kid.id, month: '2026-03', status: 'ingediend', ...extra }, now });
+  const cur = async () => (await call(h.getSettings)).jsonBody.monthStatus;
+  assert.deepEqual(await cur(), {});   // standaard: geen status
+  let r = (await set({}, new Date('2026-04-02T10:00:00Z'))).jsonBody.monthStatus;
+  assert.deepEqual(r[`${kid.id}|2026-03`], { status: 'ingediend', by: 'mariko@voorbeeld.nl', at: '2026-04-02T10:00:00.000Z' });
+  r = (await set({ status: 'betaald' }, new Date('2026-04-20T10:00:00Z'))).jsonBody.monthStatus;
+  assert.equal(r[`${kid.id}|2026-03`].status, 'betaald');
+  assert.equal(Object.keys(await cur()).filter((k) => k.startsWith(kid.id)).length, 1);   // één status per kind en maand
+  // een andere maand is los van de eerste
+  await set({ month: '2026-04' });
+  assert.equal(Object.keys(await cur()).filter((k) => k.startsWith(kid.id)).length, 2);
+  // terug naar geen status haalt de regel weg
+  await set({ status: 'geen' });
+  assert.equal((await cur())[`${kid.id}|2026-03`], undefined);
+  assert.ok((await cur())[`${kid.id}|2026-04`]);
+  // ongeldige invoer
+  await assert.rejects(set({ status: 'goedgekeurd' }), (e) => e.status === 400);
+  await assert.rejects(set({ month: '2026-13' }), (e) => e.status === 400);
+  await assert.rejects(set({ childId: 'x y' }), (e) => e.status === 400);
+  await assert.rejects(set({ childId: 'bestaatniet1' }), (e) => e.status === 404);
+  // een gebruiker (alleen uren invullen) mag het ook; zonder dat recht niet
+  const gebruiker = { email: 'g@voorbeeld.nl', kind: 'local', role: 'gebruiker', instanceId: 'main' };
+  assert.equal((await h.putMonthStatus({ user: gebruiker, repo, env, params: {}, body: { childId: kid.id, month: '2026-05', status: 'ingediend' } })).status, 200);
+  await assert.rejects(h.putMonthStatus({ user: { ...gebruiker, role: 'onbekend' }, repo, env, params: {}, body: { childId: kid.id, month: '2026-05', status: 'betaald' } }), (e) => e.status === 403);
+  // een andere administratie ziet de status niet
+  assert.deepEqual(await repo.forInstance('andereorg').listMonthStatuses(), []);
+});

@@ -282,6 +282,16 @@ function parseAgencyLinks(list) {
   });
 }
 
+// Status van de uren van een kind in een maand.
+const MONTH_STATUSES = ['geen', 'ingediend', 'betaald'];
+function parseMonthStatus(body) {
+  const b = body || {};
+  if (typeof b.childId !== 'string' || !ID.test(b.childId)) throw bad('Ongeldig kind.');
+  if (!MONTH.test(b.month || '')) throw bad('Geef een maand op als JJJJ-MM.');
+  if (!MONTH_STATUSES.includes(b.status)) throw bad('Ongeldige status: kies geen status, uren ingediend of betaald.');
+  return { childId: b.childId, month: b.month, status: b.status };
+}
+
 function parseOrgName(v) {
   const n = String(v ?? '').replace(/\s+/g, ' ').trim();
   if (!n || n.length > 100 || /[\u0000-\u001f\u007f-\u009f<>]/.test(n)) throw bad('Geef een naam van 1 tot 100 tekens.');
@@ -294,4 +304,4 @@ function parseRole(v) {
   return r;
 }
 
-module.exports = { parseSickDay, parseOrgName, parseAgencyName, parseAgencyIds, parseAgencyLinks, parseTypes, parseAgencyRates, CARE_TYPES, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
+module.exports = { parseSickDay, parseOrgName, parseAgencyName, parseMonthStatus, MONTH_STATUSES, parseAgencyIds, parseAgencyLinks, parseTypes, parseAgencyRates, CARE_TYPES, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };

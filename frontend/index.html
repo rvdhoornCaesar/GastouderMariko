@@ -166,6 +166,9 @@
   .month .day .n { font-size: .75rem; color: var(--muted); }
   .month .wk { font-size: .8rem; font-weight: 700; text-align: right; padding: 4px 2px; font-variant-numeric: tabular-nums; }
   .month .wk small { display: block; font-weight: 400; color: var(--muted); font-size: .68rem; }
+  .st { display: block; font-size: .66rem; font-weight: 700; white-space: nowrap; font-style: normal; }
+  .st-ingediend { color: var(--accent); }
+  .st-betaald { color: var(--ok); }
   .yearcell small { display: block; color: var(--muted); font-size: .68rem; font-weight: 400; white-space: nowrap; }
   .yearcell.future { color: var(--muted); font-style: italic; }
   tr.cur-row td, tr.cur-row th { background: color-mix(in srgb, var(--accent) 12%, transparent); }
@@ -333,6 +336,7 @@
     <div class="card">
       <h2 id="monthTitle"></h2>
       <div id="summary"></div>
+      <div id="monthStatus" class="noprint"></div>
     </div>
     <div class="card noprint" id="takeCard">
       <h2>Geplande uren overnemen</h2>
@@ -452,7 +456,7 @@
   <section id="tab-instellingen" hidden>
     <div class="card">
       <h2>Gastouderbureau</h2>
-      <p class="hint">Bij welke gastouderbureaus ben je aangesloten, en van wanneer tot wanneer? Laat <em>t/m</em> leeg als de aansluiting doorloopt. Per contract kies je daarna (bij Kinderen) welk bureau erbij hoort. De lijst met bureaus wordt door de platformbeheerder bijgehouden; ontbreekt jouw bureau, vraag dan om het toe te voegen.</p>
+      <p class="hint">Bij welke gastouderbureaus ben je aangesloten, en van wanneer tot wanneer? Laat <em>t/m</em> leeg als de aansluiting doorloopt. Een bureau kan meerdere periodes hebben (bijvoorbeeld opnieuw aangesloten), maar die mogen elkaar niet overlappen. Per contract kies je daarna (bij Kinderen) welk bureau erbij hoort. De lijst met bureaus wordt door de platformbeheerder bijgehouden; ontbreekt jouw bureau, vraag dan om het toe te voegen.</p>
       <p class="hint"><strong>Regel:</strong> volgens de Wet kinderopvang (art. 1.56c) mag een gastouder bij maximaal <strong>2</strong> gastouderbureaus tegelijk zijn aangesloten, bij een overstap tijdelijk bij 3. Heb je kinderen via een overeenkomst van vóór deze regel, dan mag je die kinderen houden tot ze stoppen met de opvang. Volgens de Rijksoverheid en de VNG geldt de regel sinds <strong>1 juli 2026</strong>; deze datum is niet in het Staatsblad zelf nagelopen. De app waarschuwt alleen, het blijft mogelijk om meer dan twee in te vullen.</p>
       <div class="warn" id="agencyWarn"></div>
       <div id="agencyPick"></div>
@@ -813,6 +817,12 @@
   }
   const rateFor = (x, date) => (!x ? null : rateInfo(x.contract, date).rate);
   const enabledTypes = () => state.settings.enabledTypes || ['gastouder'];
+  // Status van de uren van een kind in een maand: geen status, uren ingediend of betaald (ter voorbereiding op een koppeling met het bureau).
+  const STATUS_LABEL = { geen: 'Geen status', ingediend: 'Uren ingediend', betaald: 'Betaald' };
+  const statusOf = (childId, month) => ((state.settings.monthStatus || {})[`${childId}|${month}`] || { status: 'geen' });
+  // Kleine markering in de jaaroverzichten: alleen als er een status is.
+  const statusBadge = (childId, m) => { const st = statusOf(childId, m).status; return st === 'geen' ? '' : `<span class="st st-${st}" title="${STATUS_LABEL[st]}">${st === 'betaald' ? '✓✓ betaald' : '✓ ingediend'}</span>`; };
+  const monthName0 = (m) => new Date(`${m}-01T12:00`).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
   // Filter per soort opvang in de overzichten (Overzicht, Kalender, Financieel): standaard alles samen. Alleen te kiezen als er meer dan één soort is.
   const typeFilter = { v: 'alle' };
   try { const t = localStorage.getItem('typeFilter'); if (t === 'gastouder' || t === 'bso') typeFilter.v = t; } catch (e) { /* standaard: alles */ }
@@ -1042,6 +1052,8 @@
       // Dit is een voorbeeld van wat er gebeurt als je dit kind toevoegt; er is nog niets opgeslagen.
       html = issues.length ? `<div class="hint"><strong>Als je ${esc(x.child.name)} toevoegt (${hm(a)}–${hm(b)}):</strong></div>${issues.map(capacityLine).join('')}` : '';
     }
+    const st = x ? statusOf(x.child.id, date.slice(0, 7)) : null;
+    if (st && st.status !== 'geen') html = `<div class="hint"><strong>Let op:</strong> de uren van ${esc(x.child.name)} over ${monthName0(date.slice(0, 7))} staan op <em>${STATUS_LABEL[st.status].toLowerCase()}</em>. Ze zijn al doorgegeven; wijzigingen komen niet vanzelf bij het bureau.</div>` + html;
     $('entryCap').innerHTML = html;
   }
   $('start').addEventListener('input', updateEntryCap);
@@ -1079,7 +1091,8 @@
     if (prefill === true) contractTouched = false;
     const pick = contractTouched ? null : defaultContract(day);
     if (pick) sel.value = pick; else if (prev) sel.value = prev;
-    $('dayCap').innerHTML = capacityIssues(day).map(capacityLine).join('');
+    const locked = [...new Map(list.map((e) => { const x = findContract(e.contractId); return x ? [x.child.id, x.child] : null; }).filter(Boolean)).values()].filter((c) => statusOf(c.id, day.slice(0, 7)).status !== 'geen');
+    $('dayCap').innerHTML = capacityIssues(day).map(capacityLine).join('') + locked.map((c) => `<div>Let op: de uren van ${esc(firstName(c))} over ${monthName0(day.slice(0, 7))} staan op ${STATUS_LABEL[statusOf(c.id, day.slice(0, 7)).status].toLowerCase()}.</div>`).join('');
     updateEntryHints(prefill === true || (!!pick && pick !== prev));
   }
 
@@ -1264,12 +1277,27 @@
          ${outsideContract ? `<div class="warn">${outsideContract} registratie${outsideContract === 1 ? '' : 's'} ${outsideContract === 1 ? 'valt' : 'vallen'} buiten de contractperiode.</div>` : ''}
          ${capDays.length ? `<div class="warn">Op ${capDays.length} dag${capDays.length === 1 ? '' : 'en'} zijn er te veel kinderen tegelijk (${capDays.map(nlDate).join(', ')}). Zie de dag in het tabblad Uren invullen.</div>` : ''}`
       : '<div class="empty">Geen uren in deze maand.</div>';
+    renderMonthStatus(m, [...new Map(Object.values(per).filter((p) => p.x).map((p) => [p.x.child.id, p.x.child])).values()].sort((a, b) => firstName(a).localeCompare(firstName(b), 'nl')));
     const sickInMonth = (state.settings.sickDays || []).filter((d) => d.startsWith(m) && !beforeStart(d));
     $('summary').innerHTML += sickInMonth.length ? `<p class="hint" style="margin:10px 0 0"><span class="tag sick">ziek</span> Gastouder ziek gemeld op ${sickInMonth.length} dag${sickInMonth.length === 1 ? '' : 'en'}: ${sickInMonth.map(nlDate).join(', ')}.</p>` : '';
     $('monthEntries').innerHTML = (list.length ? list.map((e) => entryRow(e, true)).join('') : '<div class="empty">Geen registraties.</div>')
       + (holidayEntries.length ? `<h3 class="subhead">Doorbetaalde vakantiedagen</h3>${holidayEntries.map(holidayRow).join('')}` : '');
     renderTake();
   }
+
+  // Status per kind voor de gekozen maand (Overzicht): een keuzelijst per kind met uren, met wie het wanneer heeft gezet.
+  function renderMonthStatus(m, kids) {
+    $('monthStatus').innerHTML = kids.length ? `<h3 class="subhead">Status per kind</h3>${kids.map((c) => { const st = statusOf(c.id, m);
+      return `<div class="entry" style="flex-wrap:wrap"><div style="flex:1 1 160px"><div class="who">${esc(firstName(c))}</div>${st.status !== 'geen' && st.at ? `<div class="meta">gezet door ${esc(st.by || '?')} op ${nlDate(st.at.slice(0, 10))}</div>` : ''}</div>
+        <select data-statuskid="${esc(c.id)}" aria-label="Status van ${esc(firstName(c))}" style="width:auto">${Object.entries(STATUS_LABEL).map(([k, l]) => `<option value="${k}" ${k === st.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`; }).join('')}` : '';
+  }
+  $('monthStatus').addEventListener('change', async (ev) => {
+    const id = ev.target.dataset.statuskid;
+    if (!id) return;
+    const m = $('month').value;
+    const r = await guard(() => api('PUT', 'month-status', { childId: id, month: m, status: ev.target.value }));
+    if (r) { state.settings.monthStatus = r.monthStatus; render(); } else renderMonth();
+  });
 
   $('print').onclick = () => window.print();
   $('csv').onclick = () => {
@@ -1493,11 +1521,13 @@
     const months = view === 'jaar' ? Array.from({ length: 12 }, (_, i) => `${d.getFullYear()}-${pad(i + 1)}`) : [...new Set(dates.map((x) => iso(x).slice(0, 7)))];
     $('calTitle').textContent = view === 'week' ? `Week ${isoWeek(dates[0])} · ${nlLong(dates[0], { day: 'numeric', month: 'short' })} t/m ${nlLong(dates[6], { day: 'numeric', month: 'short', year: 'numeric' })}`
       : view === 'maand' ? nlLong(d, { month: 'long', year: 'numeric' }) : String(d.getFullYear());
-    $('calLegend').innerHTML = vrij
+    // De uitleg van de chips en tags hoort bij de maandkalender; bij week en jaar staat alleen (als de leeftijd aan staat) de uitleg van de kleuren.
+    const ageLegend = cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '';
+    $('calLegend').innerHTML = (vrij
       ? `<span><span class="badge av-ok">2+ vrij</span></span><span><span class="badge av-low">1 vrij</span></span><span><span class="badge av-full">vol</span></span><span><span class="badge av-closed">gesloten / vakantie / ziek</span></span>
          <span style="flex-basis:100%">Vrij = plekken over op het drukste moment van de dag (maximaal ${CAP.total} kinderen tegelijk, eigen kinderen onder 8 jaar meegeteld), op basis van geschreven en geplande uren. Vaste uren per maand hebben geen tijden en tellen niet mee.</span>`
-      : `<span><span class="chip written">Noor 9:00</span> geschreven (ingevuld)</span><span><span class="chip planned">Noor 9:00</span> gepland (vaste tijden)</span><span><span class="tag">gesloten</span> geen opvang volgens de openingstijden · <span class="tag">vakantie</span> vakantie van de gastouder · <span class="tag sick">ziek</span> gastouder ziek gemeld</span>`
-        + (cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '');
+      : (view === 'maand' ? `<span><span class="chip written">Noor 9:00</span> geschreven (ingevuld)</span><span><span class="chip planned">Noor 9:00</span> gepland (vaste tijden)</span><span><span class="tag">gesloten</span> geen opvang volgens de openingstijden · <span class="tag">vakantie</span> vakantie van de gastouder · <span class="tag sick">ziek</span> gastouder ziek gemeld</span>` : ''))
+        + ageLegend;
     await Promise.all(months.map((m) => guard(() => ensureMonth(m))));
     if (seq !== calSeq) return;
     const plans = months.map((m) => monthPlan(m, { all: cal.mode === 'vrij' })), dayMap = new Map(), vast = new Map(), drops = new Map();
@@ -1603,7 +1633,7 @@
           const r = { ...r0, written: Math.max(0, r0.written - (dropByChild(plans[i].drop).get(c.id) || 0)) }, tot = r.written + r.planned + v;
           colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot;
           const parts = [r.written && `${v ? 'extra' : 'geschreven'} ${fmt(r.written)}`, r.planned && `gepland ${fmt(r.planned)}`, v && `vast ${fmt(v)}`].filter(Boolean);
-          return `<td class="num yearcell${tot && !r.written && m > nowM ? ' future' : ''}">${hrs(tot)}${parts.length > 1 || (parts.length === 1 && !r.written) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
+          return `<td class="num yearcell${tot && !r.written && m > nowM ? ' future' : ''}">${hrs(tot)}${parts.length > 1 || (parts.length === 1 && !r.written) ? `<small>${parts.join(' · ')}</small>` : ''}${statusBadge(c.id, m)}</td>`;
         }).join('');
         const overN = [...plans[i].days.entries()].filter(([dt, it]) => isOver(dayFree(dt, it))).length;
         return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(nlLong(new Date(d.getFullYear(), i, 1, 12), { month: 'long' }))}${overN ? ` <span class="warnico" title="${overN} dag${overN === 1 ? '' : 'en'} met te veel kinderen">⚠️${overN}</span>` : ''}</th>${cells}<td class="num"><strong>${hrs(rowTot)}</strong></td></tr>`;
@@ -1824,7 +1854,7 @@
         const cell = cells[i].get(c.id), tot = cellSum(cell);
         colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot;
         const parts = cell ? [cell.w > 0.005 && `${cell.v > 0.005 ? 'extra' : 'geschreven'} ${euro0(cell.w)}`, cell.p > 0.005 && `gepland ${euro0(cell.p)}`, cell.v > 0.005 && `vast ${euro0(cell.v)}`].filter(Boolean) : [];
-        return `<td class="num yearcell${tot > 0 && !(cell && cell.w > 0) && m > nowM ? ' future' : ''}">${tot > 0.005 ? euro(tot) : '–'}${parts.length > 1 || (parts.length === 1 && !(cell && (cell.w > 0 || cell.v > 0.005))) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
+        return `<td class="num yearcell${tot > 0 && !(cell && cell.w > 0) && m > nowM ? ' future' : ''}">${tot > 0.005 ? euro(tot) : '–'}${parts.length > 1 || (parts.length === 1 && !(cell && (cell.w > 0 || cell.v > 0.005))) ? `<small>${parts.join(' · ')}</small>` : ''}${statusBadge(c.id, m)}</td>`;
       }).join('');
       grand += rowTot;
       return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(MONTHS_LONG[i])}</th>${tds}<td class="num"><strong>${rowTot > 0.005 ? euro(rowTot) : '–'}</strong></td></tr>`;
@@ -2325,7 +2355,10 @@
   function renderAgencies() {
     const all = state.settings.agencies || [], links = agencyLinks(), mine = new Set(links.map((l) => l.agencyId));
     const warn = state.settings.agencyWarnings || [], lim = state.settings.agencyLimit || { max: 2 };
-    $('agencyWarn').innerHTML = warn.map((w) => `<div>Let op${(state.settings.availableTypes || []).length > 1 ? ` (${typeLabel(w.type || 'gastouder')})` : ''}: ${w.from === w.to ? `op ${nlDate(w.from)}` : `${w.to ? `van ${nlDate(w.from)} t/m ${nlDate(w.to)}` : `vanaf ${nlDate(w.from)}`}`} ben je bij ${w.count} gastouderbureaus tegelijk aangesloten; het maximum is ${lim.max} (bij een overstap tijdelijk 3). Klopt dit niet, pas dan een datum aan.</div>`).join('');
+    // Bestaande overlap bij hetzelfde bureau (kon vroeger nog): aanwijzen, want opslaan van wijzigingen kan pas als het is opgelost.
+    const selfOver = (() => { const by = {}; links.forEach((l) => (by[l.agencyId] ||= []).push(l)); for (const id of Object.keys(by)) { const v = [...by[id]].sort((x, y) => (x.from || '').localeCompare(y.from || '')); for (let i = 1; i < v.length; i++) if ((v[i - 1].to || '9999-12-31') >= (v[i].from || '0000-01-01')) return id; } return null; })();
+    const selfOverHtml = selfOver ? `<div>Let op: ${esc(agencyName(selfOver) || 'een bureau')} staat met overlappende periodes in de lijst. Een bureau kan niet twee keer tegelijk worden aangesloten: pas de datums aan of verwijder een aansluiting (zolang dit zo staat, worden wijzigingen niet opgeslagen).</div>` : '';
+    $('agencyWarn').innerHTML = selfOverHtml + warn.map((w) => `<div>Let op${(state.settings.availableTypes || []).length > 1 ? ` (${typeLabel(w.type || 'gastouder')})` : ''}: ${w.from === w.to ? `op ${nlDate(w.from)}` : `${w.to ? `van ${nlDate(w.from)} t/m ${nlDate(w.to)}` : `vanaf ${nlDate(w.from)}`}`} ben je bij ${w.count} gastouderbureaus tegelijk aangesloten; het maximum is ${lim.max} (bij een overstap tijdelijk 3). Klopt dit niet, pas dan een datum aan.</div>`).join('');
     $('agencyPick').innerHTML = links.length ? links.map((l, i) => { const a = all.find((x) => x.id === l.agencyId);
       return `<div class="entry" style="flex-wrap:wrap"><div style="flex:1 1 200px"><div class="who">${esc(a ? a.name : 'Onbekend bureau')}${a && !a.active ? ' <span class="tag">niet actief</span>' : ''}</div>
         <div class="meta">${linkSpan(l)}</div></div>

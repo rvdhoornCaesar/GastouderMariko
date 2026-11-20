@@ -24,4 +24,18 @@ function overLimit(links, limit = LIMIT) {
 function nextDay(d) { if (d >= OPEN_END) return OPEN_END; const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() + 1); return x.toISOString().slice(0, 10); }
 function prevDay(d) { const x = new Date(`${d}T12:00:00Z`); x.setUTCDate(x.getUTCDate() - 1); return x.toISOString().slice(0, 10); }
 
-module.exports = { LIMIT, overLimit };
+// Eén bureau kan meerdere periodes hebben (bijvoorbeeld opnieuw aangesloten), maar die mogen elkaar niet overlappen.
+// Geeft de eerste overlap terug: { agencyId, a: { from, to }, b: { from, to } }, of null.
+function selfOverlap(links) {
+  const by = new Map();
+  (links || []).forEach((l) => by.set(l.agencyId, [...(by.get(l.agencyId) || []), { from: l.from || null, to: l.to || null }]));
+  for (const [agencyId, list] of by) {
+    const sorted = [...list].sort((x, y) => (x.from || OPEN_START).localeCompare(y.from || OPEN_START));
+    for (let i = 1; i < sorted.length; i++) {
+      if ((sorted[i - 1].to || OPEN_END) >= (sorted[i].from || OPEN_START)) return { agencyId, a: sorted[i - 1], b: sorted[i] };
+    }
+  }
+  return null;
+}
+
+module.exports = { LIMIT, overLimit, selfOverlap };

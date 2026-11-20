@@ -3,7 +3,7 @@ const { fixedUsers, sessionToken, sessionCookie, expiredCookie, SESSION_DAYS } =
 const P = require('./passwords');
 const T = require('./totp');
 const perm = require('./permissions');
-const { LIMIT } = require('./agency-links');
+const { LIMIT, selfOverlap } = require('./agency-links');
 const { careInfo, warningsOf, typesOf } = require('./care-types');
 const v = require('./validation');
 
@@ -145,7 +145,7 @@ async function getSettings({ user, repo, env }) {
   perm.require(user, 'settings:read');
   const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
   const manage = perm.can(user, 'settings:write');   // wie mag toegang regelen, ziet de gebruikerslijsten en de technische info
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), ...(await careSettings(repo, user)), startDate: await repo.getStartDate(), firstEntry: await repo.firstEntryDate(), runtime: manage ? process.version : undefined } };
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), ...(await careSettings(repo, user)), monthStatus: await monthStatusMap(repo), startDate: await repo.getStartDate(), firstEntry: await repo.firstEntryDate(), runtime: manage ? process.version : undefined } };
 }
 
 // Nieuwe organisaties moeten eerst een gastouderbureau kiezen (onboarding) voordat er kinderen bij kunnen. Bestaande organisaties zijn daarvan vrijgesteld.
@@ -206,6 +206,11 @@ async function putAgencyLinks({ user, repo, body }) {
   perm.require(user, 'settings:write');
   const links = body && body.links !== undefined ? v.parseAgencyLinks(body.links) : v.parseAgencyIds(body && body.agencyIds).map((agencyId) => ({ agencyId, from: null, to: null }));
   const known = new Map((await repo.listAgencies()).map((a) => [a.id, a]));
+  const overlap = selfOverlap(links);
+  if (overlap) {
+    const nl = (d) => (d ? d.split('-').reverse().join('-') : null), span = (p) => `${p.from ? `vanaf ${nl(p.from)}` : 'sinds het begin'} ${p.to ? `t/m ${nl(p.to)}` : '(doorlopend)'}`;
+    throw new HttpError(400, `${(known.get(overlap.agencyId) || {}).name || 'Dit bureau'} heeft overlappende periodes (${span(overlap.a)} en ${span(overlap.b)}). Eén bureau kan niet twee keer tegelijk worden aangesloten; pas de datums aan of verwijder een aansluiting.`);
+  }
   const current = new Set((await repo.getAgencyLinks()).map((l) => l.agencyId));
   if (links.some((l) => !known.has(l.agencyId) || (!known.get(l.agencyId).active && !current.has(l.agencyId)))) throw new HttpError(400, 'Dat gastouderbureau bestaat niet of is niet meer actief.');
   await repo.setAgencyLinks(links);
@@ -220,6 +225,17 @@ async function putOwnChildren({ user, repo, body }) {
   await repo.setOwnChildren(ownChildren);
   return { status: 200, jsonBody: { ownChildren } };
 }
+
+// Status van de uren van een kind in een maand (geen status, uren ingediend, betaald), ter voorbereiding op een koppeling met de software van het bureau.
+// Dat mag iedereen die uren invult. De status verandert niets aan de uren zelf; de app waarschuwt alleen als je uren wijzigt van een maand die al is ingediend.
+async function putMonthStatus({ user, repo, body, now = new Date() }) {
+  perm.require(user, 'entries:write');
+  const s = v.parseMonthStatus(body);
+  if (!(await repo.getChild(s.childId))) throw new HttpError(404, 'Kind niet gevonden.');
+  await repo.setMonthStatus(s.childId, s.month, s.status, user.email, now.toISOString());
+  return { status: 200, jsonBody: { monthStatus: await monthStatusMap(repo) } };
+}
+const monthStatusMap = async (repo) => Object.fromEntries((await repo.listMonthStatuses()).map((r) => [`${r.childId}|${r.month}`, { status: r.status, by: r.by, at: r.at }]));
 
 // De gastouder ziek melden voor één dag (of dat ongedaan maken). Dat mag iedereen die uren invult, dus ook een gebruiker.
 const MAX_SICK_DAYS = 1000;   // de lijst staat in één rij (maximaal 32.000 tekens)
@@ -527,4 +543,4 @@ async function deleteAccount({ user, repo, params }) {
   return { status: 204 };
 }
 
-module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers, putSickDay, putAgencyLinks, putCareTypes, putAgencyRates };
+module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers, putSickDay, putMonthStatus, putAgencyLinks, putCareTypes, putAgencyRates };
