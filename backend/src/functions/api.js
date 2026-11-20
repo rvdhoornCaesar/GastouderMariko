@@ -86,6 +86,7 @@ route('login', ['POST'], 'auth/login', handlers.login, { auth: 'public' });
 route('loginMfa', ['POST'], 'auth/login-mfa', handlers.loginMfa, { auth: 'public' });
 route('logout', ['POST'], 'auth/logout', handlers.logout, { auth: 'public' });
 route('me', ['GET'], 'me', handlers.me, { allowMustChange: true });
+route('putPrefs', ['PUT'], 'prefs', handlers.putPrefs, { allowMustChange: true });
 route('changePassword', ['POST'], 'auth/change-password', handlers.changePassword, { auth: 'session', allowMustChange: true });
 route('totpStart', ['POST'], 'auth/totp/start', handlers.totpStart, { auth: 'session' });
 route('totpEnable', ['POST'], 'auth/totp/enable', handlers.totpEnable, { auth: 'session' });

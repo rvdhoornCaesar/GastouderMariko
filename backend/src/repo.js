@@ -144,6 +144,17 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
     async setIdentity(key, email) {
       await (await table('identities')).upsertEntity({ partitionKey: 'identities', rowKey: key, email }, 'Replace');
     },
+    // Voorkeuren van een persoon (nu: het thema), per e-mailadres en dus los van de organisatie. Zelfde tabel als de identiteiten, eigen PartitionKey.
+    async getUserPrefs(email) {
+      const key = String(email || '').toLowerCase();
+      if (!keySafe(key)) return {};
+      try { return JSON.parse((await (await table('identities')).getEntity('prefs', key)).value); } catch (e) { if (e.statusCode === 404) return {}; throw e; }
+    },
+    async setUserPrefs(email, prefs) {
+      const key = String(email || '').toLowerCase();
+      if (!keySafe(key)) throw new Error('Ongeldig adres.');
+      await (await table('identities')).upsertEntity({ partitionKey: 'prefs', rowKey: key, value: JSON.stringify(prefs) }, 'Replace');
+    },
 
     // Organisaties (administraties) en lidmaatschappen: wie bij welke organisatie hoort en met welke rol. Gedeeld, niet per administratie.
     // Een lidmaatschap staat onder PartitionKey = id van de organisatie en RowKey = e-mailadres.
