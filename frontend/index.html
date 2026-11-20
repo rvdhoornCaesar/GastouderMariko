@@ -4,19 +4,25 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Gastouder Uren</title>
+<script>try { document.documentElement.dataset.theme = ['light', 'dark', 'auto'].includes(localStorage.getItem('theme')) ? localStorage.getItem('theme') : 'auto'; } catch (e) { document.documentElement.dataset.theme = 'auto'; }</script>
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <meta name="theme-color" content="#e07a5f">
 <style>
+  /* Thema per account (automatisch is de standaard): data-theme is light, dark of auto (volgt het besturingssysteem). color-scheme moet kloppen, anders
+     blijft het kalenderknopje van een datumveld zwart op donker, en dus onzichtbaar. */
   :root {
-    color-scheme: light dark;   /* anders blijft het kalenderknopje van een datumveld zwart op donker, en dus onzichtbaar */
+    color-scheme: light;
     --bg: #fdf8f3; --card: #fff; --ink: #2b2b2b; --muted: #777; --line: #e8ddd0;
     --accent: #e07a5f; --accent-ink: #fff; --ok: #3d9970; --danger: #c0392b;
+    --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a;
   }
+  :root[data-theme="dark"] { color-scheme: dark; --bg: #1d1b19; --card: #292624; --ink: #eee; --muted: #aaa; --line: #3e3a36; --s1: #3987e5; --s2: #d95926; --s3: #199e70; }
+  :root[data-theme="auto"] { color-scheme: light dark; }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #1d1b19; --card: #292624; --ink: #eee; --muted: #aaa; --line: #3e3a36; }
+    :root[data-theme="auto"] { --bg: #1d1b19; --card: #292624; --ink: #eee; --muted: #aaa; --line: #3e3a36; --s1: #3987e5; --s2: #d95926; --s3: #199e70; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; font: 16px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--ink); }
@@ -52,7 +58,8 @@
   @supports selector(::-webkit-calendar-picker-indicator) {
     input[type=date]::-webkit-calendar-picker-indicator { display: none; }
     input[type=date] { padding-right: 36px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='%23777' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='12' height='11' rx='2'/%3E%3Cpath d='M2 6.5h12M5.5 1.5v3M10.5 1.5v3'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; background-size: 16px 16px; }
-    @media (prefers-color-scheme: dark) { input[type=date] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='%23bbb' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='12' height='11' rx='2'/%3E%3Cpath d='M2 6.5h12M5.5 1.5v3M10.5 1.5v3'/%3E%3C/svg%3E"); } }
+    :root[data-theme="dark"] input[type=date] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='%23bbb' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='12' height='11' rx='2'/%3E%3Cpath d='M2 6.5h12M5.5 1.5v3M10.5 1.5v3'/%3E%3C/svg%3E"); }
+    @media (prefers-color-scheme: dark) { :root[data-theme="auto"] input[type=date] { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none' stroke='%23bbb' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='2' y='3' width='12' height='11' rx='2'/%3E%3Cpath d='M2 6.5h12M5.5 1.5v3M10.5 1.5v3'/%3E%3C/svg%3E"); } }
   }
   .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; margin-bottom: 10px; }
   button.btn { padding: 10px 16px; border: 0; border-radius: 8px; font: inherit; font-weight: 600;
@@ -172,10 +179,10 @@
   #summary tr.statusrow .sub { display: inline; margin-left: 10px; }
   #summary tr.statusrow select { width: auto; padding: 3px 8px; font-size: .85rem; margin-left: 6px; }
   .paid, .paid strong { color: var(--ok); }
-  table td.yearcell.st-bg-ingediend { background: color-mix(in srgb, var(--accent) 22%, var(--card)); }
+  table td.yearcell.st-bg-ingediend { background: color-mix(in srgb, #e3b21f 30%, var(--card)); }
   table td.yearcell.st-bg-betaald { background: color-mix(in srgb, var(--ok) 26%, var(--card)); }
   .stsw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; border: 1px solid var(--line); }
-  .stsw.st-bg-ingediend { background: color-mix(in srgb, var(--accent) 22%, var(--card)); }
+  .stsw.st-bg-ingediend { background: color-mix(in srgb, #e3b21f 30%, var(--card)); }
   .stsw.st-bg-betaald { background: color-mix(in srgb, var(--ok) 26%, var(--card)); }
   .yearcell small { display: block; color: var(--muted); font-size: .68rem; font-weight: 400; white-space: nowrap; }
   .yearcell.future { color: var(--muted); font-style: italic; }
@@ -187,8 +194,6 @@
   .tip .tr b { font-variant-numeric: tabular-nums; }
   .tip .key { display: inline-block; width: 12px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
   .tip .muted { color: var(--muted); }
-  :root { --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; }
-  @media (prefers-color-scheme: dark) { :root { --s1: #3987e5; --s2: #d95926; --s3: #199e70; } }
   svg.fin text { fill: var(--muted); font-size: 11px; font-family: inherit; }
   svg.fin text.val { fill: var(--ink); font-weight: 700; }
   svg.fin .grid { stroke: var(--line); stroke-width: 1; }
@@ -229,7 +234,7 @@
 </head>
 <body>
 <header>
-  <h1><img class="logo" src="/logo.svg" alt="" width="30" height="30">Gastouder Uren <small id="user" class="noprint"></small> <small id="orgName" class="noprint" hidden></small><select id="orgSwitch" class="noprint" aria-label="Organisatie" hidden style="width:auto;display:inline-block;font-size:.8rem;padding:2px 6px"></select> <a href="#" class="noprint" id="logout" hidden>uitloggen</a></h1>
+  <h1><img class="logo" src="/logo.svg" alt="" width="30" height="30">Gastouder Uren <small id="user" class="noprint"></small> <small id="orgName" class="noprint" hidden></small><select id="themeSel" class="noprint" aria-label="Thema" title="Thema" hidden style="width:auto;display:inline-block;font-size:.8rem;padding:2px 6px"><option value="light">Licht</option><option value="dark">Donker</option><option value="auto">Automatisch</option></select> <select id="orgSwitch" class="noprint" aria-label="Organisatie" hidden style="width:auto;display:inline-block;font-size:.8rem;padding:2px 6px"></select> <a href="#" class="noprint" id="logout" hidden>uitloggen</a></h1>
   <nav>
     <button data-tab="uren" class="active">Uren invullen</button>
     <button data-tab="overzicht">Overzicht</button>
@@ -1294,8 +1299,7 @@
       const last = p.x && !(arr[i + 1] && arr[i + 1].x && arr[i + 1].x.child.id === p.x.child.id);
       const st = last ? statusOf(p.x.child.id, m) : null;
       const statusRow = last ? `<tr class="statusrow noprint"><td colspan="4"><label>Status <select data-statuskid="${esc(p.x.child.id)}" aria-label="Status van ${esc(firstName(p.x.child))}">${Object.entries(STATUS_LABEL).map(([k, l]) => `<option value="${k}" ${k === st.status ? 'selected' : ''}>${l}</option>`).join('')}</select></label>${st.status !== 'geen' && st.at ? ` <span class="sub">gezet door ${esc(st.by || '?')} op ${nlDate(st.at.slice(0, 10))}</span>` : ''}</td></tr>` : '';
-      const isPaid = p.x && statusOf(p.x.child.id, m).status === 'betaald';
-      return `<tr${last ? ' class="hasstatus"' : ''}><td>${esc(label(p.x))}${notes.map((n) => `<div class="sub">${n}</div>`).join('')}</td><td class="num${isPaid ? ' paid' : ''}">${fmt(p.min)}</td><td class="num">${tarief}</td><td class="num${isPaid ? ' paid' : ''}">${euro(p.eur)}</td></tr>${statusRow}`;
+      return `<tr${last ? ' class="hasstatus"' : ''}><td>${esc(label(p.x))}${notes.map((n) => `<div class="sub">${n}</div>`).join('')}</td><td class="num">${fmt(p.min)}</td><td class="num">${tarief}</td><td class="num">${euro(p.eur)}</td></tr>${statusRow}`;
     });
     // Het totaal wordt groen als voor alle kinderen met uren in deze maand de status betaald is.
     const kidsInMonth = [...new Set(Object.values(per).filter((p) => p.x).map((p) => p.x.child.id))];
@@ -1896,7 +1900,13 @@
       const lines = ys.map((y, k) => {
         const T = Array.from({ length: 12 }, (_, i) => W[k * 12 + i] + V[k * 12 + i] + P[k * 12 + i]), C = [];
         T.reduce((t, v, i) => (C[i] = t + v), 0);
-        return { year: y, T, C, color: LINE_COLORS[(ys.length - 1 - k) % LINE_COLORS.length], selected: y === year };
+        // Doorgetrokken t/m de laatste maand met geschreven uren; wat daarna komt is verwachting (gepland of vast) en dus gestippeld. Een voorbij jaar is helemaal
+        // doorgetrokken en een toekomstig jaar helemaal gestippeld.
+        const nowY = Number(nowM.slice(0, 4));
+        let lastWritten = -1;
+        for (let i = 0; i < 12; i++) if (W[k * 12 + i] > 0.005) lastWritten = i;
+        const solidTo = y < nowY ? 11 : y > nowY ? -1 : lastWritten;
+        return { year: y, T, C, solidTo, color: LINE_COLORS[(ys.length - 1 - k) % LINE_COLORS.length], selected: y === year };
       });
       $('finChartTitle').textContent = lines.length > 1 ? `Cumulatieve opbrengst per jaar, ${ys[0]} t/m ${year}` : `Cumulatieve opbrengst, ${year}`;
       drawFinLines({ lines, nowM });
@@ -1929,7 +1939,7 @@
     // eerdere jaren eerst, het gekozen jaar bovenop
     [...lines].sort((a, b) => Number(a.selected) - Number(b.selected)).forEach((l) => {
       const pts = l.C.map((v, i) => [cx(i), sy(v)]), w = l.selected ? 3 : 2, op = l.selected ? 1 : 0.85;
-      const idxNow = l.year < nowY ? 11 : l.year > nowY ? -1 : nowI;   // t/m deze maand doorgetrokken, daarna gestippeld (verwachting)
+      const idxNow = l.solidTo;   // t/m de laatste maand met geschreven uren doorgetrokken, daarna gestippeld (verwachting)
       const solid = idxNow >= 0 ? pts.slice(0, idxNow + 1) : [], dashed = pts.slice(Math.max(idxNow, 0));
       if (dashed.length > 1) g += `<path d="${path(dashed)}" fill="none" stroke="${l.color}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 5" opacity="${op}"/>`;
       if (solid.length > 1) g += `<path d="${path(solid)}" fill="none" stroke="${l.color}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" opacity="${op}"/>`;
@@ -1942,7 +1952,7 @@
     box.querySelector('svg')?.remove();
     box.insertAdjacentHTML('afterbegin', `<svg class="fin" viewBox="0 0 ${VW} ${VH}" width="100%" role="img" aria-label="Cumulatieve opbrengst per jaar, ${lines[0].year} t/m ${lines[lines.length - 1].year}">${g}</svg>`);
     $('finLegend').innerHTML = [...lines].reverse().map((l) => `<span><span class="sw" style="background:${l.color}"></span><strong>${l.year}</strong> ${euro0(l.C[11])}</span>`).join('')
-      + '<span>Elke lijn is een jaar: het totaal van januari t/m die maand. Doorgetrokken = t/m deze maand, gestippeld = verwachting (gepland).</span>';
+      + '<span>Elke lijn is een jaar: het totaal van januari t/m die maand. Doorgetrokken = t/m de laatste maand met geschreven uren, gestippeld = verwachting (gepland of vast).</span>';
     const row = (key, label, val) => `<div class="tr"><span><span class="key" style="background:${key}"></span>${label}</span><b>${euro(val)}</b></div>`;
     const show = (i, x, y) => {
       tip.innerHTML = `<div class="tt">t/m ${MONTHS_LONG[i]}</div>` + [...lines].reverse().map((l) => row(l.color, String(l.year), l.C[i])).join('');
@@ -2851,8 +2861,23 @@
   function render() { renderTypeFilter(); renderDay(); renderMonth(); renderCal(); renderFin(); renderPast(); renderChildren(); renderSettings(); }
 
   // Laadt de gegevens en toont de app (of eerst het scherm om het tijdelijke wachtwoord te vervangen).
+  // Thema per account: licht (standaard), donker of automatisch (volgt het besturingssysteem). De keuze wordt bij het account bewaard; de browser
+  // onthoudt de laatste keuze alleen om bij het laden niet even in het verkeerde thema te knipperen.
+  function applyTheme(t) {
+    const theme = ['light', 'dark', 'auto'].includes(t) ? t : 'auto';
+    document.documentElement.dataset.theme = theme;
+    $('themeSel').value = theme;
+    try { localStorage.setItem('theme', theme); } catch (e) { /* niet erg */ }
+  }
+  $('themeSel').addEventListener('change', async () => {
+    const theme = $('themeSel').value;
+    applyTheme(theme);
+    try { await api('PUT', 'prefs', { theme }); } catch (e) { if (!e.noAccess) toast('Het thema kon niet worden bewaard: ' + e.message); }
+  });
   async function start(mustChange) {
     if (mode === 'local') { me = await api('GET', 'me'); currentUser = me.name || me.email; }
+    $('themeSel').hidden = false;
+    applyTheme(me && me.prefs ? me.prefs.theme : 'auto');
     if (mustChange) { showPwChange(true); return; }
     showOnly('app');
     $('user').textContent = currentUser;

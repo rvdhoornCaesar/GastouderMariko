@@ -436,8 +436,18 @@ async function logout({ repo, headers }) {
   return { status: 200, jsonBody: { ok: true }, cookies: [expiredCookie()] };
 }
 
-async function me({ user }) {
-  return { status: 200, jsonBody: { kind: user.kind, email: user.email, name: user.name, role: user.role, platformAdmin: !!user.platformAdmin,
+const THEMES = ['light', 'dark', 'auto'];
+// Voorkeuren van de ingelogde persoon (nu het thema: licht, donker of automatisch naar het besturingssysteem; standaard automatisch).
+async function putPrefs({ user, repo, body }) {
+  const theme = body && body.theme;
+  if (!THEMES.includes(theme)) throw new HttpError(400, 'Kies een thema: licht, donker of automatisch.');
+  await repo.setUserPrefs(user.email, { theme });
+  return { status: 200, jsonBody: { prefs: { theme } } };
+}
+
+async function me({ user, repo }) {
+  const prefs = repo ? await repo.getUserPrefs(user.email) : {};
+  return { status: 200, jsonBody: { prefs: { theme: THEMES.includes(prefs.theme) ? prefs.theme : 'auto' }, kind: user.kind, email: user.email, name: user.name, role: user.role, platformAdmin: !!user.platformAdmin,
     organisation: user.organisation, organisations: user.organisations || [],
     permissions: perm.permissionsFor(user), assignableRoles: perm.assignableRoles(user.role), mustChange: user.mustChange, totp: !!user.totp } };
 }
@@ -543,4 +553,4 @@ async function deleteAccount({ user, repo, params }) {
   return { status: 204 };
 }
 
-module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers, putSickDay, putMonthStatus, putAgencyLinks, putCareTypes, putAgencyRates };
+module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers, putSickDay, putPrefs, putMonthStatus, putAgencyLinks, putCareTypes, putAgencyRates };
