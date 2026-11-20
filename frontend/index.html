@@ -166,9 +166,17 @@
   .month .day .n { font-size: .75rem; color: var(--muted); }
   .month .wk { font-size: .8rem; font-weight: 700; text-align: right; padding: 4px 2px; font-variant-numeric: tabular-nums; }
   .month .wk small { display: block; font-weight: 400; color: var(--muted); font-size: .68rem; }
-  .st { display: block; font-size: .66rem; font-weight: 700; white-space: nowrap; font-style: normal; }
-  .st-ingediend { color: var(--accent); }
-  .st-betaald { color: var(--ok); }
+  #summary tr.hasstatus td { border-bottom: 0; }
+  #summary tr.statusrow td { padding: 0 6px 9px; font-size: .85rem; color: var(--muted); }
+  #summary tr.statusrow label { display: inline-flex; align-items: center; margin: 0; }
+  #summary tr.statusrow .sub { display: inline; margin-left: 10px; }
+  #summary tr.statusrow select { width: auto; padding: 3px 8px; font-size: .85rem; margin-left: 6px; }
+  .paid, .paid strong { color: var(--ok); }
+  table td.yearcell.st-bg-ingediend { background: color-mix(in srgb, var(--accent) 22%, var(--card)); }
+  table td.yearcell.st-bg-betaald { background: color-mix(in srgb, var(--ok) 26%, var(--card)); }
+  .stsw { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 5px; border: 1px solid var(--line); }
+  .stsw.st-bg-ingediend { background: color-mix(in srgb, var(--accent) 22%, var(--card)); }
+  .stsw.st-bg-betaald { background: color-mix(in srgb, var(--ok) 26%, var(--card)); }
   .yearcell small { display: block; color: var(--muted); font-size: .68rem; font-weight: 400; white-space: nowrap; }
   .yearcell.future { color: var(--muted); font-style: italic; }
   tr.cur-row td, tr.cur-row th { background: color-mix(in srgb, var(--accent) 12%, transparent); }
@@ -336,7 +344,6 @@
     <div class="card">
       <h2 id="monthTitle"></h2>
       <div id="summary"></div>
-      <div id="monthStatus" class="noprint"></div>
     </div>
     <div class="card noprint" id="takeCard">
       <h2>Geplande uren overnemen</h2>
@@ -393,6 +400,7 @@
     <div class="card">
       <h2 id="finTableTitle"></h2>
       <div class="scrollx" id="finTable"></div>
+      <div class="legend noprint" id="finStatusLegend" style="margin-top:8px"></div>
       <div class="warn" id="finWarn"></div>
       <p class="hint" style="margin: 10px 0 0">Bedrag = uren × uurprijs, met de toeslag buiten de openingstijden. <em>Geschreven</em> = ingevulde uren, <em>gepland</em> = vaste tijden voor dagen vanaf vandaag, en voorbije dagen na de laatst geschreven uren van het kind, waarvoor nog niets is ingevuld, en doorbetaalde vakanties, <em>vast</em> = vaste uren per maand. Kinderen zonder uren in dit jaar staan er niet bij.</p>
     </div>
@@ -820,8 +828,22 @@
   // Status van de uren van een kind in een maand: geen status, uren ingediend of betaald (ter voorbereiding op een koppeling met het bureau).
   const STATUS_LABEL = { geen: 'Geen status', ingediend: 'Uren ingediend', betaald: 'Betaald' };
   const statusOf = (childId, month) => ((state.settings.monthStatus || {})[`${childId}|${month}`] || { status: 'geen' });
-  // Kleine markering in de jaaroverzichten: alleen als er een status is.
-  const statusBadge = (childId, m) => { const st = statusOf(childId, m).status; return st === 'geen' ? '' : `<span class="st st-${st}" title="${STATUS_LABEL[st]}">${st === 'betaald' ? '✓✓ betaald' : '✓ ingediend'}</span>`; };
+  // Achtergrondkleur van een cel in de jaaroverzichten (Kalender, Jaar en Financieel) naar de status van het kind in die maand, met een legenda.
+  const statusCls = (childId, m) => { const st = statusOf(childId, m).status; return st === 'geen' ? '' : ` st-bg-${st}`; };
+  const statusTitle = (childId, m) => { const st = statusOf(childId, m).status; return st === 'geen' ? '' : ` title="${STATUS_LABEL[st]}"`; };
+  const yearHasStatus = (year) => Object.entries(state.settings.monthStatus || {}).some(([k, v]) => k.split('|')[1].startsWith(String(year)) && v.status !== 'geen');
+  const statusLegend = (year) => (yearHasStatus(year) ? `<span><span class="stsw st-bg-ingediend"></span>uren ingediend</span><span><span class="stsw st-bg-betaald"></span>betaald</span>` : '');
+  // Groen als alles betaald is: een tracker per tabel houdt per maand (rij) en per kind (kolom) bij of alles waarvoor uren zijn ook de status betaald heeft.
+  const paidTracker = () => {
+    const kid = new Map(), cur = { has: false, paid: true };
+    let all = { has: false, paid: true };
+    return {
+      cell(childId, m, hasHours) { if (!hasHours) return; const ok = statusOf(childId, m).status === 'betaald'; cur.has = true; all.has = true; if (!ok) { cur.paid = false; all.paid = false; } const k = kid.get(childId) || { has: false, paid: true }; k.has = true; if (!ok) k.paid = false; kid.set(childId, k); },
+      rowDone() { const r = cur.has && cur.paid; cur.has = false; cur.paid = true; return r; },
+      kidPaid: (childId) => { const k = kid.get(childId); return !!(k && k.has && k.paid); },
+      allPaid: () => all.has && all.paid,
+    };
+  };
   const monthName0 = (m) => new Date(`${m}-01T12:00`).toLocaleDateString('nl-NL', { month: 'long', year: 'numeric' });
   // Filter per soort opvang in de overzichten (Overzicht, Kalender, Financieel): standaard alles samen. Alleen te kiezen als er meer dan één soort is.
   const typeFilter = { v: 'alle' };
@@ -1262,22 +1284,29 @@
     const outsideContract = list.filter((e) => { const x = findContract(e.contractId); return x && contractWarning(x.contract, e.date); }).length;
     const capDays = [...new Set(list.map((e) => e.date))].filter((d) => capacityIssues(d).length);
     let totMin = 0, totEur = 0;
-    const rows = Object.values(per).sort((a, b) => (a.x ? a.x.child.name : '').localeCompare(b.x ? b.x.child.name : '', 'nl') || ((a.x && a.x.contract.start) || '').localeCompare((b.x && b.x.contract.start) || '')).map((p) => {
+    const rows = Object.values(per).sort((a, b) => (a.x ? a.x.child.name : '').localeCompare(b.x ? b.x.child.name : '', 'nl') || ((a.x && a.x.contract.start) || '').localeCompare((b.x && b.x.contract.start) || '')).map((p, i, arr) => {
       totMin += p.min; totEur += p.eur;
       const tarief = p.rates.size === 1 ? euro([...p.rates][0]) : p.rates.size > 1 ? 'wisselend' : '–';
       const notes = [p.fixedMin ? `waarvan ${fmt(p.fixedMin)} vast per maand` : '',
         p.holidayMin ? `waarvan ${fmt(p.holidayMin)} doorbetaalde vakantie` : '',
         factor !== 1 && p.outsideMin ? `waarvan ${fmt(p.outsideMin)} buiten openingstijden (× ${factor})` : ''].filter(Boolean);
-      return `<tr><td>${esc(label(p.x))}${notes.map((n) => `<div class="sub">${n}</div>`).join('')}</td><td class="num">${fmt(p.min)}</td><td class="num">${tarief}</td><td class="num">${euro(p.eur)}</td></tr>`;
+      // Na het laatste contract van een kind komt een tweede regel met de status van de uren van dat kind in deze maand.
+      const last = p.x && !(arr[i + 1] && arr[i + 1].x && arr[i + 1].x.child.id === p.x.child.id);
+      const st = last ? statusOf(p.x.child.id, m) : null;
+      const statusRow = last ? `<tr class="statusrow noprint"><td colspan="4"><label>Status <select data-statuskid="${esc(p.x.child.id)}" aria-label="Status van ${esc(firstName(p.x.child))}">${Object.entries(STATUS_LABEL).map(([k, l]) => `<option value="${k}" ${k === st.status ? 'selected' : ''}>${l}</option>`).join('')}</select></label>${st.status !== 'geen' && st.at ? ` <span class="sub">gezet door ${esc(st.by || '?')} op ${nlDate(st.at.slice(0, 10))}</span>` : ''}</td></tr>` : '';
+      const isPaid = p.x && statusOf(p.x.child.id, m).status === 'betaald';
+      return `<tr${last ? ' class="hasstatus"' : ''}><td>${esc(label(p.x))}${notes.map((n) => `<div class="sub">${n}</div>`).join('')}</td><td class="num${isPaid ? ' paid' : ''}">${fmt(p.min)}</td><td class="num">${tarief}</td><td class="num${isPaid ? ' paid' : ''}">${euro(p.eur)}</td></tr>${statusRow}`;
     });
+    // Het totaal wordt groen als voor alle kinderen met uren in deze maand de status betaald is.
+    const kidsInMonth = [...new Set(Object.values(per).filter((p) => p.x).map((p) => p.x.child.id))];
+    const allPaidMonth = kidsInMonth.length > 0 && kidsInMonth.every((id) => statusOf(id, m).status === 'betaald');
     $('summary').innerHTML = rows.length
       ? `<table><tr><th>Kind – contract</th><th class="num">Uren</th><th class="num">Tarief</th><th class="num">Bedrag</th></tr>${rows.join('')}
-         <tr><th>Totaal</th><th class="num">${fmt(totMin)}</th><th></th><th class="num">${euro(totEur)}</th></tr></table>
+         <tr><th>Totaal</th><th class="num${allPaidMonth ? ' paid' : ''}">${fmt(totMin)}</th><th></th><th class="num${allPaidMonth ? ' paid' : ''}">${euro(totEur)}</th></tr></table>
          ${missing ? `<div class="warn">Voor sommige uren is geen tarief bekend (bedrag telt als € 0). ${can('settings:write') ? 'Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.' : 'Vraag een beheerder een tarief toe te voegen.'}</div>` : ''}
          ${outsideContract ? `<div class="warn">${outsideContract} registratie${outsideContract === 1 ? '' : 's'} ${outsideContract === 1 ? 'valt' : 'vallen'} buiten de contractperiode.</div>` : ''}
          ${capDays.length ? `<div class="warn">Op ${capDays.length} dag${capDays.length === 1 ? '' : 'en'} zijn er te veel kinderen tegelijk (${capDays.map(nlDate).join(', ')}). Zie de dag in het tabblad Uren invullen.</div>` : ''}`
       : '<div class="empty">Geen uren in deze maand.</div>';
-    renderMonthStatus(m, [...new Map(Object.values(per).filter((p) => p.x).map((p) => [p.x.child.id, p.x.child])).values()].sort((a, b) => firstName(a).localeCompare(firstName(b), 'nl')));
     const sickInMonth = (state.settings.sickDays || []).filter((d) => d.startsWith(m) && !beforeStart(d));
     $('summary').innerHTML += sickInMonth.length ? `<p class="hint" style="margin:10px 0 0"><span class="tag sick">ziek</span> Gastouder ziek gemeld op ${sickInMonth.length} dag${sickInMonth.length === 1 ? '' : 'en'}: ${sickInMonth.map(nlDate).join(', ')}.</p>` : '';
     $('monthEntries').innerHTML = (list.length ? list.map((e) => entryRow(e, true)).join('') : '<div class="empty">Geen registraties.</div>')
@@ -1285,13 +1314,7 @@
     renderTake();
   }
 
-  // Status per kind voor de gekozen maand (Overzicht): een keuzelijst per kind met uren, met wie het wanneer heeft gezet.
-  function renderMonthStatus(m, kids) {
-    $('monthStatus').innerHTML = kids.length ? `<h3 class="subhead">Status per kind</h3>${kids.map((c) => { const st = statusOf(c.id, m);
-      return `<div class="entry" style="flex-wrap:wrap"><div style="flex:1 1 160px"><div class="who">${esc(firstName(c))}</div>${st.status !== 'geen' && st.at ? `<div class="meta">gezet door ${esc(st.by || '?')} op ${nlDate(st.at.slice(0, 10))}</div>` : ''}</div>
-        <select data-statuskid="${esc(c.id)}" aria-label="Status van ${esc(firstName(c))}" style="width:auto">${Object.entries(STATUS_LABEL).map(([k, l]) => `<option value="${k}" ${k === st.status ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`; }).join('')}` : '';
-  }
-  $('monthStatus').addEventListener('change', async (ev) => {
+  $('summary').addEventListener('change', async (ev) => {   // status van een kind in de gekozen maand
     const id = ev.target.dataset.statuskid;
     if (!id) return;
     const m = $('month').value;
@@ -1522,7 +1545,7 @@
     $('calTitle').textContent = view === 'week' ? `Week ${isoWeek(dates[0])} · ${nlLong(dates[0], { day: 'numeric', month: 'short' })} t/m ${nlLong(dates[6], { day: 'numeric', month: 'short', year: 'numeric' })}`
       : view === 'maand' ? nlLong(d, { month: 'long', year: 'numeric' }) : String(d.getFullYear());
     // De uitleg van de chips en tags hoort bij de maandkalender; bij week en jaar staat alleen (als de leeftijd aan staat) de uitleg van de kleuren.
-    const ageLegend = cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '';
+    const ageLegend = (view === 'jaar' && !vrij ? statusLegend(d.getFullYear()) : '') + (cal.age ? BANDS.map((b) => `<span><span class="dot" style="--c:${b.color}"></span>${b.label}</span>`).join('') : '');
     $('calLegend').innerHTML = (vrij
       ? `<span><span class="badge av-ok">2+ vrij</span></span><span><span class="badge av-low">1 vrij</span></span><span><span class="badge av-full">vol</span></span><span><span class="badge av-closed">gesloten / vakantie / ziek</span></span>
          <span style="flex-basis:100%">Vrij = plekken over op het drukste moment van de dag (maximaal ${CAP.total} kinderen tegelijk, eigen kinderen onder 8 jaar meegeteld), op basis van geschreven en geplande uren. Vaste uren per maand hebben geen tijden en tellen niet mee.</span>`
@@ -1624,24 +1647,24 @@
       });
       const kids = state.children.filter((c) => hasHours.has(c.id)).sort((a, b) => firstName(a).localeCompare(firstName(b)));
       const nowM = today.slice(0, 7);
-      const colTot = new Map(kids.map((c) => [c.id, 0]));
+      const colTot = new Map(kids.map((c) => [c.id, 0])), paid = paidTracker();
       const rowsHtml = months.map((m, i) => {
         const rows = new Map(sumChildren([].concat(...[...plans[i].days.values()].map(groupDay))).map((r) => [r.child.id, r]));
         let rowTot = 0;
         const cells = kids.map((c) => {
           const r0 = rows.get(c.id) || { written: 0, planned: 0 }, v = plans[i].vast.get(c.id) || 0;
           const r = { ...r0, written: Math.max(0, r0.written - (dropByChild(plans[i].drop).get(c.id) || 0)) }, tot = r.written + r.planned + v;
-          colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot;
+          colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot; paid.cell(c.id, m, tot > 0);
           const parts = [r.written && `${v ? 'extra' : 'geschreven'} ${fmt(r.written)}`, r.planned && `gepland ${fmt(r.planned)}`, v && `vast ${fmt(v)}`].filter(Boolean);
-          return `<td class="num yearcell${tot && !r.written && m > nowM ? ' future' : ''}">${hrs(tot)}${parts.length > 1 || (parts.length === 1 && !r.written) ? `<small>${parts.join(' · ')}</small>` : ''}${statusBadge(c.id, m)}</td>`;
+          return `<td class="num yearcell${tot && !r.written && m > nowM ? ' future' : ''}${statusCls(c.id, m)}"${statusTitle(c.id, m)}>${hrs(tot)}${parts.length > 1 || (parts.length === 1 && !r.written) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
         }).join('');
         const overN = [...plans[i].days.entries()].filter(([dt, it]) => isOver(dayFree(dt, it))).length;
-        return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(nlLong(new Date(d.getFullYear(), i, 1, 12), { month: 'long' }))}${overN ? ` <span class="warnico" title="${overN} dag${overN === 1 ? '' : 'en'} met te veel kinderen">⚠️${overN}</span>` : ''}</th>${cells}<td class="num"><strong>${hrs(rowTot)}</strong></td></tr>`;
+        return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(nlLong(new Date(d.getFullYear(), i, 1, 12), { month: 'long' }))}${overN ? ` <span class="warnico" title="${overN} dag${overN === 1 ? '' : 'en'} met te veel kinderen">⚠️${overN}</span>` : ''}</th>${cells}<td class="num${paid.rowDone() ? ' paid' : ''}"><strong>${hrs(rowTot)}</strong></td></tr>`;
       }).join('');
       const grand = [...colTot.values()].reduce((s, x) => s + x, 0);
       body.innerHTML = kids.length ? `<div class="card"><h2>Uren per kind per maand, ${d.getFullYear()}</h2><div class="scrollx"><table class="sticky">
         <tr><th>Maand</th>${kids.map((c) => `<th class="num${cal.age ? ' agehead' : ''}"${cStyle(c, today)}>${esc(firstName(c))}${cal.age && c.birthDate ? `<small class="sub" style="display:block">${ageShort(c, today)}</small>` : ''}</th>`).join('')}<th class="num">Totaal</th></tr>${rowsHtml}
-        <tr><th>Totaal ${d.getFullYear()}</th>${kids.map((c) => `<th class="num">${hrs(colTot.get(c.id))}</th>`).join('')}<th class="num">${hrs(grand)}</th></tr></table></div>
+        <tr><th>Totaal ${d.getFullYear()}</th>${kids.map((c) => `<th class="num${paid.kidPaid(c.id) ? ' paid' : ''}">${hrs(colTot.get(c.id))}</th>`).join('')}<th class="num${paid.allPaid() ? ' paid' : ''}">${hrs(grand)}</th></tr></table></div>
         <p class="hint" style="margin:10px 0 0">Geschreven = ingevuld; gepland = vaste tijden vanaf vandaag en voorbije dagen na de laatst geschreven uren van het kind, en doorbetaalde vakanties; vast = vaste uren per maand van het contract. Alleen geschreven uren staan zonder toelichting.${cal.age ? ' De leeftijd is van vandaag.' : ''}</p></div>`
         : `<div class="card"><div class="empty">Geen uren in ${d.getFullYear()}.</div></div>`;
     }
@@ -1846,21 +1869,22 @@
     const kids = [...data.kids.values()].filter((c) => cells.some((m) => cellSum(m.get(c.id)) > 0)).sort((a, b) => firstName(a).localeCompare(firstName(b), 'nl'));
 
     // Tabel
-    const colTot = new Map(kids.map((c) => [c.id, 0]));
+    const colTot = new Map(kids.map((c) => [c.id, 0])), paid = paidTracker();
     let grand = 0;
     const rows = months.map((m, i) => {
       let rowTot = 0;
       const tds = kids.map((c) => {
         const cell = cells[i].get(c.id), tot = cellSum(cell);
-        colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot;
+        colTot.set(c.id, colTot.get(c.id) + tot); rowTot += tot; paid.cell(c.id, m, tot > 0.005);
         const parts = cell ? [cell.w > 0.005 && `${cell.v > 0.005 ? 'extra' : 'geschreven'} ${euro0(cell.w)}`, cell.p > 0.005 && `gepland ${euro0(cell.p)}`, cell.v > 0.005 && `vast ${euro0(cell.v)}`].filter(Boolean) : [];
-        return `<td class="num yearcell${tot > 0 && !(cell && cell.w > 0) && m > nowM ? ' future' : ''}">${tot > 0.005 ? euro(tot) : '–'}${parts.length > 1 || (parts.length === 1 && !(cell && (cell.w > 0 || cell.v > 0.005))) ? `<small>${parts.join(' · ')}</small>` : ''}${statusBadge(c.id, m)}</td>`;
+        return `<td class="num yearcell${tot > 0 && !(cell && cell.w > 0) && m > nowM ? ' future' : ''}${statusCls(c.id, m)}"${statusTitle(c.id, m)}>${tot > 0.005 ? euro(tot) : '–'}${parts.length > 1 || (parts.length === 1 && !(cell && (cell.w > 0 || cell.v > 0.005))) ? `<small>${parts.join(' · ')}</small>` : ''}</td>`;
       }).join('');
       grand += rowTot;
-      return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(MONTHS_LONG[i])}</th>${tds}<td class="num"><strong>${rowTot > 0.005 ? euro(rowTot) : '–'}</strong></td></tr>`;
+      return `<tr${m === nowM ? ' class="cur-row"' : ''}><th>${esc(MONTHS_LONG[i])}</th>${tds}<td class="num${paid.rowDone() ? ' paid' : ''}"><strong>${rowTot > 0.005 ? euro(rowTot) : '–'}</strong></td></tr>`;
     }).join('');
     $('finTable').innerHTML = kids.length ? `<table class="fin-table sticky"><tr><th>Maand</th>${kids.map((c) => `<th class="num">${esc(firstName(c))}</th>`).join('')}<th class="num">Totaal</th></tr>${rows}
-      <tr><th>Totaal ${year}</th>${kids.map((c) => `<th class="num">${euro(colTot.get(c.id))}</th>`).join('')}<th class="num">${euro(grand)}</th></tr></table>` : `<div class="empty">Geen uren in ${year}.</div>`;
+      <tr><th>Totaal ${year}</th>${kids.map((c) => `<th class="num${paid.kidPaid(c.id) ? ' paid' : ''}">${euro(colTot.get(c.id))}</th>`).join('')}<th class="num${paid.allPaid() ? ' paid' : ''}">${euro(grand)}</th></tr></table>` : `<div class="empty">Geen uren in ${year}.</div>`;
+    $('finStatusLegend').innerHTML = kids.length ? statusLegend(year) : '';
     $('finWarn').textContent = missing ? `Voor sommige uren is geen tarief bekend (het bedrag telt als € 0). ${can('settings:write') ? 'Voeg een algemeen tarief toe bij Instellingen of vul een tarief in bij het contract.' : 'Vraag een beheerder een tarief toe te voegen.'}` : '';
 
     // Grafiek: kolommen voor het gekozen jaar, of een lijn per jaar om jaren te vergelijken.
