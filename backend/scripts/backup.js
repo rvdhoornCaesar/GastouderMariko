@@ -106,4 +106,22 @@ async function restore({ conn, id, apply = false, replace = false, now = new Dat
   return { applied: true, id, summary, safetyBackup: safety.id };
 }
 
-module.exports = { backup, restore, listBackups, checksum, normalizeRow, stamp, EXCLUDED };
+// Ruimt automatische back-ups op: de nieuwste `keep` blijven staan, oudere gaan weg. Alleen back-ups met een omschrijving die met
+// "automatisch" begint worden aangeraakt; handmatige back-ups en veiligheidskopieën van een herstel blijven altijd staan.
+const AUTO_LABEL = 'automatisch';
+async function prune({ conn, keep = 35, apply = true }) {
+  if (!Number.isInteger(keep) || keep < 1) throw new Error('keep moet een geheel getal van minstens 1 zijn.');
+  const auto = (await listBackups(conn)).filter((b) => !b.incomplete && (b.label || '').startsWith(AUTO_LABEL));   // nieuwste eerst
+  const old = auto.slice(keep);
+  if (apply) {
+    const names = await tableNames(conn);
+    for (const b of old) {
+      for (const n of names.filter((x) => x.startsWith(`${PREFIX}${b.id}`) && BACKUP_NAME.exec(x)[1] === b.id)) {
+        try { await service(conn).deleteTable(n); } catch (e) { if (e.statusCode !== 404) throw e; }
+      }
+    }
+  }
+  return { kept: auto.slice(0, keep).map((b) => b.id), removed: old.map((b) => b.id), applied: apply };
+}
+
+module.exports = { backup, restore, listBackups, prune, AUTO_LABEL, checksum, normalizeRow, stamp, EXCLUDED };

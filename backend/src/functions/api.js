@@ -72,6 +72,7 @@ route('putStartDate', ['PUT'], 'settings/start-date', handlers.putStartDate);
 route('putVacations', ['PUT'], 'settings/vacations', handlers.putVacations);
 route('putOpening', ['PUT'], 'settings/opening', handlers.putOpening);
 route('putSickDay', ['PUT'], 'sick-days', handlers.putSickDay);
+route('putHolidays', ['PUT'], 'settings/holidays', handlers.putHolidays);
 route('putMonthStatus', ['PUT'], 'month-status', handlers.putMonthStatus);
 route('putAgencyLinks', ['PUT'], 'settings/agencies', handlers.putAgencyLinks);
 route('putCareTypes', ['PUT'], 'settings/care-types', handlers.putCareTypes);

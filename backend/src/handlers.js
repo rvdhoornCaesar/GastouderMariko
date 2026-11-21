@@ -145,7 +145,7 @@ async function getSettings({ user, repo, env }) {
   perm.require(user, 'settings:read');
   const opening = (await repo.getOpening()) || v.DEFAULT_OPENING;
   const manage = perm.can(user, 'settings:write');   // wie mag toegang regelen, ziet de gebruikerslijsten en de technische info
-  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), ...(await careSettings(repo, user)), monthStatus: await monthStatusMap(repo), startDate: await repo.getStartDate(), firstEntry: await repo.firstEntryDate(), runtime: manage ? process.version : undefined } };
+  return { status: 200, jsonBody: { rates: await repo.getRates(), users: manage ? await msMembers(repo, user.instanceId, env) : [], fixedUsers: manage ? fixedUsers(env) : [], me: user.email, opening, ownChildren: await repo.getOwnChildren(), vacations: await repo.getVacations(), sickDays: await repo.getSickDays(), ...(await careSettings(repo, user)), monthStatus: await monthStatusMap(repo), holidays: await holidaySettings(repo), startDate: await repo.getStartDate(), firstEntry: await repo.firstEntryDate(), runtime: manage ? process.version : undefined } };
 }
 
 // Nieuwe organisaties moeten eerst een gastouderbureau kiezen (onboarding) voordat er kinderen bij kunnen. Bestaande organisaties zijn daarvan vrijgesteld.
@@ -236,6 +236,15 @@ async function putMonthStatus({ user, repo, body, now = new Date() }) {
   return { status: 200, jsonBody: { monthStatus: await monthStatusMap(repo) } };
 }
 const monthStatusMap = async (repo) => Object.fromEntries((await repo.listMonthStatuses()).map((r) => [`${r.childId}|${r.month}`, { status: r.status, by: r.by, at: r.at }]));
+
+// Feestdagen die als gesloten gelden, met uitzonderingen per datum (open ondanks de feestdag). Zonder eigen keuze geldt de standaardlijst.
+const holidaySettings = async (repo) => (await repo.getHolidays()) || { closed: v.HOLIDAYS_DEFAULT, openDates: [] };
+async function putHolidays({ user, repo, body }) {
+  perm.require(user, 'settings:write');
+  const h = v.parseHolidaySettings(body);
+  await repo.setHolidays(h);
+  return { status: 200, jsonBody: { holidays: h } };
+}
 
 // De gastouder ziek melden voor één dag (of dat ongedaan maken). Dat mag iedereen die uren invult, dus ook een gebruiker.
 const MAX_SICK_DAYS = 1000;   // de lijst staat in één rij (maximaal 32.000 tekens)
@@ -553,4 +562,4 @@ async function deleteAccount({ user, repo, params }) {
   return { status: 204 };
 }
 
-module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers, putSickDay, putPrefs, putMonthStatus, putAgencyLinks, putCareTypes, putAgencyRates };
+module.exports = { setAccountRole, login, loginMfa, totpStart, totpEnable, totpDisable, logout, me, changePassword, listAccounts, createAccount, resetAccount, deleteAccount, listChildren, createChild, updateChild, deleteChild, listEntries, createEntry, createEntries, updateEntry, deleteEntry, getSettings, putRates, putVacations, putStartDate, putOpening, putOwnChildren, putUsers, putSickDay, putHolidays, putPrefs, putMonthStatus, putAgencyLinks, putCareTypes, putAgencyRates };

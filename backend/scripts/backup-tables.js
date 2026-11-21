@@ -2,9 +2,10 @@
 // Gebruik (verbinding in TABLES_CONNECTION):
 //   node scripts/backup-tables.js backup [--label tekst]
 //   node scripts/backup-tables.js list
+//   node scripts/backup-tables.js prune [--keep 35]   (ruimt alleen back-ups met omschrijving "automatisch…" op)
 //   node scripts/backup-tables.js restore --id <id> [--apply] [--replace]
 //   node scripts/backup-tables.js plan-organisaties   (alleen lezen: wat de overstap naar organisaties zou doen; ALLOWED_USERS uit de omgeving)
-const { backup, restore, listBackups } = require('./backup');
+const { backup, restore, listBackups, prune } = require('./backup');
 const { createRepo } = require('../src/repo');
 const { planSeed } = require('../src/organisations');
 const masked = (e) => e.replace(/^(.{1,2})[^@]*@/, '$1***@');   // adressen niet volledig in een log
@@ -24,6 +25,10 @@ const conn = process.env.TABLES_CONNECTION;
     const list = await listBackups(conn);
     if (!list.length) console.log('Geen back-ups.');
     list.forEach((b) => console.log(`${b.id}  ${b.createdAt || '(onvolledig)'}  ${b.label || ''}  ${b.tables.map((t) => `${t.name}=${t.rows}`).join(' ')}`));
+  } else if (cmd === 'prune') {
+    const keep = value('keep') ? Number(value('keep')) : 35;
+    const res = await prune({ conn, keep });
+    console.log(`Automatische back-ups: ${res.kept.length} bewaard, ${res.removed.length} opgeruimd${res.removed.length ? ` (${res.removed.join(', ')})` : ''}.`);
   } else if (cmd === 'restore') {
     if (!value('id')) throw new Error('Geef --id.');
     const res = await restore({ conn, id: value('id'), apply: flag('apply'), replace: flag('replace') });
@@ -40,6 +45,6 @@ const conn = process.env.TABLES_CONNECTION;
     console.log(`Lokale accounts die platformbeheerder blijven: ${plan.platformFlags.length}${plan.platformFlags.length ? ` (${plan.platformFlags.map(masked).join(', ')})` : ''}`);
     plan.skipped.forEach((x) => console.log(`  overgeslagen: ${masked(x.email)} (${x.reason})`));
   } else {
-    throw new Error('Onbekende opdracht. Gebruik backup, list, restore of plan-organisaties.');
+    throw new Error('Onbekende opdracht. Gebruik backup, list, prune, restore of plan-organisaties.');
   }
 })().catch((e) => { console.error(`Mislukt: ${e.message}`); process.exit(1); });

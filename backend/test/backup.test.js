@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { TableClient } = require('@azure/data-tables');
-const { backup, restore, listBackups, checksum, normalizeRow } = require('../scripts/backup');
+const { backup, restore, listBackups, prune, checksum, normalizeRow } = require('../scripts/backup');
 
 // Draait tegen een echte Azurite (poort 10113, los van de andere tests die ook Azurite starten).
 const PORT = 10113;
@@ -98,4 +98,22 @@ test('een beschadigde back-up wordt niet teruggezet', async () => {
   await assert.rejects(restore({ conn: CONN, id: first.id, apply: true, now: new Date('2026-11-15T13:00:00Z') }), /beschadigd/);
   assert.deepEqual((await rowsOf('children')).map((r) => r.name), ['Noor', 'Sam']);   // niets veranderd
   await assert.rejects(restore({ conn: CONN, id: '20000101t000000' }), /niet gevonden/);
+});
+
+test('opruimen: alleen automatische back-ups buiten de nieuwste N verdwijnen', async () => {
+  const day = (d) => new Date(`2026-12-${String(d).padStart(2, '0')}T02:00:00Z`);
+  const manual = await backup({ conn: CONN, now: day(1), label: 'voor migratie' });
+  const ids = [];
+  for (const d of [2, 3, 4, 5]) ids.push((await backup({ conn: CONN, now: day(d), label: 'automatisch' })).id);
+  const dry = await prune({ conn: CONN, keep: 2, apply: false });
+  assert.deepEqual(dry.removed, [ids[1], ids[0]]);
+  assert.equal((await listBackups(CONN)).length >= 5, true);   // proefrun verwijdert niets
+  const res = await prune({ conn: CONN, keep: 2 });
+  assert.deepEqual(res.kept, [ids[3], ids[2]]);
+  const left = (await listBackups(CONN)).map((b) => b.id);
+  assert.ok(!left.includes(ids[0]) && !left.includes(ids[1]));
+  assert.ok(left.includes(ids[2]) && left.includes(ids[3]) && left.includes(manual.id));   // handmatige blijft
+  const tables = []; for await (const t of require('@azure/data-tables').TableServiceClient.fromConnectionString(CONN, { allowInsecureConnection: true }).listTables()) tables.push(t.name);
+  assert.ok(!tables.some((n) => n.startsWith(`bak${ids[0]}`)), 'ook de kopieën van de tabellen zijn weg');
+  await assert.rejects(prune({ conn: CONN, keep: 0 }), /keep/);
 });

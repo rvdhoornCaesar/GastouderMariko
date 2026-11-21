@@ -4,7 +4,11 @@ name: Back-up en herstel (tabellen)
 # Een back-up verandert niets aan de bestaande gegevens: de kopieën staan in aparte tabellen "bak<tijdstip><naam>" in hetzelfde
 # storage account, met een controle dat elke kopie gelijk is aan de bron. Sessies en inlogpogingen worden niet meegenomen.
 # Voor production vraagt GitHub om goedkeuring, net als bij een deploy.
+# Elke nacht draait er ook een automatische back-up van production (omschrijving "automatisch"), waarna automatische back-ups ouder
+# dan de nieuwste 35 worden opgeruimd. Handmatige back-ups en veiligheidskopieën van een herstel worden nooit opgeruimd.
 on:
+  schedule:
+    - cron: '17 2 * * *'
   workflow_dispatch:
     inputs:
       environment:
@@ -13,9 +17,9 @@ on:
         options: [test, production]
         default: test
       action:
-        description: backup = nieuwe back-up, list = overzicht, restore = terugzetten, plan-organisaties = voorbeeld van de overstap naar organisaties (alleen lezen)
+        description: backup = nieuwe back-up, list = overzicht, prune = oude automatische back-ups opruimen (houdt de nieuwste 35), restore = terugzetten, plan-organisaties = voorbeeld van de overstap naar organisaties (alleen lezen)
         type: choice
-        options: [backup, list, restore, plan-organisaties]
+        options: [backup, list, prune, restore, plan-organisaties]
         default: backup
       label:
         description: Omschrijving bij een nieuwe back-up (bijvoorbeeld "voor migratie")
@@ -39,15 +43,16 @@ permissions:
   contents: read
 
 concurrency:
-  group: backup-${{ inputs.environment }}
+  group: backup-${{ inputs.environment || 'production' }}
   cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    # De nachtelijke run gebruikt een eigen omgeving zonder vereiste goedkeuring (zie README); handmatige runs gebruiken de gekozen omgeving.
+    environment: ${{ github.event_name == 'schedule' && 'production-backup' || inputs.environment }}
     env:
-      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || format('gastouder-{0}-rg', inputs.environment) }}
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || format('gastouder-{0}-rg', inputs.environment || 'production') }}
     steps:
       - uses: actions/checkout@v5
 
@@ -68,12 +73,12 @@ jobs:
 
       - name: Opdracht uitvoeren
         env:
-          ACTION: ${{ inputs.action }}
-          LABEL: ${{ inputs.label }}
+          ACTION: ${{ inputs.action || 'backup' }}
+          LABEL: ${{ github.event_name == 'schedule' && 'automatisch' || inputs.label }}
           BACKUP_ID: ${{ inputs.backup_id }}
           APPLY: ${{ inputs.apply }}
           REPLACE: ${{ inputs.replace }}
-          ENVIRONMENT: ${{ inputs.environment }}
+          ENVIRONMENT: ${{ inputs.environment || 'production' }}
           ALLOWED_USERS: ${{ vars.ALLOWED_USERS }}
         run: |
           set -euo pipefail
@@ -97,4 +102,5 @@ jobs:
             echo '```'
             node backend/scripts/backup-tables.js "${args[@]}"
             echo '```'
+            if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then node backend/scripts/backup-tables.js prune --keep 35; fi
           } | tee -a "$GITHUB_STEP_SUMMARY"

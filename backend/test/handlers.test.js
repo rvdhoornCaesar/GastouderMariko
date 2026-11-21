@@ -975,3 +975,20 @@ test('voorkeuren per account: het thema, standaard automatisch', async () => {
   await h.putPrefs({ user: u('thema@voorbeeld.nl'), repo, body: { theme: 'light' } });
   assert.deepEqual(await me('thema@voorbeeld.nl'), { theme: 'light' });
 });
+
+test('feestdagen: standaardlijst, eigen keuze en uitzonderingen per datum', async () => {
+  const cur = async () => (await call(h.getSettings)).jsonBody.holidays;
+  const def = await cur();
+  assert.deepEqual(def.openDates, []);
+  assert.ok(def.closed.includes('koningsdag') && def.closed.includes('tweedekerstdag'));
+  assert.ok(!def.closed.includes('goedevrijdag') && !def.closed.includes('bevrijdingsdag'));   // standaard niet gesloten
+  const r = (await call(h.putHolidays, { body: { closed: ['goedevrijdag', 'koningsdag'], openDates: ['2027-04-27', '2027-04-27', '2026-12-25'] } })).jsonBody.holidays;
+  assert.deepEqual(r, { closed: ['goedevrijdag', 'koningsdag'], openDates: ['2026-12-25', '2027-04-27'] });   // gesorteerd, zonder dubbele
+  assert.deepEqual(await cur(), r);
+  await assert.rejects(call(h.putHolidays, { body: { closed: ['sinterklaas'], openDates: [] } }), (e) => e.status === 400);
+  await assert.rejects(call(h.putHolidays, { body: { closed: [], openDates: ['2027-02-30'] } }), (e) => e.status === 400);
+  await assert.rejects(call(h.putHolidays, { body: { closed: 'koningsdag', openDates: [] } }), (e) => e.status === 400);
+  const gebruiker = { email: 'g@voorbeeld.nl', kind: 'local', role: 'gebruiker', instanceId: 'main' };
+  await assert.rejects(h.putHolidays({ user: gebruiker, repo, env, params: {}, body: { closed: [], openDates: [] } }), (e) => e.status === 403);
+  assert.deepEqual((await call(h.putHolidays, { body: { closed: [], openDates: [] } })).jsonBody.holidays, { closed: [], openDates: [] });   // alles open mag ook
+});
