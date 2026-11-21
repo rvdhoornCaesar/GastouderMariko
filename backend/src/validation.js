@@ -292,6 +292,17 @@ function parseMonthStatus(body) {
   return { childId: b.childId, month: b.month, status: b.status };
 }
 
+// Nederlandse feestdagen die de gastouder als gesloten kan laten gelden. Standaard gesloten: de dagen waarop een kinderopvang meestal dicht is;
+// Goede Vrijdag en Bevrijdingsdag (alleen in lustrumjaren een vrije dag) staan standaard uit.
+const HOLIDAY_KEYS = ['nieuwjaarsdag', 'goedevrijdag', 'eerstepaasdag', 'tweedepaasdag', 'koningsdag', 'bevrijdingsdag', 'hemelvaartsdag', 'eerstepinksterdag', 'tweedepinksterdag', 'eerstekerstdag', 'tweedekerstdag'];
+const HOLIDAYS_DEFAULT = ['nieuwjaarsdag', 'eerstepaasdag', 'tweedepaasdag', 'koningsdag', 'hemelvaartsdag', 'eerstepinksterdag', 'tweedepinksterdag', 'eerstekerstdag', 'tweedekerstdag'];
+function parseHolidaySettings(body) {
+  const b = body || {};
+  if (!Array.isArray(b.closed) || b.closed.some((k) => !HOLIDAY_KEYS.includes(k))) throw bad('Ongeldige feestdagen.');
+  if (!Array.isArray(b.openDates) || b.openDates.length > 200 || b.openDates.some((d) => !validDate(d))) throw bad('Ongeldige datum bij de uitzonderingen.');
+  return { closed: HOLIDAY_KEYS.filter((k) => b.closed.includes(k)), openDates: [...new Set(b.openDates)].sort() };
+}
+
 function parseOrgName(v) {
   const n = String(v ?? '').replace(/\s+/g, ' ').trim();
   if (!n || n.length > 100 || /[\u0000-\u001f\u007f-\u009f<>]/.test(n)) throw bad('Geef een naam van 1 tot 100 tekens.');
@@ -304,4 +315,4 @@ function parseRole(v) {
   return r;
 }
 
-module.exports = { parseSickDay, parseOrgName, parseAgencyName, parseMonthStatus, MONTH_STATUSES, parseAgencyIds, parseAgencyLinks, parseTypes, parseAgencyRates, CARE_TYPES, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };
+module.exports = { parseSickDay, parseOrgName, parseAgencyName, parseMonthStatus, MONTH_STATUSES, parseHolidaySettings, HOLIDAY_KEYS, HOLIDAYS_DEFAULT, parseAgencyIds, parseAgencyLinks, parseTypes, parseAgencyRates, CARE_TYPES, parseRole, parseAccountEmail, parseOwnChildren, parseVacations, parseStartDate, DEFAULT_OPENING, parseOpening, parseRates, parseUsers, parseChild, parseEntry, parseMonth, parseId, parseEntryId };

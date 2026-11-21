@@ -298,6 +298,7 @@
 </main>
 
 <main id="app" hidden>
+  <div class="warn noprint" id="reminderBanner" hidden style="margin:10px 0"></div>
   <div class="warn noprint" id="onboardBanner" hidden style="margin:10px 0"><strong>Eerste stap:</strong> kies bij Instellingen je gastouderbureau(s). <button class="btn small" id="onboardGo" type="button" style="margin-left:8px">Naar Instellingen</button></div>
   <!-- UREN -->
   <section id="tab-uren">
@@ -553,6 +554,18 @@
       <div class="err" id="vacErr"></div>
     </div>
 
+    <div class="card">
+      <h2>Feestdagen</h2>
+      <p class="hint">Op welke feestdagen ben je gesloten? Zo'n dag telt als een dag zonder opvang: er worden geen uren voor gepland en de dag staat in de kalender als <em>feestdag</em>. Ingevulde uren blijven staan (met een waarschuwing). Bevrijdingsdag is alleen in lustrumjaren een vrije dag en Goede Vrijdag is geen officiële feestdag; die staan daarom standaard uit. Ben je op een bepaalde feestdag toch open, voeg die datum dan toe aan de uitzonderingen.</p>
+      <div id="holidayList"></div>
+      <div class="hint" style="margin-top:10px"><strong>Toch open op:</strong></div>
+      <div id="holidayOpenList"></div>
+      <form class="grid2" id="holidayOpenForm" style="margin-top:6px">
+        <div class="wide"><label for="holidayOpenDate">Datum (een feestdag waarop je open bent)</label><input type="date" id="holidayOpenDate" required></div>
+        <div class="wide"><button class="btn secondary">Uitzondering toevoegen</button></div>
+      </form>
+      <div class="err" id="holidayErr"></div>
+    </div>
     <div class="card">
       <h2>Openingstijden en toeslag</h2>
       <p class="hint">Binnen de openingstijden geldt het gewone uurtarief. Uren buiten de openingstijden krijgen een toeslag: het tarief wordt vermenigvuldigd met de factor (2 = dubbel tarief, 1 = geen toeslag). Op een gesloten dag valt alles buiten de openingstijden.</p>
@@ -893,9 +906,32 @@
   // Ziek gemeld (knop bij Uren invullen): een dag zonder opvang, net als een vakantie. Daarom telt hij overal mee als 'vakantie' (geen geplande
   // uren, dag gesloten, waarschuwing bij uren); alleen de tekst en kleur zeggen 'ziek'. Een echte vakantie gaat voor.
   const sickOf = (date) => (state.settings.sickDays || []).includes(date);
-  const vacationOf = (date) => (state.settings.vacations || []).find((h) => h.from <= date && date <= h.to) || (sickOf(date) ? { from: date, to: date, note: '', sick: true } : null);
-  const absentWord = (v) => (v && v.sick ? 'ziek' : 'vakantie');
-  const absentText = (v) => (v && v.sick ? 'Gastouder ziek' : `Vakantie gastouder${v && v.note ? `: ${v.note}` : ''}`);
+  // Nederlandse feestdagen die als gesloten gelden (Instellingen: per soort aan of uit, en per datum open ondanks de feestdag). Net als ziek telt zo'n dag
+  // overal als dag zonder opvang (geen geplande uren, gesloten in de kalender, waarschuwing bij uren); een vakantie of ziekmelding gaat voor.
+  const HOLIDAY_NAMES = { nieuwjaarsdag: 'Nieuwjaarsdag', goedevrijdag: 'Goede Vrijdag', eerstepaasdag: 'Eerste Paasdag', tweedepaasdag: 'Tweede Paasdag', koningsdag: 'Koningsdag', bevrijdingsdag: 'Bevrijdingsdag', hemelvaartsdag: 'Hemelvaartsdag', eerstepinksterdag: 'Eerste Pinksterdag', tweedepinksterdag: 'Tweede Pinksterdag', eerstekerstdag: 'Eerste Kerstdag', tweedekerstdag: 'Tweede Kerstdag' };
+  const HOLIDAY_DEFAULT = ['nieuwjaarsdag', 'eerstepaasdag', 'tweedepaasdag', 'koningsdag', 'hemelvaartsdag', 'eerstepinksterdag', 'tweedepinksterdag', 'eerstekerstdag', 'tweedekerstdag'];
+  const holidayCache = new Map();
+  function holidaysOfYear(y) {   // datum -> sleutel
+    if (holidayCache.has(y)) return holidayCache.get(y);
+    const a = y % 19, b = Math.floor(y / 100), c = y % 100, d = Math.floor(b / 4), e = b % 4, f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3);
+    const h = (19 * a + b - d - g + 15) % 30, i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+    const easter = new Date(y, month - 1, day, 12), plus = (n) => { const x = new Date(easter); x.setDate(x.getDate() + n); return iso(x); };
+    const king = new Date(y, 3, 27, 12); if (king.getDay() === 0) king.setDate(26);   // Koningsdag: 27 april, of 26 april als dat een zondag is
+    const map = { [`${y}-01-01`]: 'nieuwjaarsdag', [plus(-2)]: 'goedevrijdag', [plus(0)]: 'eerstepaasdag', [plus(1)]: 'tweedepaasdag', [iso(king)]: 'koningsdag', [`${y}-05-05`]: 'bevrijdingsdag',
+      [plus(39)]: 'hemelvaartsdag', [plus(49)]: 'eerstepinksterdag', [plus(50)]: 'tweedepinksterdag', [`${y}-12-25`]: 'eerstekerstdag', [`${y}-12-26`]: 'tweedekerstdag' };
+    holidayCache.set(y, map);
+    return map;
+  }
+  const holidayCfg = () => state.settings.holidays || { closed: HOLIDAY_DEFAULT, openDates: [] };
+  const holidayOf = (date) => {   // { key, name } als dit een feestdag is die als gesloten geldt
+    const key = holidaysOfYear(Number(date.slice(0, 4)))[date], cfg = holidayCfg();
+    return key && cfg.closed.includes(key) && !(cfg.openDates || []).includes(date) ? { key, name: HOLIDAY_NAMES[key] } : null;
+  };
+  const vacationOf = (date) => (state.settings.vacations || []).find((h) => h.from <= date && date <= h.to) || (sickOf(date) ? { from: date, to: date, note: '', sick: true } : null)
+    || (() => { const f = holidayOf(date); return f ? { from: date, to: date, note: f.name, holiday: true } : null; })();
+  const absentWord = (v) => (v && v.sick ? 'ziek' : v && v.holiday ? 'feestdag' : 'vakantie');
+  const absentText = (v) => (v && v.sick ? 'Gastouder ziek' : v && v.holiday ? `Feestdag: ${v.note}` : `Vakantie gastouder${v && v.note ? `: ${v.note}` : ''}`);
   // Vaste gesloten dag: een weekdag die bij Instellingen (openingstijden) niet open staat. Vakantie en begindatum gaan voor.
   const closedWeekday = (date) => { const o = (state.settings.opening.days || [])[(new Date(date + 'T12:00').getDay() + 6) % 7]; return !!(o && !o.open); };
   const vacTag = (date) => {
@@ -1064,7 +1100,7 @@
   // Waarschuwing bij een datum buiten het contract; bij wisselen van dag of contract ook de vaste tijden invullen.
   function updateEntryHints(prefill) {
     const x = findContract($('contract').value), date = $('day').value;
-    $('entryWarn').textContent = [x ? contractWarning(x.contract, date) : '', vacationOf(date) ? `Let op: de gastouder ${vacationOf(date).sick ? 'is ziek gemeld' : 'heeft vakantie'} op ${nlDate(date)}.` : ''].filter(Boolean).join(' ');
+    $('entryWarn').textContent = [x ? contractWarning(x.contract, date) : '', vacationOf(date) ? `Let op: de gastouder ${vacationOf(date).sick ? 'is ziek gemeld' : vacationOf(date).holiday ? `is gesloten (${vacationOf(date).note})` : 'heeft vakantie'} op ${nlDate(date)}.` : ''].filter(Boolean).join(' ');
     const d = prefill && x && scheduleFor(x.contract, date);
     if (d) { $('start').value = d.from; $('end').value = d.to; }
     updateEntryCap();
@@ -1127,7 +1163,7 @@
   function entryRow(e, withDate) {
     const x = findContract(e.contractId), multi = x && x.child.contracts.length > 1;
     const name = x ? x.child.name + (multi ? ` · ${contractPeriod(x.contract)}` : '') : '(verwijderd contract)';
-    const flags = (x && contractWarning(x.contract, e.date) ? '<span class="flag">⚠ buiten contract</span>' : '') + (vacationOf(e.date) ? `<span class="flag">⚠ ${vacationOf(e.date).sick ? 'gastouder ziek' : 'vakantie gastouder'}</span>` : '');
+    const flags = (x && contractWarning(x.contract, e.date) ? '<span class="flag">⚠ buiten contract</span>' : '') + (vacationOf(e.date) ? `<span class="flag">⚠ ${vacationOf(e.date).sick ? 'gastouder ziek' : vacationOf(e.date).holiday ? 'feestdag' : 'vakantie gastouder'}</span>` : '');
     return `<div class="entry c"><div class="main"><span class="who">${withDate ? esc(nlDate(e.date)) + ' · ' : ''}${esc(name)}</span><span class="meta">${e.start}–${e.end}</span>${e.note ? `<span class="meta note" title="${esc(e.note)}">${esc(e.note)}</span>` : ''}${flags}</div>
       <div class="act"><span class="hours">${fmt(entryMin(e))}</span><button class="link neutral noprint" data-edit="${e.id}" title="Bewerken" aria-label="Bewerken">✎</button><button class="link noprint" data-del="${e.id}" title="Verwijderen" aria-label="Verwijderen">✕</button></div></div>`;
   }
@@ -1553,7 +1589,7 @@
     $('calLegend').innerHTML = (vrij
       ? `<span><span class="badge av-ok">2+ vrij</span></span><span><span class="badge av-low">1 vrij</span></span><span><span class="badge av-full">vol</span></span><span><span class="badge av-closed">gesloten / vakantie / ziek</span></span>
          <span style="flex-basis:100%">Vrij = plekken over op het drukste moment van de dag (maximaal ${CAP.total} kinderen tegelijk, eigen kinderen onder 8 jaar meegeteld), op basis van geschreven en geplande uren. Vaste uren per maand hebben geen tijden en tellen niet mee.</span>`
-      : (view === 'maand' ? `<span><span class="chip written">Noor 9:00</span> geschreven (ingevuld)</span><span><span class="chip planned">Noor 9:00</span> gepland (vaste tijden)</span><span><span class="tag">gesloten</span> geen opvang volgens de openingstijden · <span class="tag">vakantie</span> vakantie van de gastouder · <span class="tag sick">ziek</span> gastouder ziek gemeld</span>` : ''))
+      : (view === 'maand' ? `<span><span class="chip written">Noor 9:00</span> geschreven (ingevuld)</span><span><span class="chip planned">Noor 9:00</span> gepland (vaste tijden)</span><span><span class="tag">gesloten</span> geen opvang volgens de openingstijden · <span class="tag">vakantie</span> vakantie van de gastouder · <span class="tag">feestdag</span> gesloten feestdag · <span class="tag sick">ziek</span> gastouder ziek gemeld</span>` : ''))
         + ageLegend;
     await Promise.all(months.map((m) => guard(() => ensureMonth(m))));
     if (seq !== calSeq) return;
@@ -2334,6 +2370,31 @@
     if (id && confirm('Dit eigen kind verwijderen?')) saveSetting($('ownErr'), 'own-children', { ownChildren: state.settings.ownChildren.filter((c) => c.id !== id) }, (res) => { state.settings.ownChildren = res.ownChildren; });
   });
 
+  // --- Feestdagen (Instellingen) ---
+  function renderHolidays() {
+    const cfg = holidayCfg(), y = new Date().getFullYear();
+    const dateOf = (key) => { for (const yy of [y, y + 1]) { const e = Object.entries(holidaysOfYear(yy)).find(([, k]) => k === key); if (e && e[0] >= iso(new Date())) return e[0]; } return null; };
+    $('holidayList').innerHTML = Object.entries(HOLIDAY_NAMES).map(([key, name]) => `<label class="chk" style="display:block;margin:5px 0"><input type="checkbox" data-hol="${key}" ${cfg.closed.includes(key) ? 'checked' : ''}> ${name} <span class="sub">${dateOf(key) ? `(eerstvolgende: ${nlDate(dateOf(key))})` : ''}</span></label>`).join('');
+    $('holidayOpenList').innerHTML = (cfg.openDates || []).length ? cfg.openDates.map((d) => { const k = holidaysOfYear(Number(d.slice(0, 4)))[d];
+      return `<div class="entry"><div class="who">${nlDate(d)}${k ? ` <span class="sub">${HOLIDAY_NAMES[k]}</span>` : ' <span class="sub">(geen feestdag)</span>'}</div><button class="link" data-holrm="${d}" title="Verwijderen">✕</button></div>`; }).join('') : '<div class="empty">Geen uitzonderingen.</div>';
+  }
+  const saveHolidays = (next) => saveSetting($('holidayErr'), 'holidays', next, (r) => { state.settings.holidays = r.holidays; });
+  $('holidayList').addEventListener('change', async (ev) => {
+    if (!ev.target.dataset.hol) return;
+    const closed = [...$('holidayList').querySelectorAll('input[data-hol]:checked')].map((x) => x.dataset.hol);
+    if (!(await saveHolidays({ closed, openDates: holidayCfg().openDates || [] }))) renderHolidays();
+  });
+  $('holidayOpenForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const d = $('holidayOpenDate').value;
+    if (!completeDate(d)) { $('holidayErr').textContent = 'Vul een geldige datum in.'; return; }
+    if (await saveHolidays({ closed: holidayCfg().closed, openDates: [...(holidayCfg().openDates || []), d] })) $('holidayOpenDate').value = '';
+  });
+  $('holidayOpenList').addEventListener('click', (ev) => {
+    const d = ev.target.dataset.holrm;
+    if (d) saveHolidays({ closed: holidayCfg().closed, openDates: (holidayCfg().openDates || []).filter((x) => x !== d) });
+  });
+
   function renderVacations() {
     const today = iso(new Date()), list = [...(state.settings.vacations || [])];
     const upcoming = list.filter((h) => h.to >= today), past = list.filter((h) => h.to < today).reverse();
@@ -2363,6 +2424,7 @@
     if (document.activeElement !== $('startDate')) $('startDate').value = state.settings.startDate || '';
     renderOwnChildren();
     renderVacations();
+    renderHolidays();
     renderAgencies();
     renderAccounts();
     $('runtimeInfo').textContent = state.settings.runtime ? `Technische info: de API draait op Node ${state.settings.runtime.replace(/^v/, '')}.` : '';
@@ -2858,7 +2920,30 @@
     try { localStorage.setItem('typeFilter', t); } catch (e) { /* niet erg */ }
     render();
   });
-  function render() { renderTypeFilter(); renderDay(); renderMonth(); renderCal(); renderFin(); renderPast(); renderChildren(); renderSettings(); }
+  // Herinnering bovenaan: afgelopen maanden (de laatste drie) met geschreven uren waarvan de status van een kind nog op 'geen status' staat. Per maand
+  // is de herinnering in deze browser te verbergen.
+  function renderReminders() {
+    const box = $('reminderBanner');
+    if (!can('entries:write') || !state.children.length) { box.hidden = true; return; }
+    let hidden = []; try { hidden = JSON.parse(localStorage.getItem('reminderHidden') || '[]'); } catch (e) { /* niets verborgen */ }
+    const lines = [];
+    for (const m of [1, 2, 3].map(monthKeyAgo)) {
+      if (gStart() && m < gStart().slice(0, 7)) continue;
+      if (hidden.includes(m)) continue;
+      const kids = new Map();
+      state.entries.filter((e) => e.date.startsWith(m)).forEach((e) => { const x = findContract(e.contractId); if (x && statusOf(x.child.id, m).status === 'geen') kids.set(x.child.id, x.child); });
+      if (kids.size) lines.push({ m, names: [...kids.values()].map(firstName).sort((a, b) => a.localeCompare(b, 'nl')) });
+    }
+    box.hidden = !lines.length;
+    box.innerHTML = lines.map((l) => `<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:2px 0"><span><strong>${monthName0(l.m)}</strong> staat nog op <em>geen status</em> voor ${l.names.length === 1 ? l.names[0] : `${l.names.length} kinderen (${esc(l.names.slice(0, 4).join(', '))}${l.names.length > 4 ? ', …' : ''})`}.</span>
+      <button class="btn small" data-remonth="${l.m}" type="button">Naar Overzicht</button> <button class="link" data-rehide="${l.m}" type="button" title="Niet meer tonen voor deze maand">✕</button></div>`).join('');
+  }
+  $('reminderBanner').addEventListener('click', (ev) => {
+    const go = ev.target.dataset.remonth, hide = ev.target.dataset.rehide;
+    if (go) { $('month').value = go; document.querySelector('[data-tab=overzicht]').click(); renderMonth(); }
+    if (hide) { try { const h = JSON.parse(localStorage.getItem('reminderHidden') || '[]'); localStorage.setItem('reminderHidden', JSON.stringify([...new Set([...h, hide])].slice(-24))); } catch (e) { /* niet erg */ } renderReminders(); }
+  });
+  function render() { renderTypeFilter(); renderReminders(); renderDay(); renderMonth(); renderCal(); renderFin(); renderPast(); renderChildren(); renderSettings(); }
 
   // Laadt de gegevens en toont de app (of eerst het scherm om het tijdelijke wachtwoord te vervangen).
   // Thema per account: licht (standaard), donker of automatisch (volgt het besturingssysteem). De keuze wordt bij het account bewaard; de browser
@@ -2888,6 +2973,7 @@
     if (children) state.children = children;
     if (settings) state.settings = settings;
     loadedMonths.clear(); state.entries = [];
+    await guard(() => ensureMonth(monthKeyAgo(1)));   // ook de twee maanden daarvoor: voor de herinnering over maanden zonder status
     render();
     renderOpening();
     loadAccounts();

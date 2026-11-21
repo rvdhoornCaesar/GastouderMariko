@@ -223,6 +223,9 @@ function createRepo(connectionString, instanceId = 'main', tables = {}) {
       if (status === 'geen') { try { await t.deleteEntity(scope.id, rowKey); } catch (e) { if (e.statusCode !== 404) throw e; } return; }
       await t.upsertEntity({ partitionKey: scope.id, rowKey, value: JSON.stringify({ status, by, at }) }, 'Replace');
     },
+    // Feestdagen: welke soorten als gesloten gelden (null = de standaardlijst) en de datums waarop je ondanks een feestdag open bent.
+    getHolidays: () => getSetting('holidays', null),
+    setHolidays: (v) => setSetting('holidays', v),
     getAgencyIds: () => getSetting('agencyIds'),
     setAgencyIds: (list) => setSetting('agencyIds', list),
     // Aansluitingen bij gastouderbureaus met periodes. Bestaande gegevens (alleen een lijst bureaus) tellen als aansluiting zonder begin en einde.
