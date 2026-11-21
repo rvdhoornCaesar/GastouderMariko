@@ -49,7 +49,8 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment || 'production' }}
+    # De nachtelijke run gebruikt een eigen omgeving zonder vereiste goedkeuring (zie README); handmatige runs gebruiken de gekozen omgeving.
+    environment: ${{ github.event_name == 'schedule' && 'production-backup' || inputs.environment }}
     env:
       RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP || format('gastouder-{0}-rg', inputs.environment || 'production') }}
     steps:
