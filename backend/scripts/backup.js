@@ -1,5 +1,6 @@
 const crypto = require('node:crypto');
 const { TableClient, TableServiceClient } = require('@azure/data-tables');
+const { createRepo } = require('../src/repo');
 
 // Back-up en herstel van de tabellen in Table Storage. Een back-up is een kopie van elke tabel naar een tabel "bak<id><naam>", plus een
 // tabel "bak<id>meta" met per tabel het aantal rijen en een controlesom. Niets wordt ooit weggegooid of overschreven door een back-up.
@@ -106,6 +107,110 @@ async function restore({ conn, id, apply = false, replace = false, now = new Dat
   return { applied: true, id, summary, safetyBackup: safety.id };
 }
 
+// Herstel van één administratie (gastouder) uit een back-up. De gegevens van een administratie staan in de tabellen children, entries en
+// settings onder PartitionKey = id van de administratie; alleen die rijen worden aangeraakt, de rest van het platform en de andere
+// administraties blijven zoals ze zijn. Leden (memberships) en accounts worden nooit teruggezet: wie nu toegang heeft, houdt die.
+//  - Met `target` komt de oude stand als nieuwe administratie "<naam> (herstel <tijdstip>)" naast de huidige, met dezelfde leden en
+//    rollen, om te vergelijken. Het doel moet nieuw zijn en er verandert niets aan bestaande gegevens.
+//  - Zonder `target` wordt de administratie zelf teruggezet: eerst een veiligheidskopie van alle tabellen, dan alle rijen uit de
+//    back-up terugschrijven (met `replace` ook de rijen verwijderen die er na de back-up bij zijn gekomen).
+// Zonder `apply` verandert er niets en krijg je alleen het overzicht.
+const ORG_TABLES = ['children', 'entries', 'settings'];
+const ORG_ID = /^[a-z0-9][a-z0-9-]{0,39}$/;
+async function snapshotRows(conn, id, org) {
+  const meta = await readMeta(conn, id);
+  if (!meta) throw new Error(`Back-up ${id} niet gevonden of niet compleet.`);
+  const out = {};
+  for (const name of ORG_TABLES) {
+    const t = meta.tables.find((x) => x.name === name);
+    if (!t) { out[name] = []; continue; }
+    const rows = await readAll(conn, backupTable(id, name));
+    if (rows.length !== t.rows || checksum(rows) !== t.checksum) throw new Error(`Back-up ${id} is beschadigd bij tabel ${name}; er is niets teruggezet.`);
+    out[name] = rows.filter((r) => r.partitionKey === org);
+  }
+  return { meta, rows: out };
+}
+async function liveRows(conn, org) {
+  const names = await tableNames(conn), out = {};
+  for (const name of ORG_TABLES) out[name] = names.includes(name) ? (await readAll(conn, name)).filter((r) => r.partitionKey === org) : [];
+  return out;
+}
+const count = (o) => ORG_TABLES.map((n) => `${n}=${o[n].length}`).join(' ');
+
+// Welke administraties staan in een back-up, met aantal rijen per tabel.
+async function organisationsIn({ conn, id }) {
+  const meta = await readMeta(conn, id);
+  if (!meta) throw new Error(`Back-up ${id} niet gevonden of niet compleet.`);
+  const by = new Map();
+  for (const name of ORG_TABLES) {
+    if (!meta.tables.some((x) => x.name === name)) continue;
+    for (const r of await readAll(conn, backupTable(id, name))) {
+      if (!by.has(r.partitionKey)) by.set(r.partitionKey, { org: r.partitionKey, children: 0, entries: 0, settings: 0 });
+      by.get(r.partitionKey)[name]++;
+    }
+  }
+  const repo = createRepo(conn);
+  return Promise.all([...by.values()].sort((a, b) => a.org.localeCompare(b.org)).map(async (o) => ({ ...o, name: ((await repo.getOrganisation(o.org)) || {}).name || null })));
+}
+
+async function restoreOrganisation({ conn, id, org, target = '', apply = false, replace = false, now = new Date() }) {
+  if (!ORG_ID.test(org || '')) throw new Error('Geef de id van de administratie (zie de opdracht organisaties).');
+  if (target && !ORG_ID.test(target)) throw new Error('Ongeldige id voor de kopie.');
+  if (target === org) throw new Error('De kopie moet een andere id hebben dan de administratie zelf; laat target weg om terug te zetten.');
+  const { meta, rows } = await snapshotRows(conn, id, org);
+  if (!ORG_TABLES.some((n) => rows[n].length)) throw new Error(`Back-up ${id} bevat geen gegevens van administratie ${org}.`);
+  const repo = createRepo(conn);
+  const live = await liveRows(conn, org);
+
+  if (target) {
+    if (await repo.getOrganisation(target)) throw new Error(`Administratie ${target} bestaat al; kies een nieuwe id.`);
+    const there = await liveRows(conn, target);
+    if (ORG_TABLES.some((n) => there[n].length)) throw new Error(`Er staan al gegevens onder ${target}; kies een nieuwe id.`);
+    const summary = { copy: true, from: org, target, backup: id, rows: count(rows) };
+    if (!apply) return { applied: false, ...summary };
+    const source = await repo.getOrganisation(org);
+    const when = (meta.createdAt || '').slice(0, 16).replace('T', ' ');
+    for (const name of ORG_TABLES) {
+      await createIfMissing(conn, name);
+      const t = client(conn, name);
+      await inBatches(rows[name], (r) => t.upsertEntity({ ...r, partitionKey: target }, 'Replace'));
+    }
+    const after = await liveRows(conn, target);
+    for (const name of ORG_TABLES) {
+      const want = rows[name].map((r) => JSON.stringify({ ...r, partitionKey: target }));
+      if (after[name].length !== want.length || after[name].some((r, i) => JSON.stringify(r) !== want[i])) throw new Error(`Controle van de kopie (${name}) mislukt; er is niets aan ${org} veranderd.`);
+    }
+    // De organisatie als laatste: dit is de markering dat de kopie compleet is.
+    await repo.saveOrganisation({ id: target, name: `${source ? source.name : org} (herstel ${when})`, status: 'active', createdAt: now.toISOString(), needsAgency: source ? source.needsAgency : false });
+    for (const m of await repo.listMembersOf(org)) await repo.saveMembership({ orgId: target, email: m.email, role: m.role, createdAt: now.toISOString(), source: 'herstel' });
+    return { applied: true, ...summary };
+  }
+
+  const plan = ORG_TABLES.map((name) => {
+    const liveMap = new Map(live[name].map((r) => [rowKey(r), JSON.stringify(r)]));
+    const extra = live[name].filter((r) => !rows[name].some((x) => rowKey(x) === rowKey(r)));
+    return { name, rows: rows[name], extra,
+      add: rows[name].filter((r) => !liveMap.has(rowKey(r))).length,
+      change: rows[name].filter((r) => liveMap.has(rowKey(r)) && liveMap.get(rowKey(r)) !== JSON.stringify(r)).length,
+      same: rows[name].filter((r) => liveMap.get(rowKey(r)) === JSON.stringify(r)).length };
+  });
+  const summary = plan.map(({ name, add, change, same, extra }) => ({ name, add, change, same, extra: extra.length, remove: replace ? extra.length : 0 }));
+  if (!apply) return { applied: false, copy: false, org, backup: id, summary };
+  const safety = await backup({ conn, now, label: `voor herstel van ${org} uit ${id}` });
+  for (const p of plan) {
+    await createIfMissing(conn, p.name);
+    const t = client(conn, p.name);
+    await inBatches(p.rows, (r) => t.upsertEntity(r, 'Replace'));
+    if (replace) await inBatches(p.extra, (r) => t.deleteEntity(r.partitionKey, r.rowKey));
+  }
+  const after = await liveRows(conn, org);
+  for (const p of plan) {
+    const have = new Map(after[p.name].map((r) => [rowKey(r), JSON.stringify(r)]));
+    if (p.rows.some((r) => have.get(rowKey(r)) !== JSON.stringify(r)) || (replace && after[p.name].length !== p.rows.length)) throw new Error(`Controle na herstel van ${p.name} mislukt; de stand van voor het herstel staat in back-up ${safety.id}.`);
+  }
+  return { applied: true, copy: false, org, backup: id, summary, safetyBackup: safety.id };
+}
+
 // Ruimt automatische back-ups op: de nieuwste `keep` blijven staan, oudere gaan weg. Alleen back-ups met een omschrijving die met
 // "automatisch" begint worden aangeraakt; handmatige back-ups en veiligheidskopieën van een herstel blijven altijd staan.
 const AUTO_LABEL = 'automatisch';
@@ -124,4 +229,4 @@ async function prune({ conn, keep = 35, apply = true }) {
   return { kept: auto.slice(0, keep).map((b) => b.id), removed: old.map((b) => b.id), applied: apply };
 }
 
-module.exports = { backup, restore, listBackups, prune, AUTO_LABEL, checksum, normalizeRow, stamp, EXCLUDED };
+module.exports = { backup, restore, restoreOrganisation, organisationsIn, listBackups, prune, AUTO_LABEL, checksum, normalizeRow, stamp, EXCLUDED };
