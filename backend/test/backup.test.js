@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const net = require('node:net');
 const { TableClient } = require('@azure/data-tables');
-const { backup, restore, listBackups, prune, checksum, normalizeRow } = require('../scripts/backup');
+const { backup, restore, restoreOrganisation, organisationsIn, listBackups, prune, checksum, normalizeRow } = require('../scripts/backup');
 
 // Draait tegen een echte Azurite (poort 10113, los van de andere tests die ook Azurite starten).
 const PORT = 10113;
@@ -116,4 +116,69 @@ test('opruimen: alleen automatische back-ups buiten de nieuwste N verdwijnen', a
   const tables = []; for await (const t of require('@azure/data-tables').TableServiceClient.fromConnectionString(CONN, { allowInsecureConnection: true }).listTables()) tables.push(t.name);
   assert.ok(!tables.some((n) => n.startsWith(`bak${ids[0]}`)), 'ook de kopieën van de tabellen zijn weg');
   await assert.rejects(prune({ conn: CONN, keep: 0 }), /keep/);
+});
+
+test('herstel per administratie: kopie ernaast, en terugzetten zonder de andere administratie of de leden te raken', async () => {
+  await put('children', [
+    { partitionKey: 'anna', rowKey: 'a1', name: 'Mees', contracts: '[]' }, { partitionKey: 'anna', rowKey: 'a2', name: 'Lot', contracts: '[]' },
+    { partitionKey: 'bea', rowKey: 'b1', name: 'Zoë', contracts: '[]' }]);
+  await put('entries', [{ partitionKey: 'anna', rowKey: '2026-11-03_a', contractId: 'c', start: '08:00', end: '12:00', note: 'oud' }]);
+  await put('settings', [{ partitionKey: 'anna', rowKey: 'rates', value: '[{"rate":9}]' }, { partitionKey: 'bea', rowKey: 'rates', value: '[{"rate":7}]' }]);
+  await put('organisations', [{ partitionKey: 'organisations', rowKey: 'anna', name: 'Anna', status: 'active', createdAt: '', deletedAt: '', needsAgency: true }]);
+  await put('memberships', [{ partitionKey: 'anna', rowKey: 'anna@x.nl', role: 'beheerder', createdAt: '', source: '' }]);
+  const snap = await backup({ conn: CONN, now: new Date('2026-12-10T08:00:00Z'), label: 'voor het ongeluk' });
+
+  assert.deepEqual((await organisationsIn({ conn: CONN, id: snap.id })).filter((o) => o.org !== 'main').map((o) => [o.org, o.name, o.children, o.entries, o.settings]),
+    [['anna', 'Anna', 2, 1, 1], ['bea', null, 1, 0, 1]]);
+
+  // Het ongeluk: een kind weg, uren gewijzigd, een instelling aangepast, een nieuw kind erbij, en een lid erbij.
+  await tc('children').deleteEntity('anna', 'a2');
+  await tc('children').upsertEntity({ partitionKey: 'anna', rowKey: 'a9', name: 'Nieuw', contracts: '[]' }, 'Replace');
+  await tc('entries').upsertEntity({ partitionKey: 'anna', rowKey: '2026-11-03_a', contractId: 'c', start: '08:00', end: '12:00', note: 'KAPOT' }, 'Replace');
+  await tc('settings').upsertEntity({ partitionKey: 'anna', rowKey: 'rates', value: '[]' }, 'Replace');
+  await tc('memberships').upsertEntity({ partitionKey: 'anna', rowKey: 'nieuw@x.nl', role: 'gebruiker', createdAt: '', source: '' }, 'Replace');
+  const kids = async (org) => (await rowsOf('children')).filter((r) => r.partitionKey === org).map((r) => r.rowKey);
+
+  // Proefrun en ongeldige invoer
+  const dry = await restoreOrganisation({ conn: CONN, id: snap.id, org: 'anna', target: 'anna-herstel' });
+  assert.equal(dry.applied, false);
+  assert.deepEqual(await kids('anna-herstel'), []);
+  await assert.rejects(restoreOrganisation({ conn: CONN, id: snap.id, org: 'bestaatniet' }), /geen gegevens/);
+  await assert.rejects(restoreOrganisation({ conn: CONN, id: snap.id, org: 'anna', target: 'anna' }), /andere id/);
+  await assert.rejects(restoreOrganisation({ conn: CONN, id: snap.id, org: 'An na' }), /id van de administratie/);
+
+  // Kopie ernaast: oude stand onder een nieuwe id, met dezelfde leden als nu; anna zelf ongemoeid.
+  const copy = await restoreOrganisation({ conn: CONN, id: snap.id, org: 'anna', target: 'anna-herstel', apply: true });
+  assert.equal(copy.applied, true);
+  assert.deepEqual(await kids('anna-herstel'), ['a1', 'a2']);
+  assert.equal((await rowsOf('entries')).find((r) => r.partitionKey === 'anna-herstel').note, 'oud');
+  assert.deepEqual(await kids('anna'), ['a1', 'a9']);   // ongemoeid
+  const { createRepo } = require('../src/repo');
+  const org = await createRepo(CONN).getOrganisation('anna-herstel');
+  assert.match(org.name, /^Anna \(herstel 2026-12-10 08:00\)$/);
+  assert.equal(org.needsAgency, true);
+  assert.deepEqual((await createRepo(CONN).listMembersOf('anna-herstel')).map((m) => m.email), ['anna@x.nl', 'nieuw@x.nl']);
+  await assert.rejects(restoreOrganisation({ conn: CONN, id: snap.id, org: 'anna', target: 'anna-herstel', apply: true }), /bestaat al/);
+
+  // Terugzetten op zichzelf: proefrun telt, apply maakt een veiligheidskopie; replace verwijdert wat er na de back-up bij kwam.
+  const plan = await restoreOrganisation({ conn: CONN, id: snap.id, org: 'anna', replace: true });
+  assert.deepEqual(plan.summary.find((s) => s.name === 'children'), { name: 'children', add: 1, change: 0, same: 1, extra: 1, remove: 1 });
+  assert.deepEqual(await kids('anna'), ['a1', 'a9']);
+  const res = await restoreOrganisation({ conn: CONN, id: snap.id, org: 'anna', apply: true, replace: true, now: new Date('2026-12-10T09:00:00Z') });
+  assert.equal(res.applied, true);
+  assert.deepEqual(await kids('anna'), ['a1', 'a2']);
+  assert.equal((await rowsOf('entries')).find((r) => r.partitionKey === 'anna').note, 'oud');
+  assert.equal((await rowsOf('settings')).find((r) => r.partitionKey === 'anna').value, '[{"rate":9}]');
+  assert.deepEqual(await kids('bea'), ['b1']);   // andere administratie ongemoeid
+  assert.equal((await rowsOf('settings')).find((r) => r.partitionKey === 'bea').value, '[{"rate":7}]');
+  assert.deepEqual((await createRepo(CONN).listMembersOf('anna')).map((m) => m.email), ['anna@x.nl', 'nieuw@x.nl']);   // leden worden niet teruggezet
+  const safety = (await listBackups(CONN)).find((b) => b.id === res.safetyBackup);
+  assert.match(safety.label, /voor herstel van anna/);
+  assert.deepEqual((await rowsOf(`bak${res.safetyBackup}children`)).filter((r) => r.partitionKey === 'anna').map((r) => r.rowKey), ['a1', 'a9']);   // stand van vóór het herstel
+});
+
+test('herstel per administratie weigert een beschadigde back-up', async () => {
+  const snap = (await listBackups(CONN)).find((b) => b.label === 'voor het ongeluk');
+  await tc(`bak${snap.id}settings`).upsertEntity({ partitionKey: 'anna', rowKey: 'rates', value: 'gemanipuleerd' }, 'Replace');
+  await assert.rejects(restoreOrganisation({ conn: CONN, id: snap.id, org: 'anna', apply: true }), /beschadigd/);
 });

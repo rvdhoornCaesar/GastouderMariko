@@ -17,9 +17,9 @@ on:
         options: [test, production]
         default: test
       action:
-        description: backup = nieuwe back-up, list = overzicht, prune = oude automatische back-ups opruimen (houdt de nieuwste 35), restore = terugzetten, plan-organisaties = voorbeeld van de overstap naar organisaties (alleen lezen)
+        description: backup = nieuwe back-up, list = overzicht, prune = oude automatische back-ups opruimen (houdt de nieuwste 35), restore = alles terugzetten, organisaties = welke administraties in een back-up staan (backup_id), restore-organisatie = één administratie terugzetten of als kopie ernaast zetten (backup_id, organisation, eventueel target), plan-organisaties = voorbeeld van de overstap naar organisaties (alleen lezen)
         type: choice
-        options: [backup, list, prune, restore, plan-organisaties]
+        options: [backup, list, prune, restore, organisaties, restore-organisatie, plan-organisaties]
         default: backup
       label:
         description: Omschrijving bij een nieuwe back-up (bijvoorbeeld "voor migratie")
@@ -29,12 +29,20 @@ on:
         description: Alleen bij restore, het id van de back-up (zie list), bijvoorbeeld 20261115t093012
         type: string
         default: ''
+      organisation:
+        description: Alleen bij restore-organisatie, de id van de administratie (zie organisaties)
+        type: string
+        default: ''
+      target:
+        description: Alleen bij restore-organisatie, laat leeg om de administratie zelf terug te zetten, of geef een nieuwe id (kleine letters, cijfers en streepjes) voor een kopie ernaast
+        type: string
+        default: ''
       apply:
-        description: Alleen bij restore, uit = proefrun (er verandert niets), aan = echt terugzetten
+        description: Alleen bij restore en restore-organisatie, uit = proefrun (er verandert niets), aan = echt terugzetten
         type: boolean
         default: false
       replace:
-        description: Alleen bij restore met apply, ook rijen verwijderen die niet in de back-up staan
+        description: Alleen bij restore en restore-organisatie met apply, ook rijen verwijderen die niet in de back-up staan
         type: boolean
         default: false
 
@@ -76,6 +84,8 @@ jobs:
           ACTION: ${{ inputs.action || 'backup' }}
           LABEL: ${{ github.event_name == 'schedule' && 'automatisch' || inputs.label }}
           BACKUP_ID: ${{ inputs.backup_id }}
+          ORGANISATION: ${{ inputs.organisation }}
+          TARGET: ${{ inputs.target }}
           APPLY: ${{ inputs.apply }}
           REPLACE: ${{ inputs.replace }}
           ENVIRONMENT: ${{ inputs.environment || 'production' }}
@@ -90,6 +100,17 @@ jobs:
           args=("$ACTION")
           case "$ACTION" in
             backup) if [ -n "$LABEL" ]; then args+=(--label "$LABEL"); fi ;;
+            organisaties)
+              if [ -z "$BACKUP_ID" ]; then echo "::error::Geef het id van de back-up (zie de opdracht list)."; exit 1; fi
+              args+=(--id "$BACKUP_ID")
+              ;;
+            restore-organisatie)
+              if [ -z "$BACKUP_ID" ] || [ -z "$ORGANISATION" ]; then echo "::error::Geef het id van de back-up en van de administratie (zie list en organisaties)."; exit 1; fi
+              args+=(--id "$BACKUP_ID" --org "$ORGANISATION")
+              if [ -n "$TARGET" ]; then args+=(--target "$TARGET"); fi
+              if [ "$APPLY" = "true" ]; then args+=(--apply); fi
+              if [ "$REPLACE" = "true" ]; then args+=(--replace); fi
+              ;;
             restore)
               if [ -z "$BACKUP_ID" ]; then echo "::error::Geef bij restore het id van de back-up (zie de opdracht list)."; exit 1; fi
               args+=(--id "$BACKUP_ID")
